@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.23.1"
+const VERSION := "v0.23.2"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1829,6 +1829,14 @@ func _drive_pose() -> void:
 				state._recompute()
 			if _frames == 30:
 				player.shout_press()
+			if _frames in [34, 50, 70] and is_instance_valid(player):
+				player.bot_active = true
+				player.bot_move = Vector2(1, 0)
+			if _frames in [36, 52, 72]:
+				print("[모으는중] f=%d 모은 %.2f 속도 %.2f (평소 %.2f) 팔뒤=%.2f" % [
+					_frames, player._shout_charge,
+					Vector2(player.velocity.x, player.velocity.z).length(),
+					state.move_speed, player._pose.weight])
 			if _frames == 30 + (3 if _probe_arg == "tap" else (52 if _probe_arg == "sync" else 62)):
 				var before := state.breath
 				player.shout_release()
