@@ -1,0 +1,51 @@
+# 주인공 교체용 카탈로그.
+#
+#   tools/build_hero.bat
+#
+# # 왜 별도 카탈로그인가
+#
+# test3 의 roguelike.yaml 은 불꽃 깃털 원화를 기준 스타일로 잡고, 거기서 먼
+# 원화를 걸러 냅니다(max_source_distance 0.25). 새 주인공은 셀 셰이딩 계열의
+# 흰옷 아이라 그 기준과는 아주 멀어서, 같은 카탈로그에 넣으면 **보류 처리로
+# 아예 만들어지지 않습니다.**
+#
+# 그래서 자기 스타일을 갖는 카탈로그를 따로 둡니다. 팔레트도 강제하지 않습니다
+# (palette_strength 0) - 원화가 이미 정리된 색이라 끌어당길 기준이 필요 없고,
+# 억지로 맞추면 흰옷이 탁해집니다.
+#
+# 그 대신 주인공과 나머지(적·상인)의 화풍이 다릅니다. 통일하려면 적과 상인도
+# 같은 결의 원화로 다시 뽑아야 합니다 - README 의 "알려진 한계" 참고.
+version: 1
+
+style: rogue_hero
+out_dir: build_hero
+
+styles:
+  rogue_hero:
+    note: 셀 셰이딩 3면도에서 뽑는 아이 캐릭터. 흰 티셔츠, 검은 머리, 평평한 색면.
+    palette_colors: 16
+    # 0 = 원화 색을 그대로 씁니다.
+    palette_strength: 0.0
+    density: {character: 512}
+    budget: {character: 18000}
+    # 기준 원화가 없으므로 분위기 거리 검사를 하지 않습니다(0 = 끔).
+    max_source_distance: 0.0
+    reject_source_distance: 0.0
+    max_palette_distance: 0.0
+
+defaults:
+  character:
+    preset: 유니티 캐릭터
+    rig: true
+    lods: 3
+
+assets:
+  # 3면도 한 장입니다. 파이프라인의 split_sheet 가 정면/측면/후면으로 나누고,
+  # 얼굴 검출로 어느 칸이 정면인지 확정합니다. 통째로 넣으면 인물 셋이 한
+  # 덩어리로 뭉개지므로 이 분할이 핵심입니다.
+  - id: hero_boy
+    kind: character
+    source: assets/source/hero_sheet.png
+    # 아이 비례. 지금 주인공(1.5m)보다 작게 잡습니다.
+    size: 1.3
+    tags: [player, melee]
