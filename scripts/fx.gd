@@ -202,7 +202,9 @@ static func warm_up(parent: Node3D) -> void:
 	shimmer(parent, Vector3(0, -40, 0), Vector3.FORWARD, 1, false)
 	# 소용돌이도 같이 데웁니다. 셰이더가 하나 더 늘었고, 그 첫 번이 고함을
 	# 지르는 순간에 오면 딱 그때 화면이 끊깁니다.
-	vortex(parent, Vector3(0, -40, 0), Vector3.FORWARD, 1.0, 0.5, 1.0)
+	var warm := make_vortex(parent)
+	drive_vortex(warm, Vector3(0, -40, 0), Vector3.FORWARD, 1.0, 1.0, 60.0, 1.0)
+	warm.create_tween().tween_callback(warm.queue_free).set_delay(0.1)
 
 
 static func shimmer(parent: Node3D, at: Vector3, dir: Vector3,
@@ -681,13 +683,10 @@ static func _all(root: Node) -> Array:
 ## 소용돌이에 쓰는 노이즈. **한 번 만들어 나눠 씁니다** - 고함마다 새로
 ## 만들면 그때마다 텍스처를 굽습니다.
 static var _vortex_noise: NoiseTexture2D = null
-## 원뿔의 메시와 재질. **층마다 한 벌 만들어 나눠 씁니다.**
+## 부채꼴 판의 메시. **한 번 만들어 겹마다 나눠 씁니다.**
 ##
-## 고함마다 새로 만들었더니 **5.2ms** 였습니다(프레임의 3분의 1). 셋이 서로
-## 다른 것은 크기·빠르기·진하기뿐이라 미리 세 벌만 만들어 두면 됩니다 -
-## 남는 값은 노드 셋을 다는 것뿐입니다.
-static var _vortex_mesh: Array = []
-static var _vortex_mat: Array = []
+## 고함마다 새로 만들었더니 5.2ms 였습니다(프레임의 3분의 1).
+static var _vortex_mesh_cached: ArrayMesh = null
 ## 겹치는 원뿔의 수.
 ##
 ## 넷 이상 겹쳐 봤는데 **이 게임에는 과합니다.** 더하기로 섞이는 터라 겹칠수록
@@ -714,110 +713,115 @@ static func _noise() -> NoiseTexture2D:
 	return _vortex_noise
 
 
-static func _vortex_build() -> void:
-	## 원뿔 셋의 메시와 재질을 한 번만 만듭니다.
+## 만들어 두는 최대 각도(도). 실제 고함은 이 안에서 잘라 씁니다.
+##
+## `Player.SHOUT_ARC_MAX` 와 같아야 합니다 - 작으면 최대로 지른 고함이 잘리고,
+## 크면 잘라 쓰는 값(`arc_frac`)이 1 에 못 미쳐 언제나 좁아 보입니다.
+const VORTEX_ARC_MAX := 132.0
+
+
+static func shout_cone_mesh() -> ArrayMesh:
+	## **부채꼴에서 뽑은 판.** 꼭짓점이 입(0, 1, 0)이고 테두리가 바닥의 호입니다.
 	##
-	## **길이 1, 반지름 1 로 만들어 두고** 부르는 쪽에서 늘입니다. 고함마다
-	## 새로 만들었더니 5.2ms 였습니다 - 프레임(16.7ms)의 3분의 1 입니다.
+	## 크기 1 로 한 번만 만들고, 부르는 쪽에서 사거리와 입 높이로 늘입니다 -
+	## 모으는 동안 매 프레임 다시 만들면 그 값이 그대로 듭니다(원뿔을 매번
+	## 만들었을 때 5.2ms 였습니다).
 	##
-	## 좁은 쪽(bottom)이 **입**이고 넓은 쪽(top)이 **앞**입니다. 소리가 입에서
-	## 나와 퍼지는 모양이라 이 방향이어야 합니다 - 반대로 두면 앞에서 입으로
-	## 빨려 들어갑니다.
-	if not _vortex_mesh.is_empty():
-		return
+	## UV 를 **극좌표로** 답니다: u 는 부채꼴을 가로지르는 각도(0~1), v 는
+	## 입에서 테두리까지(0~1). 셰이더가 그대로 흘려 소용돌이를 만듭니다.
+	if _vortex_mesh_cached != null:
+		return _vortex_mesh_cached
+	var half := deg_to_rad(VORTEX_ARC_MAX) * 0.5
+	var steps := 28
+	# 입에서 테두리까지도 몇 마디로 나눕니다. 한 마디면 UV 가 선형이라
+	# 무늬가 부챗살처럼 곧게 뻗습니다 - 감기는 것으로 안 보입니다.
+	var rings := 6
+	var verts := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	for r in range(rings + 1):
+		var v := float(r) / float(rings)
+		for i2 in range(steps + 1):
+			var u := float(i2) / float(steps)
+			var a2 := lerpf(-half, half, u)
+			# 입(0,1,0)에서 바닥의 호까지 곧게 잇습니다.
+			verts.append(Vector3(sin(a2) * v, 1.0 - v, -cos(a2) * v))
+			uvs.append(Vector2(u, v))
+	var idx := PackedInt32Array()
+	for r in range(rings):
+		for i2 in range(steps):
+			var a3 := r * (steps + 1) + i2
+			var b := a3 + 1
+			var c := a3 + steps + 1
+			var d := c + 1
+			idx.append(a3); idx.append(c); idx.append(b)
+			idx.append(b); idx.append(c); idx.append(d)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	_vortex_mesh_cached = mesh
+	return mesh
+
+
+static func make_vortex(parent: Node3D) -> Node3D:
+	## 소용돌이 한 벌을 만들어 돌려줍니다. **부르는 쪽이 들고 있다가** 모으는
+	## 동안 크기와 각도를 고쳐 씁니다(`drive_vortex`).
+	##
+	## 겹은 셋입니다. 넷 이상 겹쳐 봤는데 더하기로 섞이는 터라 겹칠수록
+	## 밝아져서, 수채화 배경 위에 파란 덩어리가 생깁니다.
+	var holder := Node3D.new()
+	parent.add_child(holder)
 	for i in VORTEX_CONES:
 		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
-		var cone := CylinderMesh.new()
-		cone.bottom_radius = lerpf(0.06, 0.02, t)   # 입 쪽
-		cone.top_radius = lerpf(1.0, 0.62, t)       # 앞 쪽
-		cone.height = 1.0
-		cone.radial_segments = 18
-		cone.rings = 3
-		_vortex_mesh.append(cone)
-
 		var mat := ShaderMaterial.new()
 		mat.shader = load("res://assets/shaders/vortex.gdshader")
 		mat.set_shader_parameter("noise_tex", _noise())
 		mat.set_shader_parameter("vortex_color",
 			Color(RUSH_COLOR.r, RUSH_COLOR.g, RUSH_COLOR.b,
-				0.34 * lerpf(1.0, 0.55, t)))
-		# 안쪽(가는) 겹일수록 빨리 흐릅니다.
-		mat.set_shader_parameter("scroll_speed", lerpf(1.3, 2.4, t))
-		mat.set_shader_parameter("spiral_amount", lerpf(2.6, 3.8, t))
-		_vortex_mat.append(mat)
+				0.30 * lerpf(1.0, 0.55, t)))
+		# 겹마다 다른 빠르기로 흐릅니다. 같으면 한 장으로 보입니다.
+		mat.set_shader_parameter("scroll_speed", lerpf(1.2, 2.3, t))
+		mat.set_shader_parameter("spiral_amount", lerpf(2.4, 3.8, t))
+		var mesh := MeshInstance3D.new()
+		mesh.mesh = shout_cone_mesh()
+		mesh.material_override = mat
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# 카툰 외곽선이 판을 검게 두르면 소용돌이가 아니라 종이가 됩니다.
+		mesh.set_meta("flat", true)
+		# 겹끼리 아주 조금 띄웁니다. 딱 붙이면 서로 다투어 지지직거립니다.
+		mesh.position.y = 0.012 * float(i)
+		holder.add_child(mesh)
+	return holder
 
 
-static func vortex(parent: Node3D, at: Vector3, dir: Vector3,
-		length: float, radius: float, strength: float = 1.0) -> void:
-	## 고함이 만드는 **소용돌이**. 원뿔 여러 겹이 **입에서 시작해 앞으로
-	## 벌어집니다.**
-	##
-	## 처음에는 바닥에 세운 깔때기였습니다. 소용돌이로는 보였지만 **누가
-	## 만든 것인지** 안 읽혔습니다 - 발 앞에 물기둥이 하나 솟은 것에 가까웠고,
-	## 지르는 방향과도 상관이 없었습니다. 꼭짓점을 입에 두고 앞으로 벌리면
-	## 소리가 나가는 길이 그대로 그림이 됩니다.
-	##
-	## 겹마다 다른 빠르기로 돕니다 - 같은 속도면 통째로 도는 고깔이고, 다르면
-	## 층 사이가 엇갈리며 감깁니다.
-	##
-	## **과하지 않게** 잡았습니다. 이 게임은 수채화 배경에 카툰 외곽선이라
-	## 화면을 채우는 이펙트는 그림체와 싸웁니다 - 원뿔 셋, 알파 0.34, 0.42초.
-	if not is_instance_valid(parent):
+static func drive_vortex(holder: Node3D, at: Vector3, dir: Vector3,
+		reach: float, mouth: float, arc_deg: float, fade: float) -> void:
+	## 모으는 동안 매 프레임 고쳐 씁니다. **판정과 같은 값**을 받으므로
+	## 부채꼴이 자라면 소용돌이도 같이 자랍니다.
+	if holder == null or not is_instance_valid(holder):
 		return
-	_vortex_build()
 	var flat := Vector3(dir.x, 0.0, dir.z)
 	if flat.length_squared() < 0.0001:
 		flat = Vector3.FORWARD
 	flat = flat.normalized()
-
-	var holder := Node3D.new()
-	parent.add_child(holder)
 	holder.global_position = at
-	# 지르는 쪽을 봅니다(-Z 가 앞).
 	holder.rotation.y = atan2(-flat.x, -flat.z)
-
-	for i in VORTEX_CONES:
+	var frac := clampf(arc_deg / VORTEX_ARC_MAX, 0.0, 1.0)
+	for i in holder.get_child_count():
+		var mesh := holder.get_child(i) as MeshInstance3D
+		if mesh == null:
+			continue
 		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
-		# 원뿔의 축(+Y)을 **앞(-Z)** 으로 눕힙니다. 이 마디를 따로 두는 이유는
-		# 늘이는 축과 도는 축이 같아야 하기 때문입니다 - 홀더에서 늘이면
-		# 기울어진 상자를 늘이는 꼴이라 원뿔이 찌그러집니다.
-		var axis := Node3D.new()
-		axis.rotation.x = -PI * 0.5
-		holder.add_child(axis)
-
-		var mesh := MeshInstance3D.new()
-		mesh.mesh = _vortex_mesh[i]
-		mesh.material_override = _vortex_mat[i]
-		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# 카툰 외곽선이 원뿔을 검게 두르면 소용돌이가 아니라 고깔이 됩니다.
-		mesh.set_meta("flat", true)
-		# 메시는 가운데가 원점이라 절반만큼 앞으로 밀어야 **좁은 끝이 입에**
-		# 놓입니다.
-		mesh.position.y = 0.5
-		axis.add_child(mesh)
-
-		# 겹마다 길이와 굵기를 조금씩 달리해 서로 안쪽에 놓입니다.
-		var len_i := length * lerpf(1.0, 0.66, t)
-		var rad_i := radius * lerpf(1.0, 0.7, t)
-		axis.scale = Vector3(rad_i, len_i, rad_i)
-
-		# **안쪽일수록 빠르게** 돕니다. 방향은 층마다 같게 - 반대로 돌리면
-		# 서로 비비는 것처럼 보입니다.
-		var spin := mesh.create_tween().set_loops()
-		spin.tween_property(mesh, "rotation:y", TAU, lerpf(0.9, 0.42, t)) 			.from(0.0)
-
-	# 뻗었다 스러집니다. 뻗는 쪽이 빠르고 스러지는 쪽이 느립니다 - 나타나는
-	# 것은 순간이고 사라지는 것은 여운입니다(호랑이와 같은 규칙).
-	#
-	# 세기는 **길이**로 냅니다. 알파는 재질에 있어 나눠 쓰는 터라 손댈 수
-	# 없는데, 짧고 뭉툭한 것과 길게 뻗은 것이 눈에는 세기 차이로 읽힙니다.
-	var big := Vector3(1.0, 0.7 + 0.3 * strength, 1.0)
-	holder.scale = Vector3(0.35, 0.25, 0.35) * big
-	var tw := holder.create_tween()
-	tw.tween_property(holder, "scale", big, VORTEX_TIME * 0.3) 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(holder, "scale",
-		Vector3(big.x * 1.2, big.y * 1.1, big.z * 1.2), VORTEX_TIME * 0.7) 		.set_trans(Tween.TRANS_SINE)
-	tw.tween_callback(holder.queue_free)
+		# 겹마다 조금씩 짧고 좁게 - 안쪽에 포개집니다.
+		var k := lerpf(1.0, 0.82, t)
+		mesh.scale = Vector3(reach * k, mouth, reach * k)
+		var mat := mesh.material_override as ShaderMaterial
+		if mat != null:
+			mat.set_shader_parameter("arc_frac", frac * lerpf(1.0, 0.86, t))
+			mat.set_shader_parameter("fade", fade)
 
 
 static func shout_fan(parent: Node3D, at: Vector3, dir: Vector3,

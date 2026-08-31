@@ -739,11 +739,10 @@ func _build_options() -> void:
 	_grade_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grade_row.add_child(_grade_button)
 
-	# **록온(자동 조준).** 기본은 **끔**입니다.
+	# **록온(자동 조준).** 기본은 **켬**입니다.
 	#
-	# 켜 두면 3.9m 안의 가장 가까운 적으로 몸이 저절로 돌아갑니다. 편하지만
-	# 겨누는 일이 통째로 사라져서, 어디를 보고 있느냐로 갈리는 것들(등 뒤
-	# 잡기, 베개 아기의 앞뒤, 굴러 피하기)이 다 같이 무의미해집니다.
+	# 밀기 사거리(3.8m) 안의 가장 가까운 적으로 몸이 돌아갑니다. 그 밖에서는
+	# 안 걸리므로, 멀리서 겨누는 일은 그대로 손에 남습니다.
 	var lock_row := HBoxContainer.new()
 	lock_row.add_theme_constant_override("separation", 6)
 	col.add_child(lock_row)
@@ -751,7 +750,7 @@ func _build_options() -> void:
 	lock_name.custom_minimum_size = Vector2(64, 34)
 	lock_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lock_row.add_child(lock_name)
-	_lock_button = _small_button("끔", func() -> void: lock_toggled.emit())
+	_lock_button = _small_button("켬", func() -> void: lock_toggled.emit())
 	_lock_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lock_row.add_child(_lock_button)
 

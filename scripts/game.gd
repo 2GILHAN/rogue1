@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.25.2"
+const VERSION := "v0.26.2"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -45,7 +45,10 @@ const CAM_OFFSET := Vector3(0, 5.56, 2.83)
 ## 값은 화면에서 재서 골랐습니다 - 아래 `--pose=frame` 이 캐릭터가 화면
 ## 세로의 몇 %에 있는지 찍습니다. 0.5 가 한가운데이고 0.60 쯤이 "조금 아래"
 ## 입니다.
-const CAM_LOOK_AHEAD := 1.15
+## **1.15 에서 0.58 로 되돌렸습니다.** 1.15 는 너무 내려왔습니다 - 발이
+## 화면 세로의 0.66 이라 아래쪽에 남는 공간이 거의 없었습니다. 0(가운데)과
+## 1.15 의 한가운데입니다.
+const CAM_LOOK_AHEAD := 0.58
 const CAM_PITCH := -63.0
 ## 옵션으로 움직일 수 있는 폭. 40도보다 눕히면 벽 윗면이 화면 절반을 덮고,
 ## 78도를 넘으면 캐릭터 정수리만 보입니다.
@@ -130,8 +133,13 @@ const FOE_ROOM_TILES := 26
 ## 방이 22칸(33m)이라 9m 면 한가운데에서 넉넉히 벗어나면서도 벽에 안 붙습니다 -
 ## 풀장 반지름이 1.85m 이고 물물교환하는 아이가 그 옆 2.9m 에 섭니다.
 const TEST_SHOP_AT := 9.0
-## **록온(자동 조준).** 기본은 끔 - 옵션 판에서 켭니다.
-var lock_on := false
+## **록온(자동 조준). 기본은 켬** - 옵션 판에서 끕니다.
+##
+## 한동안 기본을 끔으로 뒀습니다. 겨누는 일이 사라지면 어디를 보고 있느냐로
+## 갈리는 것들(등 뒤 잡기, 베개 아기의 앞뒤, 굴러 피하기)이 무의미해진다는
+## 것이 이유였는데, **범위를 밀기 사거리에 매면서 그 걱정이 줄었습니다** -
+## 3.8m 안에 붙었을 때만 걸리므로 멀리서 겨누는 일은 그대로 손에 남습니다.
+var lock_on := true
 var ui: Ui
 
 var world_env: Environment
@@ -733,12 +741,11 @@ func build_floor() -> void:
 	player.ultimate_changed.connect(_on_ultimate)
 	player.bot_active = _bot
 	# 폰에서는 마우스가 없으니 가장 가까운 적을 자동으로 겨눕니다.
-	# **록온은 기본으로 끕니다.** 옵션 판에서 켤 수 있습니다.
+	# **록온은 기본으로 켭니다.** 옵션 판에서 끌 수 있습니다.
 	#
-	# 예전에는 폰이면 자동으로 켰습니다 - 손가락으로는 겨누기 어려우니까요.
-	# 그런데 켜 두면 겨누는 일이 통째로 사라져서, 어디를 보고 있느냐로 갈리는
-	# 것들(등 뒤 잡기, 베개 아기의 앞뒤, 굴러 피하기)이 다 무의미해집니다.
-	# 조준은 이제 **가는 쪽**이 정합니다(_auto_aim 의 뒷부분).
+	# 범위가 밀기 사거리(3.8m)를 따라가므로 붙었을 때만 걸립니다 - 멀리서
+	# 겨누는 일은 그대로 손에 남습니다. 끄면 조준은 **가는 쪽**이 정합니다
+	# (_auto_aim 의 뒷부분).
 	player.auto_aim = lock_on
 	# 화면 조작이면 마우스가 없습니다. 있는 척하면 몸이 마지막으로 닿은
 	# 자리를 향한 채로 굳습니다(player.gd 의 `mouse_aim`).
@@ -1818,6 +1825,14 @@ func _drive_pose() -> void:
 					player.global_position + Vector3(0, 1.25, 0))
 				print("[화면] 발 %.2f  머리 %.2f  (0.5=한가운데, 클수록 아래)" % [
 					feet.y / vp.y, head.y / vp.y])
+		"lockon":
+			# 록온 범위가 **밀기 사거리를 따라가는지** 봅니다.
+			if _frames == 20:
+				lock_on = true
+				player.auto_aim = true
+				print("[록온] 밀기 %.2f + 여유 %.1f -> 록온 %.2f" % [
+					Player.LUNGE_RANGE, Player.AUTO_AIM_MARGIN,
+					player.lock_on_range()])
 		"lane":
 			# **서진의 돌진 예고**를 보는 자리. 사거리 안에 세워 두면 알아서
 			# 겨누기 시작합니다.
@@ -1863,6 +1878,18 @@ func _drive_pose() -> void:
 				player.bot_active = true
 				player.bot_move = Vector2(1, 0)
 			if _frames in [36, 52, 72]:
+				var vx: Node3D = player._shout_vortex
+				var vs := 0.0
+				var vfrac := 0.0
+				if vx != null and is_instance_valid(vx) and vx.get_child_count() > 0:
+					var m0 := vx.get_child(0) as MeshInstance3D
+					vs = m0.scale.x
+					vfrac = float((m0.material_override as ShaderMaterial)
+						.get_shader_parameter("arc_frac"))
+				print("[소용돌이] f=%d 판정 사거리 %.2f / 각 %.0f도  ->  판 %.2f / 각비 %.2f (= %.0f도)" % [
+					_frames, player.shout_reach(player._shout_charge) + 0.4,
+					player.shout_arc(player._shout_charge),
+					vs, vfrac, vfrac * 132.0])
 				print("[모으는중] f=%d 모은 %.2f 속도 %.2f (평소 %.2f) 팔뒤=%.2f" % [
 					_frames, player._shout_charge,
 					Vector2(player.velocity.x, player.velocity.z).length(),
@@ -1883,7 +1910,7 @@ func _drive_pose() -> void:
 					print("[계속누름] f=%d 모으는중=%s 미리보기=%s" % [
 						_frames, str(player._shout_charge >= 0.0),
 						str(player._shout_prev != null and is_instance_valid(player._shout_prev))])
-			elif _frames == 30 + (3 if _probe_arg == "tap" else (36 if _probe_arg == "sync" else 48)):
+			elif _frames == 30 + (3 if _probe_arg == "tap" else (30 if _probe_arg == "sync" else 42)):
 				var before := state.breath
 				player.shout_release()
 				print("[모으기] %s  모은 %.2f  사거리 %.2f  각도 %.0f도  숨 %.0f -> %.0f" % [

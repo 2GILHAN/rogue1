@@ -155,8 +155,8 @@ func skill_lv(fam: String) -> int:
 ## 스킬이 실제로 올린 값에서 나옵니다.
 ##
 ## 계통 Lv 로 세기까지 정하면 **이펙트가 거짓말을 합니다.** 밀기 계통에는
-## 「억센 손」(피해)·「밀치는 힘」(넉백)·「긴 팔」(사거리) 셋이 들어 있는데,
-## 긴 팔만 세 번 찍으면 넉백은 그대로인 채 화면에서는 세게 밀리는 그림이
+## (옛 이야기입니다. 그때는 밀기 계통에 「억센 손」·「밀치는 힘」·「긴 팔」
+## 셋이 들어 있었고, 긴 팔만 세 번 찍으면 넉백은 그대로인 채 세게 밀리는 그림이
 ## 떴습니다. 값에서 뽑으면 안 찍은 것은 안 보입니다.
 func _picks(value: float, per_pick: float) -> int:
 	## 그 스킬을 몇 번 찍었나. 값을 한 번의 증가폭으로 나눕니다 - 스킬 쪽
@@ -168,9 +168,35 @@ func shout_range() -> float:
 	## 고함이 닿는 거리. 스킬로 늘어납니다 - 파문 크기도 이 값에서 나오므로
 	## (_show_shout), 늘리면 **보이는 것과 닿는 것이 같이** 커집니다.
 	return ATTACK_RANGE + (state.shout_range if state != null else 0.0)
-## 자동 조준이 반응하는 거리. 사거리보다 조금만 넓게 둬서, 닿기 직전에 몸이
-## 돌아가기 시작하도록 합니다.
-const AUTO_AIM_RANGE := 3.9
+## 록온이 반응하는 거리가 **밀기 사거리보다 얼마나 넓은가**(m).
+##
+## 닿기 직전에 몸이 돌아가기 시작하라는 값입니다. 예전에는 11m 였는데, 방
+## 반대편 적에게도 몸이 돌아가서 **가려는 방향과 보는 방향이 계속
+## 어긋났습니다.**
+const AUTO_AIM_MARGIN := 1.2
+
+
+func lock_on_range() -> float:
+	## 록온이 반응하는 거리. **밀기(달려들기) 사거리를 따라갑니다.**
+	##
+	## 3.9m 로 박아 두었던 값입니다. 그때는 고함 사거리(2.7)보다 조금 넓게
+	## 잡은 것이었는데, 그 뒤로 고함이 **모은 만큼 1.29~5.7m** 로 변하게
+	## 되면서 어느 값과도 안 맞게 됐습니다 - 고함을 판 사람은 겨눌 수 있는
+	## 적에게 록온이 안 걸렸습니다.
+	##
+	## 밀기에 맨 이유: 록온이 실제로 필요한 순간은 **붙어서 미는 순간**입니다.
+	## 고함은 부채꼴이 넓어서 대충 그쪽만 보면 맞지만, 밀기는 한 사람을
+	## 정확히 겨눠야 하고 등 뒤냐 앞이냐까지 갈립니다.
+	##
+	## **「긴 팔」은 걷어냈습니다.** 스킬 스무 개를 여섯 계통으로 줄일 때
+	## 이미 빠졌는데(`_recompute` 가 안 건드려서 늘 0), 값만 죽은 채 남아
+	## 있었습니다 - 더해도 아무 일이 안 일어나는 항이 식에 남아 있으면
+	## 다음에 읽는 사람이 "찍으면 늘어나는구나" 로 잘못 압니다.
+	##
+	## 사거리를 늘리는 것 자체가 별로였습니다: 달려드는 거리가 길어지면 더
+	## 멀리서 밀 수 있는 대신 **달려가는 동안 무방비인 시간**이 같이 길어져서,
+	## 이득이 거의 없습니다.
+	return LUNGE_RANGE + AUTO_AIM_MARGIN
 const ATTACK_ARC := deg_to_rad(110.0)
 const SWING_TIME := 0.30
 const HIT_INVULN := 0.45
@@ -419,6 +445,10 @@ var _shout_voice: AudioStreamPlayer = null
 ## 모으는 동안 발밑에 자라는 부채꼴.
 var _shout_prev: MeshInstance3D = null
 var _shout_prev_mat: StandardMaterial3D = null
+## 모으는 동안 입에서 뻗는 소용돌이.
+var _shout_vortex: Node3D = null
+## 지른 뒤 소용돌이가 스러지는 시간(초).
+const VORTEX_FADE := 0.30
 ## 고함 자세를 붙잡고 있는 시간. 판정(_swing_time, 0.30초)보다 깁니다.
 ##
 ## 목소리 클립이 1.05초인데 자세가 0.30초에 풀리면, 아직 지르고 있는데 아이는
@@ -835,11 +865,10 @@ func _move_input() -> Vector2:
 func _auto_aim() -> bool:
 	## 가장 가까운 적을 봅니다. 없으면 가는 쪽을 봅니다.
 	##
-	## 범위를 소리가 닿는 거리에 맞춰 둡니다. 예전에는 11m 였는데, 방 반대편
-	## 적에게도 몸이 돌아가서 **가려는 방향과 보는 방향이 계속 어긋났습니다.**
-	## 지금은 때릴 수 있을 만큼 붙어야 반응하고, 그 전에는 가는 쪽을 봅니다.
+	## 범위는 **밀기 사거리**를 따라갑니다(`lock_on_range`). 때릴 수 있을 만큼
+	## 붙어야 반응하고, 그 전에는 가는 쪽을 봅니다.
 	var best: Node3D = null
-	var closest := AUTO_AIM_RANGE
+	var closest := lock_on_range()
 	for n in get_tree().get_nodes_in_group("enemies"):
 		var e := n as Node3D
 		if not is_instance_valid(e):
@@ -1609,7 +1638,10 @@ func shout_release() -> void:
 ##
 ## 살짝 눌렀다 뗄 때만 거기서 끊깁니다. 그건 "덜 모았다" 가 귀에 남아야 해서
 ## 그렇습니다.
-const SHOUT_CHARGE_TIME := 0.60
+## **0.86 → 0.60 → 0.50.** 손으로 쥐고 있기에는 그만큼도 깁니다 - 최대로
+## 지르려면 매번 서 있어야 하고 그동안 발이 0.2배로 묶입니다. 목소리(1.05초)의
+## 절반이 채 안 되므로 남은 절반은 지르고 난 여운이 됩니다.
+const SHOUT_CHARGE_TIME := 0.50
 const SHOUT_COST_MIN := 0.30
 ## 살짝 눌렀을 때의 몫. 0 이면 스쳐 누른 것이 헛손질이 되어, 눌렀는데 아무 일도
 ## 안 일어난 것처럼 보입니다.
@@ -2469,7 +2501,7 @@ func _lunge_target() -> Node3D:
 	## 보고 있는 쪽의 가장 가까운 적. 등 뒤는 세지 않습니다 - 뒤로 달려드는
 	## 것은 조작이 아니라 사고입니다.
 	var best: Node3D = null
-	var closest := LUNGE_RANGE + state.lunge_range
+	var closest := LUNGE_RANGE
 	for node in get_tree().get_nodes_in_group("enemies"):
 		var enemy := node as Enemy
 		if not is_instance_valid(enemy) or enemy.held_by != null:
@@ -2799,6 +2831,22 @@ func _shout_preview() -> void:
 	_shout_prev.mesh = Fx.fan_mesh(shout_reach(charge) + 0.4, shout_arc(charge))
 	_shout_prev.global_position = global_position + Vector3(0, 0.05, 0)
 	_shout_prev.rotation.y = atan2(-aim.x, -aim.z)
+
+	# **소용돌이도 같이 자랍니다.**
+	#
+	# 지를 때 한 번 터뜨리던 것을 모으는 동안 내내 띄우는 것으로 바꿨습니다 -
+	# 소리는 누르는 순간부터 나고 부채꼴도 그때부터 자라는데 소용돌이만
+	# 마지막에 나오면, 셋이 서로 다른 것을 말합니다.
+	#
+	# **판정과 같은 값**을 넘깁니다(`shout_reach`, `shout_arc`). 부채꼴이
+	# 자라면 소용돌이도 정확히 그만큼 자랍니다.
+	if _shout_vortex == null or not is_instance_valid(_shout_vortex):
+		_shout_vortex = Fx.make_vortex(get_parent())
+	Fx.drive_vortex(_shout_vortex,
+		global_position + Vector3(0, MOUTH_HEIGHT, 0),
+		aim, shout_reach(charge) + 0.4, MOUTH_HEIGHT, shout_arc(charge),
+		# 모을수록 진해집니다. 다 모이면 진하기도 최대입니다.
+		0.45 + 0.55 * charge)
 	# 다 모이면 진해집니다. 언제가 최대인지 눈으로도 알 수 있어야 합니다.
 	_shout_prev_mat.albedo_color = Color(1.0, 0.88, 0.5, 0.16).lerp(
 		Color(1.0, 0.72, 0.32, 0.40), charge)
@@ -2809,6 +2857,19 @@ func _clear_shout_preview() -> void:
 		_shout_prev.queue_free()
 	_shout_prev = null
 	_shout_prev_mat = null
+	# 소용돌이는 **그 자리에 두고 스러지게** 합니다. 같이 지우면 지르는
+	# 순간에 화면에서 사라져서, 소리는 이어지는데 그림만 끊깁니다.
+	if _shout_vortex != null and is_instance_valid(_shout_vortex):
+		var gone := _shout_vortex
+		var tw := gone.create_tween()
+		tw.tween_method(func(f: float) -> void:
+			for i in gone.get_child_count():
+				var m := gone.get_child(i) as MeshInstance3D
+				if m != null and m.material_override is ShaderMaterial:
+					(m.material_override as ShaderMaterial) 						.set_shader_parameter("fade", f),
+			1.0, 0.0, VORTEX_FADE)
+		tw.tween_callback(gone.queue_free)
+	_shout_vortex = null
 
 
 func _release_shout() -> void:
@@ -2866,17 +2927,6 @@ func _try_attack() -> void:
 	# 낸다**는 그림이 아니었습니다. 나선으로 감겨 빨려 드는 모양이 지르는
 	# 행위와 더 가깝고, 무엇보다 모은 만큼 커지는 것과 잘 붙습니다.
 	#
-	# **꼭짓점이 입입니다.** 거기서 앞으로 벌어지며 뻗습니다 - 소리가 나가는
-	# 길이 그대로 그림이 됩니다.
-	#
-	# 길이는 사거리 그대로, 벌어지는 굵기는 그 0.30배입니다. 부채꼴 각도
-	# (최대 132도)를 그대로 따르면 원뿔이 아니라 원반이 됩니다 - 범위를
-	# 가르치는 일은 바닥에 칠한 부채꼴이 이미 하고 있으므로, 이쪽은 **소리가
-	# 나간다**만 말하면 됩니다.
-	var reach := shout_reach(_shout_fired)
-	Fx.vortex(get_parent(), global_position + Vector3(0, MOUTH_HEIGHT, 0) + aim * 0.12,
-		aim, reach, reach * 0.30, 0.65 + 0.35 * _shout_fired)
-
 	var slv := skill_lv("shout")
 	if slv >= 3:
 		# **Lv5 는 호랑이입니다.** 구슬은 "퍼졌다" 까지이고, 계통을 끝까지 판
@@ -2884,12 +2934,10 @@ func _try_attack() -> void:
 		Fx.tiger(get_parent(), global_position + Vector3(0, 0.35, 0), aim,
 			shout_reach(_shout_fired))
 	elif slv >= 2:
-		# Lv2 는 소용돌이가 하나 더 붙습니다 - 같은 자리에서 더 짧고 굵게
-		# 겹쳐 두 겹으로 감깁니다. 새 그림을 더하는 대신 같은 것을 겹치는
-		# 쪽이 조용합니다.
-		Fx.vortex(get_parent(),
-			global_position + Vector3(0, MOUTH_HEIGHT, 0) + aim * 0.12,
-			aim, reach * 0.6, reach * 0.20, 0.5)
+		# Lv2 는 맞은 자리에서 구슬이 한 번 더 터집니다. 소용돌이는 이미
+		# 모으는 동안 내내 떠 있으므로, 여기서는 **맞았다**만 보태면 됩니다.
+		Fx.orbs(get_parent(), global_position + Vector3(0, 0.7, 0), aim,
+			shout_reach(_shout_fired), 5 + slv * 3, state.shout_knock > 0.0)
 
 
 ## 물장난이 도는 시간과, 팔을 좌우로 바꾸는 주기.

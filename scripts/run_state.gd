@@ -41,7 +41,6 @@ var shout_range := 0.0      # 고함 사거리 +m
 var shout_stun := 0.0       # 고함 경직 +초
 var shove_knock := 0.0      # 밀기 넉백 +
 var shove_damage := 0.0     # 밀기 피해 배율 +
-var lunge_range := 0.0      # 달려드는 거리 +m
 var roll_dist := 0.0        # 구르기 거리 배율 +
 var breath_regen := 0.0     # 숨 회복 +/초
 ## 연타 벌금을 깎는 비율(0~0.8). 같은 기술을 잇달아 쓸 때 더 드는 숨이
