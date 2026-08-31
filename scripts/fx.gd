@@ -200,6 +200,9 @@ static func warm_up(parent: Node3D) -> void:
 	##
 	## 바닥 아래에서 그립니다 - 보이지 않지만 그리기는 합니다.
 	shimmer(parent, Vector3(0, -40, 0), Vector3.FORWARD, 1, false)
+	# 소용돌이도 같이 데웁니다. 셰이더가 하나 더 늘었고, 그 첫 번이 고함을
+	# 지르는 순간에 오면 딱 그때 화면이 끊깁니다.
+	vortex(parent, Vector3(0, -40, 0), 0.6, 1.0, 1.0)
 
 
 static func shimmer(parent: Node3D, at: Vector3, dir: Vector3,
@@ -673,6 +676,130 @@ static func _all(root: Node) -> Array:
 	for c in root.get_children():
 		out.append_array(_all(c))
 	return out
+
+
+## 소용돌이에 쓰는 노이즈. **한 번 만들어 나눠 씁니다** - 고함마다 새로
+## 만들면 그때마다 텍스처를 굽습니다.
+static var _vortex_noise: NoiseTexture2D = null
+## 원뿔의 메시와 재질. **층마다 한 벌 만들어 나눠 씁니다.**
+##
+## 고함마다 새로 만들었더니 **5.2ms** 였습니다(프레임의 3분의 1). 셋이 서로
+## 다른 것은 크기·빠르기·진하기뿐이라 미리 세 벌만 만들어 두면 됩니다 -
+## 남는 값은 노드 셋을 다는 것뿐입니다.
+static var _vortex_mesh: Array = []
+static var _vortex_mat: Array = []
+## 겹치는 원뿔의 수.
+##
+## 넷 이상 겹쳐 봤는데 **이 게임에는 과합니다.** 더하기로 섞이는 터라 겹칠수록
+## 밝아져서, 수채화 배경 위에 파란 덩어리가 생깁니다. 셋이면 소용돌이로
+## 읽히면서 뒤가 비칩니다.
+const VORTEX_CONES := 3
+## 도는 동안. 고함 자세(0.62초)보다 짧게 둡니다 - 자세보다 오래 남으면
+## 소리가 끝난 자리에 기운만 떠 있습니다.
+const VORTEX_TIME := 0.42
+
+
+static func _noise() -> NoiseTexture2D:
+	if _vortex_noise == null:
+		var n := FastNoiseLite.new()
+		n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		n.frequency = 0.035
+		var tex := NoiseTexture2D.new()
+		tex.noise = n
+		tex.width = 128
+		tex.height = 128
+		# 극좌표로 감아 쓰므로 좌우가 이어져야 이음매가 안 보입니다.
+		tex.seamless = true
+		_vortex_noise = tex
+	return _vortex_noise
+
+
+static func _vortex_build(radius: float, height: float) -> void:
+	## 원뿔 셋의 메시와 재질을 한 번만 만듭니다.
+	##
+	## 크기를 인자로 받지만 **처음 한 번만** 씁니다 - 그 뒤로는 고함마다
+	## 홀더의 scale 로 키웁니다. 메시를 매번 다시 만들면 나눠 쓰는 뜻이
+	## 없어집니다.
+	if not _vortex_mesh.is_empty():
+		return
+	for i in VORTEX_CONES:
+		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
+		var cone := CylinderMesh.new()
+		# 위로 갈수록 좁아지는 깔때기. 위 칸일수록 통째로 작습니다.
+		cone.top_radius = radius * lerpf(0.10, 0.02, t)
+		cone.bottom_radius = radius * lerpf(1.0, 0.45, t)
+		cone.height = height * lerpf(0.55, 0.32, t)
+		cone.radial_segments = 18
+		cone.rings = 3
+		_vortex_mesh.append(cone)
+
+		var mat := ShaderMaterial.new()
+		mat.shader = load("res://assets/shaders/vortex.gdshader")
+		mat.set_shader_parameter("noise_tex", _noise())
+		mat.set_shader_parameter("vortex_color",
+			Color(RUSH_COLOR.r, RUSH_COLOR.g, RUSH_COLOR.b,
+				0.34 * lerpf(1.0, 0.55, t)))
+		# 안쪽(위) 칸일수록 빨리 흐릅니다.
+		mat.set_shader_parameter("scroll_speed", lerpf(1.3, 2.4, t))
+		mat.set_shader_parameter("spiral_amount", lerpf(2.6, 3.8, t))
+		_vortex_mat.append(mat)
+
+
+## 미리 만들어 두는 원뿔의 기준 크기(m). 고함마다 여기서 배로 키웁니다.
+const VORTEX_BASE_RADIUS := 1.0
+const VORTEX_BASE_HEIGHT := 1.0
+
+
+static func vortex(parent: Node3D, at: Vector3, radius: float,
+		height: float, strength: float = 1.0) -> void:
+	## 고함이 만드는 **소용돌이**. 원뿔 여러 겹을 세우고 각각 다른 빠르기로
+	## 돌립니다.
+	##
+	## 안쪽일수록 빠르게 돕니다 - 같은 속도로 돌리면 통째로 도는 고깔이고,
+	## 속도가 다르면 층 사이가 엇갈리며 감기는 것으로 보입니다.
+	##
+	## **과하지 않게** 잡았습니다. 이 게임은 수채화 배경에 카툰 외곽선이라,
+	## 화면을 채우는 이펙트는 그림체와 싸웁니다 - 원뿔 셋, 알파 0.34, 0.42초
+	## 입니다.
+	##
+	## 메시와 재질은 **나눠 씁니다**(`_vortex_build`). 매번 만들면 5.2ms 가
+	## 듭니다 - 지르는 순간마다 프레임의 3분의 1을 버리는 셈이었습니다.
+	## 크기와 세기는 홀더의 scale 로 냅니다.
+	if not is_instance_valid(parent):
+		return
+	_vortex_build(VORTEX_BASE_RADIUS, VORTEX_BASE_HEIGHT)
+	var holder := Node3D.new()
+	parent.add_child(holder)
+	holder.global_position = at
+	for i in VORTEX_CONES:
+		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
+		var mesh := MeshInstance3D.new()
+		mesh.mesh = _vortex_mesh[i]
+		mesh.material_override = _vortex_mat[i]
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# 카툰 외곽선이 원뿔을 검게 두르면 소용돌이가 아니라 고깔이 됩니다.
+		mesh.set_meta("flat", true)
+		mesh.position.y = height * lerpf(0.18, 0.62, t)
+		holder.add_child(mesh)
+
+		# **안쪽일수록 빠르게** 돕니다. 방향도 층마다 같게 두어야 감기는
+		# 것으로 보입니다 - 반대로 돌리면 서로 비비는 것처럼 보입니다.
+		var spin := mesh.create_tween().set_loops()
+		spin.tween_property(mesh, "rotation:y", TAU, lerpf(0.9, 0.42, t)) 			.from(0.0)
+
+	# 솟았다 사라집니다. 커지는 쪽이 빠르고 스러지는 쪽이 느립니다 -
+	# 나타나는 것은 순간이고 사라지는 것은 여운입니다(호랑이와 같은 규칙).
+	#
+	# 세기는 **높이**로 냅니다. 알파는 재질에 있어 나눠 쓰는 터라 손댈 수
+	# 없는데, 낮고 넓게 퍼진 것과 높이 솟은 것이 눈에는 세기 차이로 읽힙니다.
+	var big := Vector3(radius, height * (0.7 + 0.3 * strength), radius)
+	holder.scale = big * Vector3(0.35, 0.2, 0.35)
+	var tw := holder.create_tween()
+	tw.tween_property(holder, "scale", big, VORTEX_TIME * 0.3) 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(holder, "scale",
+		Vector3(big.x * 1.25, big.y * 0.15, big.z * 1.25),
+		VORTEX_TIME * 0.7).set_trans(Tween.TRANS_SINE)
+	tw.tween_callback(holder.queue_free)
 
 
 static func shout_fan(parent: Node3D, at: Vector3, dir: Vector3,

@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.24"
+const VERSION := "v0.25"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1847,8 +1847,13 @@ func _drive_pose() -> void:
 				var foe := Enemy.new()
 				world.add_child(foe)
 				foe.setup("grunt", 1, dungeon, player)
-				# **최소 사거리 밖, 최대 사거리 안**에 세웁니다(3.7 < 4.8 < 5.7).
+				# **최소 사거리 밖, 최대 사거리 안**에 세웁니다(1.1 < 4.8 < 5.7).
 				foe.global_position = player.global_position + Vector3(4.8, 0, 0)
+				# **못 움직이게 세워 둡니다.** 살아 있는 적을 두면 스스로
+				# 달려가 벽에 박아 체력이 깎입니다(부딪힘 피해) - 고함이
+				# 맞혔는지 재는 자리에서 그 값이 섞이면 아무것도 못 봅니다.
+				foe.speed = 0.0
+				foe.set_physics_process(false)
 				_probe_foe = foe
 				state.skill_lv["shout"] = 3
 				state._recompute()
@@ -1875,6 +1880,14 @@ func _drive_pose() -> void:
 					("살짝 눌렀다 뗌" if _probe_arg == "tap" else "끝까지 누름"),
 					player._shout_fired, player.shout_reach(player._shout_fired),
 					player.shout_arc(player._shout_fired), before, state.breath])
+			if _frames == 100:
+				state.breath = 100.0
+				player.shout_press()
+			if _frames == 104:
+				var t2 := Time.get_ticks_usec()
+				player.shout_release()
+				print("[값] 두 번째로 지르는 데 %.2fms" % (
+					(Time.get_ticks_usec() - t2) / 1000.0))
 			if _frames == 130 and is_instance_valid(_probe_foe):
 				print("[모으기] 4.8m 앞의 적 체력 %.0f / %.0f  (맞음=%s)" % [
 					_probe_foe.hp, _probe_foe.max_hp,

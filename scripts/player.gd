@@ -2839,6 +2839,18 @@ func _try_attack() -> void:
 	# 구슬 개수는 **굳히는 힘**(「쩌렁쩌렁」 0.5초마다 셋)에서 뽑습니다.
 	# 사거리는 이미 `shout_range()` 가 그림 크기를 정하므로 여기서 안 셉니다 -
 	# 「멀리 가는 소리」를 찍으면 구슬이 그만큼 멀리 퍼집니다.
+	# **소용돌이.** 고함이 만드는 기운입니다 - 계통 Lv 과 상관없이 늘 뜹니다.
+	#
+	# 파란 구슬을 걷어낸 자리입니다. 구슬은 "퍼졌다" 는 됐지만 **소리가 밀어
+	# 낸다**는 그림이 아니었습니다. 나선으로 감겨 빨려 드는 모양이 지르는
+	# 행위와 더 가깝고, 무엇보다 모은 만큼 커지는 것과 잘 붙습니다.
+	#
+	# 자리는 부채꼴의 **한가운데쯤**(사거리의 0.42배 앞)입니다. 발밑에 두면
+	# 아이를 덮고, 끝에 두면 무엇이 만든 것인지 안 읽힙니다.
+	var reach := shout_reach(_shout_fired)
+	Fx.vortex(get_parent(), global_position + aim * (reach * 0.42),
+		reach * 0.34, 1.15, 0.65 + 0.35 * _shout_fired)
+
 	var slv := skill_lv("shout")
 	if slv >= 3:
 		# **Lv5 는 호랑이입니다.** 구슬은 "퍼졌다" 까지이고, 계통을 끝까지 판
@@ -2846,8 +2858,10 @@ func _try_attack() -> void:
 		Fx.tiger(get_parent(), global_position + Vector3(0, 0.35, 0), aim,
 			shout_reach(_shout_fired))
 	elif slv >= 2:
-		Fx.orbs(get_parent(), global_position + Vector3(0, 0.7, 0), aim,
-			shout_reach(_shout_fired), 5 + slv * 3, state.shout_knock > 0.0)
+		# Lv2 는 소용돌이가 하나 더 붙습니다 - 앞쪽에 작게 겹쳐 두 겹으로
+		# 감깁니다. 새 그림을 더하는 대신 같은 것을 겹치는 쪽이 조용합니다.
+		Fx.vortex(get_parent(), global_position + aim * (reach * 0.72),
+			reach * 0.22, 0.85, 0.5)
 
 
 ## 물장난이 도는 시간과, 팔을 좌우로 바꾸는 주기.
