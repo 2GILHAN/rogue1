@@ -150,7 +150,11 @@ func generate(floor_num: int, rng: RandomNumberGenerator) -> void:
 	# 넓은 판에 방을 흩어 놓으면 그 사이가 전부 복도가 됩니다. 재 보니 가장
 	# 긴 곧은 복도가 **27~52m** 였습니다 - 초당 3.1m 로 걸으면 한 복도에
 	# 9~17초, 그동안 아무 일도 일어나지 않습니다.
-	w = clampi(34 + floor_num, 34, 44)
+	#
+	# **한 번 더 좁혔습니다**(34~44 → 28~36). 방을 작게 만들면서 판까지 그대로
+	# 두면 줄어든 만큼이 도로 복도가 됩니다 - 방 비율을 지키려면 둘을 같이
+	# 줄여야 합니다.
+	w = clampi(28 + floor_num, 28, 36)
 	h = w
 	solid = PackedByteArray()
 	solid.resize(w * h)
@@ -163,8 +167,17 @@ func generate(floor_num: int, rng: RandomNumberGenerator) -> void:
 	var tries := 0
 	while rooms.size() < want and tries < 1400:
 		tries += 1
-		var rw := _rng.randi_range(8, 13)
-		var rh := _rng.randi_range(7, 12)
+		# **방을 줄였습니다**(8~13 × 7~12 → 6~9 × 5~8).
+		#
+		# 한 칸이 1.5m 이므로 9~13.5m × 7.5~12m 입니다. 예전 방(12~19.5m)은
+		# 초당 3.1m 로 가로지르는 데 4~6초가 걸렸는데, 그 안에 적이 한둘이면
+		# **방 하나가 곧 빈 마당**입니다. 작은 방에서는 들어서자마자 마주치고,
+		# 물러날 곳이 적어 밀기·구르기의 자리 선택이 실제로 의미를 갖습니다.
+		#
+		# 소품 자리는 `_spot_for` 가 크기를 보고 고르므로, 풀장(반지름 1.85)이
+		# 안 들어가는 방은 알아서 건너뜁니다.
+		var rw := _rng.randi_range(6, 9)
+		var rh := _rng.randi_range(5, 8)
 		var rx := _rng.randi_range(2, w - rw - 3)
 		var ry := _rng.randi_range(2, h - rh - 3)
 		var rect := Rect2i(rx, ry, rw, rh)

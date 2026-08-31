@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.22"
+const VERSION := "v0.23"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -113,6 +113,13 @@ var _hp_at_windup := 0.0
 ## 풀장이 지름 3.7m(반지름 1.85)라 2.9 면 물가 바깥 한 걸음입니다 - 물에
 ## 잠기지도, 다른 방 물건처럼 떨어져 보이지도 않습니다.
 const SHOP_GAP := 2.9
+## 적 한 마리에 필요한 방 칸 수. 방이 줄면 적도 이 값으로 같이 줄어듭니다.
+const FOE_ROOM_TILES := 26
+## 테스트 방에서 물놀이터를 놓는 자리(방 한가운데에서 몇 m 떨어져서).
+##
+## 방이 22칸(33m)이라 9m 면 한가운데에서 넉넉히 벗어나면서도 벽에 안 붙습니다 -
+## 풀장 반지름이 1.85m 이고 물물교환하는 아이가 그 옆 2.9m 에 섭니다.
+const TEST_SHOP_AT := 9.0
 ## **록온(자동 조준).** 기본은 끔 - 옵션 판에서 켭니다.
 var lock_on := false
 var ui: Ui
@@ -733,8 +740,23 @@ func build_floor() -> void:
 	cam_rig.global_position = player.global_position
 
 	if test_mode:
-		# 실험용 방에는 출구도 상점도 소품도 두지 않습니다. 보려는 것 하나만
-		# 남기는 것이 이 방의 전부입니다.
+		# 실험용 방에는 출구도 소품도 두지 않습니다. 보려는 것 하나만 남기는
+		# 것이 이 방의 전부입니다.
+		#
+		# **물놀이터와 물물교환은 예외입니다.** 둘 다 방 하나에 놓여야 하는
+		# 것이고, 실제 판에서는 2층부터 한 번씩만 나와서 손볼 때마다 층을
+		# 넘겨야 했습니다 - 확인하려는 것을 확인할 수 없는 자리였습니다.
+		# 구석에 놓아 방 한가운데(적이 나오고 스킬을 시험하는 자리)를 비워
+		# 둡니다.
+		var corner: Vector3 = dungeon.room_center(0) + Vector3(TEST_SHOP_AT, 0.0, TEST_SHOP_AT)
+		_place_waterpark(corner)
+		shop = Shopkeeper.new()
+		world.add_child(shop)
+		shop.global_position = corner + Vector3(SHOP_GAP, 0.0, 0.0)
+		_waterpark_used = false
+		# 사탕이 없으면 물놀이터가 "사탕이 모자랍니다" 만 말합니다. 실험하는
+		# 자리에서는 값이 아니라 **일어나는 일**을 봐야 합니다.
+		state.gold = 300
 		ui.set_minimap(dungeon, player.global_position, player.global_position)
 		ui.set_boons(_boon_names)
 		if _toon_start and not Toon.enabled:
@@ -827,13 +849,21 @@ func _place_waterpark(at: Vector3) -> void:
 func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 	## 방마다 조금씩. 한 방에 몰아넣으면 나머지 방이 빈 복도가 됩니다.
 	##
-	## **수를 줄이고 한 마리를 세게 했습니다**(예전 4 + 층×2 = 1층 6마리,
-	## 5층 14마리). 여럿이면 무엇을 하든 밀기 한 번으로 무리를 정리하는 것이
-	## 답이라, 적 종류를 나눠 만든 것이 화면에서 안 보였습니다. 한 마리가
-	## 세면 **그 한 마리를 어떻게 처리할지**가 생깁니다.
+	## **수를 줄이고 한 마리를 세게 했습니다.**
 	##
-	## 줄인 몫은 적 쪽 `FOE_POWER`(1.45배)가 받습니다.
-	var budget := 3 + state.floor_num
+	##     4 + 층×2   1층 6 · 5층 14      처음
+	##     3 + 층     1층 4 · 5층  9      한 번 줄임
+	##     1 + 층     1층 3 · 5층  7      방을 줄이면서 다시
+	##
+	## 여럿이면 무엇을 하든 밀기 한 번으로 무리를 정리하는 것이 답이라, 적
+	## 종류를 나눠 만든 것이 화면에서 안 보였습니다. 한 마리가 세면 **그 한
+	## 마리를 어떻게 처리할지**가 생깁니다. 줄인 몫은 적 쪽 `FOE_POWER`
+	## (1.45배)가 받습니다.
+	##
+	## 방이 작아진 것과 맞물린 값입니다 - 좁은 방에 예전 수가 그대로 들어가면
+	## 들어서자마자 둘러싸입니다. 아래 `FOE_ROOM_TILES` 가 그 관계를 코드로
+	## 붙들어 둡니다.
+	var budget := 1 + state.floor_num
 	var rooms_available: Array[int] = []
 	for i in range(1, dungeon.rooms.size()):
 		if i != shop_room:
@@ -849,6 +879,14 @@ func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 		# 출구 방은 마지막 관문이라 조금 더 둡니다.
 		if room == exit_room:
 			n += 1
+		# **방 크기가 상한을 정합니다.**
+		#
+		# 이 한 줄이 "방을 줄이면 적도 준다" 를 코드로 만듭니다. 숫자를 따로
+		# 적어 두면 나중에 방 크기를 다시 손볼 때 한쪽만 바뀌고, 좁아진 방에
+		# 예전 수가 그대로 들어가 서로 겹쳐 섭니다.
+		#
+		# 한 마리에 FOE_ROOM_TILES 칸. 지금 방(30~72칸)이면 1~3마리입니다.
+		n = mini(n, maxi(1, _room_tiles(room) / FOE_ROOM_TILES))
 		for _i in range(n):
 			var kind: String = pool[rng.randi_range(0, pool.size() - 1)]
 			var e := Enemy.new()
@@ -860,6 +898,14 @@ func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 			placed += 1
 		if placed >= budget:
 			break
+
+
+func _room_tiles(room: int) -> int:
+	## 방의 칸 수. 적을 몇 마리까지 둘지 정하는 데 씁니다.
+	if room < 0 or room >= dungeon.rooms.size():
+		return 0
+	var r: Rect2i = dungeon.rooms[room]
+	return r.size.x * r.size.y
 
 
 func _kind_pool() -> Array:
@@ -1762,12 +1808,13 @@ func _drive_pose() -> void:
 				state._recompute()
 			if _frames == 30:
 				player.shout_press()
-			if _frames == 30 + (4 if _probe_arg == "tap" else 70):
+			if _frames == 30 + (3 if _probe_arg == "tap" else (52 if _probe_arg == "sync" else 62)):
+				var before := state.breath
 				player.shout_release()
-				print("[모으기] %s  모은 정도 %.2f  사거리 %.2f  각도 %.0f도" % [
+				print("[모으기] %s  모은 %.2f  사거리 %.2f  각도 %.0f도  숨 %.0f -> %.0f" % [
 					("살짝 눌렀다 뗌" if _probe_arg == "tap" else "끝까지 누름"),
 					player._shout_fired, player.shout_reach(player._shout_fired),
-					player.shout_arc(player._shout_fired)])
+					player.shout_arc(player._shout_fired), before, state.breath])
 			if _frames == 130 and is_instance_valid(_probe_foe):
 				print("[모으기] 4.8m 앞의 적 체력 %.0f / %.0f  (맞음=%s)" % [
 					_probe_foe.hp, _probe_foe.max_hp,
@@ -2259,6 +2306,16 @@ func _drive_pose() -> void:
 					str(player.global_position.round()), phase,
 					str(_shelf_at.was_read) if is_instance_valid(_shelf_at) else "?"])
 		"testroom":
+			if _frames == 40:
+				print("[테스트방] 물놀이터=%s 물물교환=%s 사탕=%d" % [
+					str(_waterpark != null and is_instance_valid(_waterpark)),
+					str(shop != null and is_instance_valid(shop)), state.gold])
+				if _waterpark != null and is_instance_valid(player):
+					player.global_position = _waterpark.global_position + Vector3(-1.6, 0, 0)
+			if _frames == 46:
+				print("[테스트방] 물놀이 전 체력 %.0f 사탕 %d" % [state.hp, state.gold])
+				try_interact()
+				print("[테스트방] 물놀이 후 체력 %.0f 사탕 %d" % [state.hp, state.gold])
 			# 테스트 방 확인용. 방을 열고 붙잡는 아기를 계속 내보냅니다.
 			# **제목 화면을 실제로 띄운 뒤** 테스트 방으로 들어갑니다.
 			# 자동 시작으로 들어오면 제목이 애초에 없어서, 닫히는지를

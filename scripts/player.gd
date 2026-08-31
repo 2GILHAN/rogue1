@@ -1558,17 +1558,23 @@ func shout_release() -> void:
 ## 최대입니다. 귀와 눈이 같은 것을 말하므로 언제까지 눌러야 하는지를 따로
 ## 배울 필요가 없습니다.
 ##
-## 값을 안 받는 이유: 모으는 **시간 자체가 값**입니다. 그동안 서 있어야 하고,
-## 적은 그 사이에 다가옵니다. 숨까지 더 받으면 최대로 지르는 일이 두 번
-## 비싸집니다.
+## **숨도 모은 만큼 듭니다.** 처음에는 값을 안 받았는데, 시작을 점만 하게
+## 줄이면서 바꿨습니다 - 거의 안 닿는 고함에 온 숨을 내면 살짝 누르는 일이
+## 그냥 낭비가 되고, 그러면 "짧게 지를 수도 있다" 는 선택이 사라집니다.
+## 최소에서 30%, 최대에서 100% 입니다.
 const SHOUT_CHARGE_TIME := Sfx.SHOUT_LEN
+const SHOUT_COST_MIN := 0.30
 ## 살짝 눌렀을 때의 몫. 0 이면 스쳐 누른 것이 헛손질이 되어, 눌렀는데 아무 일도
 ## 안 일어난 것처럼 보입니다.
-const SHOUT_CHARGE_MIN := 0.22
+const SHOUT_CHARGE_MIN := 0.05
 ## 최소일 때와 최대일 때의 사거리 배수.
-const SHOUT_REACH_MIN := 0.55
-## 최소일 때와 최대일 때의 각도(도).
-const SHOUT_ARC_MIN := 62.0
+##
+## **0.55 에서 0.14 로 내렸습니다.** 시작이 이미 절반이면 모으는 일이 "조금 더
+## 넓어진다" 밖에 안 됩니다 - 거의 발밑의 점에서 자라야 커지는 것이 보입니다.
+const SHOUT_REACH_MIN := 0.14
+## 최소일 때와 최대일 때의 각도(도). 시작을 좁혀야 부채꼴이 **벌어지는** 것이
+## 보입니다.
+const SHOUT_ARC_MIN := 30.0
 const SHOUT_ARC_MAX := 132.0
 
 
@@ -2692,7 +2698,9 @@ func _begin_shout() -> bool:
 		return false
 	# **숨은 여기서 확인만** 하고 뺏지 않습니다. 모으다 그만두는 일이 값을
 	# 치르는 일이 되면, 잘못 눌렀을 때 손해가 두 번입니다.
-	if not _has_breath(breath_cost("shout", BREATH_SHOUT)):
+	# 살짝 지르는 것도 못 할 만큼 숨이 없을 때만 막습니다. 실제로 빼는 것은
+	# 지를 때이고, 그때 **모은 만큼** 냅니다.
+	if not _has_breath(breath_cost("shout", BREATH_SHOUT) * SHOUT_COST_MIN):
 		_out_of_breath()
 		return false
 	_shout_charge = 0.0
@@ -2767,7 +2775,8 @@ func _try_attack() -> void:
 	# 서로 덮어써서 팔이 두 곳을 동시에 가리키게 됩니다.
 	if _splash_time > 0.0 or _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
-	var shout_cost := breath_cost("shout", BREATH_SHOUT)
+	# **모은 만큼 냅니다.** 살짝 지른 것은 30%, 끝까지 모은 것은 100% 입니다.
+	var shout_cost := breath_cost("shout", BREATH_SHOUT) 		* lerpf(SHOUT_COST_MIN, 1.0, clampf(_shout_fired, 0.0, 1.0))
 	if not _has_breath(shout_cost):
 		_out_of_breath()
 		return
