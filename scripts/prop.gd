@@ -51,6 +51,9 @@ const PUSH_SPEED := 6.5
 ## 수평 속도가 2~8 로 내려왔는데(예전에는 9 고정), 감쇠까지 걸려서 날아가는
 ## 도중에 문턱 아래로 떨어졌습니다. 던져서 맞히면 아파야 합니다.
 const HURT_SPEED := 1.2
+## 다 쓴 자동차가 연기를 뿜는 주기(초). 잦으면 불난 것으로 보이고, 뜸하면
+## 무엇이 달라졌는지 모릅니다.
+const SMOKE_EVERY := 0.55
 
 ## 소품마다 성격이 다릅니다. 무거운 것은 못 들고 밀기만 합니다.
 ##
@@ -171,6 +174,12 @@ const KINDS := {
 var kind := "daycare_toybox"
 var stats := {}
 var held_by: Node3D = null
+## **한 번 타고 나면 다시 못 탑니다**(자동차). 연기를 내며 서 있습니다.
+##
+## 다시 탈 수 있으면 방 하나가 무한한 무적 시간이 됩니다 - 타고 내려서 다시
+## 타면 되니까요. 한 번뿐이라야 "언제 쓸까" 가 생깁니다.
+var spent := false
+var _smoke := 0.0
 
 var _damage := 0.0
 var _hit: Dictionary = {}
@@ -363,9 +372,15 @@ func _spawn_puff() -> void:
 
 
 func _add_water(box: Vector3) -> void:
-	## 얇은 원판 하나입니다. 물을 흉내 내는 데 셰이더까지 쓰지 않는 이유는
-	## 폰 때문입니다 - 이 게임은 웹으로 폰에서 돌고, 투명한 면 하나가 가장
-	## 싸게 "물이 들었다" 를 만듭니다.
+	## 얇은 원판 하나에 **물결 셰이더**를 씌웁니다.
+	##
+	## 처음에는 반투명 파란 판이었습니다. "물이 들었다" 는 됐지만 가만히 있는
+	## 색면이라, 화면이 멈추면 그냥 칠해 놓은 바닥으로 보였습니다 - 물은 색이
+	## 아니라 **움직임**으로 알아봅니다.
+	##
+	## 정점은 안 흔듭니다. 63도로 내려다보는 카메라에서는 수면의 높낮이가
+	## 실루엣에 거의 안 나타나는데, 흔들려면 원판을 수백 조각으로 쪼개야
+	## 합니다 - 폰에서 그 값을 내고 얻는 것이 없습니다.
 	var disc := CylinderMesh.new()
 	var radius: float = minf(box.x, box.z) * 0.5 * WATER_INSET
 	disc.top_radius = radius
@@ -373,15 +388,8 @@ func _add_water(box: Vector3) -> void:
 	disc.height = 0.02
 	disc.radial_segments = 24
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.35, 0.72, 0.95, 0.62)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.roughness = 0.12
-	mat.metallic = 0.0
-	# 물은 스스로 조금 밝습니다. 안 그러면 그늘에서 그냥 회색 판이 됩니다.
-	mat.emission_enabled = true
-	mat.emission = Color(0.30, 0.66, 0.90)
-	mat.emission_energy_multiplier = 0.25
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://assets/shaders/water.gdshader")
 
 	_water = MeshInstance3D.new()
 	_water.mesh = disc
@@ -716,7 +724,30 @@ func _lure_active() -> bool:
 	return true
 
 
+func mark_spent() -> void:
+	## 다 쓴 자동차. 연기를 내기 시작합니다.
+	spent = true
+	# 앞머리를 살짝 기울여 세워 둡니다. 연기만으로는 지나가다 못 알아봅니다 -
+	# 멀쩡히 서 있는 것과 모양이 달라야 합니다.
+	rotation.x = deg_to_rad(-7.0)
+	Fx.burst(get_parent(), global_position + Vector3(0, 0.5, 0),
+		Color(0.62, 0.62, 0.66), 14, 2.4)
+
+
+func _drive_smoke(delta: float) -> void:
+	## 다 쓴 자동차가 연기를 냅니다. 파티클 대신 조각을 띄엄띄엄 띄웁니다 -
+	## 층마다 두 대뿐이라 값이 문제가 되지 않고, 이미 있는 길을 씁니다.
+	_smoke -= delta
+	if _smoke > 0.0:
+		return
+	_smoke = SMOKE_EVERY
+	Fx.burst(get_parent(), global_position + Vector3(0, 0.55, 0),
+		Color(0.60, 0.60, 0.64), 4, 1.2)
+
+
 func _process(delta: float) -> void:
+	if spent:
+		_drive_smoke(delta)
 	if _lure_text != "":
 		## 숨 쉬듯 밝아졌다 어두워집니다. 깜빡이면 경고로 읽히고, 가만히
 		## 있으면 배경으로 읽힙니다 - 느리게 오르내려야 "부르는" 것이 됩니다.

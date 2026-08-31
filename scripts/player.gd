@@ -205,6 +205,16 @@ const JOY_REACH := 1.15
 const JOY_TURN_EVERY := 0.62
 ## 부딪힌 적을 밀어내는 힘.
 const JOY_KNOCK := 7.0
+## 조작이 방향을 끌어당기는 세기(초당).
+##
+## 1.1 로 두었더니 **아무 소용이 없었습니다** - 0.62초마다 ±2 라디안씩 제멋대로
+## 꺾는 힘이 훨씬 세서, 밀고 있는 쪽의 반대로 가는 일이 잦았습니다. 끌어당기는
+## 힘을 3.5 로 올리고, 무엇보다 **꺾는 기준을 밀고 있는 쪽으로** 바꿨습니다.
+##
+## 그래도 조종은 안 됩니다. 흔들리는 폭이 ±0.9 라디안(±52도)이라 원하는 곳에
+## 딱 가지는 못하고, 밀어붙이면 대충 그쪽으로 향합니다 - 모는 것이 아니라
+## **떼를 쓰는** 정도입니다.
+const JOY_STEER := 3.5
 ## 클립 재생 배속. test3 의 걷기 사이클은 32프레임/24fps 라 한 걸음에 1.3초로,
 ## 초당 6.5m 로 달리는 캐릭터에 붙이면 미끄러지듯 보입니다.
 ## 클립이 **1배속에서 바닥을 미는 속도**(m/s). 재생 속도를 여기에 맞추면
@@ -2738,6 +2748,18 @@ func _drive_shout_charge(delta: float) -> void:
 	if _shout_charge < 0.0:
 		return
 	_shout_charge = minf(1.0, _shout_charge + delta / SHOUT_CHARGE_TIME)
+	# **다 모이면 손을 떼지 않아도 나갑니다.**
+	#
+	# 소리가 끝나는 순간이 최대이므로, 그 뒤로는 눌러 봐야 아무것도 안
+	# 늘어납니다. 그런데 부채꼴은 계속 떠 있었습니다 - 손가락을 붙이고 있는
+	# 동안 "아직 모으는 중" 이라는 거짓말을 하는 셈이고, 소리는 이미 끝나
+	# 귀와도 어긋납니다.
+	#
+	# 뗄 때 오는 신호는 그냥 흘러갑니다(`_release_shout` 가 모으는 중이
+	# 아니면 아무것도 안 합니다).
+	if _shout_charge >= 1.0:
+		_release_shout()
+		return
 	# 느려지는 것은 `_swing_move_scale` 이 맡습니다(평소의 0.2배).
 	_shout_preview()
 
@@ -2871,9 +2893,14 @@ func _drive_splash(delta: float) -> void:
 
 func begin_joyride(car: Prop) -> bool:
 	## 자동차에 올라탑니다. 이미 타고 있거나 다른 일을 하는 중이면 안 탑니다.
-	if _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
+	# **물장난 중에는 못 탑니다.**
+	#
+	# 빠져 있어서 물놀이 도중에도 탈 수 있었는데, 그러면 물장난 갈래가 먼저라
+	# (`_physics_process` 의 elif) 자동차 시계가 멈춘 채로 남습니다 - 재 보니
+	# 2.23초 동안 0.75초밖에 안 줄었습니다.
+	if _splash_time > 0.0 or _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
 		return false
-	if car == null or not is_instance_valid(car):
+	if car == null or not is_instance_valid(car) or car.spent:
 		return false
 	if _held != null:
 		# 두 손이 차 있으면 못 탑니다. 들고 있던 것은 놓습니다.
@@ -2906,11 +2933,32 @@ func _drive_joyride(delta: float) -> void:
 	_joy_time -= delta
 	_invuln = maxf(_invuln, 0.12)
 	_joy_turn -= delta
+	var wish := _move_input()
+	var steering := wish.length_squared() > 0.04
 	if _joy_turn <= 0.0:
 		_joy_turn = JOY_TURN_EVERY
-		# 지금 가던 쪽에서 크게 꺾습니다. 완전히 무작위로 뽑으면 제자리에서
-		# 갈팡질팡하고, 조금만 꺾으면 직선으로만 갑니다.
-		_joy_dir = _joy_dir.rotated(Vector3.UP, rng.randf_range(-2.0, 2.0)).normalized()
+		if steering:
+			# **밀고 있으면 그쪽을 중심으로** 흔들립니다. 가던 쪽에서 아무렇게나
+			# 꺾으면 조작이 아무리 세도 0.62초마다 무위로 돌아갑니다 - 실제로
+			# 재 보니 밀고 있는 쪽의 반대로 가고 있었습니다.
+			var base := Vector3(wish.x, 0.0, wish.y).normalized()
+			_joy_dir = base.rotated(Vector3.UP, rng.randf_range(-0.9, 0.9))
+		else:
+			# 손을 놓고 있으면 제멋대로. 완전히 무작위로 뽑으면 제자리에서
+			# 갈팡질팡하고, 조금만 꺾으면 직선으로만 갑니다.
+			_joy_dir = _joy_dir.rotated(Vector3.UP, rng.randf_range(-2.0, 2.0)).normalized()
+	# **조작이 조금은 먹습니다.**
+	#
+	# 처음에는 아예 안 먹게 뒀습니다 - 조종되면 그냥 "빨라지고 무적인 상태" 라
+	# 다른 기술이 다 쓸모없어지니까요. 그런데 아무것도 안 먹으면 타는 순간부터
+	# 3.4초 동안 **화면을 구경하는 시간**이 됩니다.
+	#
+	# 가려는 쪽으로 조금씩 끌어당깁니다. 스스로 꺾는 힘이 훨씬 세서 원하는
+	# 곳에 딱 가지는 못하지만, 밀어붙이면 대충 그쪽으로 향합니다 - 모는 것이
+	# 아니라 **떼를 쓰는** 정도입니다.
+	if steering:
+		var want := Vector3(wish.x, 0.0, wish.y).normalized()
+		_joy_dir = _joy_dir.lerp(want, minf(1.0, JOY_STEER * delta)).normalized()
 	# 벽에 닿았으면 튕깁니다. 벽을 밀고 있으면 제자리에서 부르릉거립니다.
 	if is_on_wall():
 		var n := get_wall_normal()
@@ -2963,6 +3011,9 @@ func _end_joyride() -> void:
 		_joy_car.held_by = null
 		_joy_car.freeze = false
 		_joy_car.set_solid(true)
+		# **한 번 타면 끝입니다.** 다시 탈 수 있으면 방 하나가 무한한 무적
+		# 시간이 됩니다 - 내렸다 다시 타면 되니까요.
+		_joy_car.mark_spent()
 		_joy_car.global_position = global_position + aim * -1.1 + Vector3(0, 0.3, 0)
 	_joy_car = null
 	velocity.x *= 0.3

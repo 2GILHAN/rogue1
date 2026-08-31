@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.23.2"
+const VERSION := "v0.24"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -39,6 +39,13 @@ const FINAL_FLOOR := 5
 ## 보이는 범위가 절반이 되는 것은 피할 수 없습니다. 적의 인지 거리(17m)가
 ## 화면 밖이라, 안 보이는 곳에서 오는 적은 미니맵으로 알아야 합니다.
 const CAM_OFFSET := Vector3(0, 5.56, 2.83)
+## 카메라가 캐릭터보다 얼마나 **앞을 보는가**(m).
+##
+## 이만큼 앞(-Z)을 가운데에 두므로 캐릭터는 그만큼 화면 아래로 내려옵니다.
+## 값은 화면에서 재서 골랐습니다 - 아래 `--pose=frame` 이 캐릭터가 화면
+## 세로의 몇 %에 있는지 찍습니다. 0.5 가 한가운데이고 0.60 쯤이 "조금 아래"
+## 입니다.
+const CAM_LOOK_AHEAD := 1.15
 const CAM_PITCH := -63.0
 ## 옵션으로 움직일 수 있는 폭. 40도보다 눕히면 벽 윗면이 화면 절반을 덮고,
 ## 78도를 넘으면 캐릭터 정수리만 보입니다.
@@ -110,9 +117,12 @@ var _hp_at_windup := 0.0
 ## 물에 잠기지도, 따로 떨어져 보이지도 않는 자리입니다.
 ## 풀장 한가운데에서 물물교환하는 아이까지의 거리(m).
 ##
-## 풀장이 지름 3.7m(반지름 1.85)라 2.9 면 물가 바깥 한 걸음입니다 - 물에
-## 잠기지도, 다른 방 물건처럼 떨어져 보이지도 않습니다.
-const SHOP_GAP := 2.9
+## 풀장이 지름 3.69m(반지름 1.84)이고 테두리 높이가 1.20m 입니다. **1.68 이
+## 테두리 한가운데**라, 거기 걸터앉으면 다리가 물 쪽으로 늘어집니다.
+##
+## 물 안(1.25)에 앉히려던 것을 물렸습니다 - 테두리가 아이 키와 거의 같아서
+## 무엇을 해도 가립니다.
+const SHOP_GAP := 1.68
 ## 적 한 마리에 필요한 방 칸 수. 방이 줄면 적도 이 값으로 같이 줄어듭니다.
 const FOE_ROOM_TILES := 26
 ## 테스트 방에서 물놀이터를 놓는 자리(방 한가운데에서 몇 m 떨어져서).
@@ -752,7 +762,7 @@ func build_floor() -> void:
 		_place_waterpark(corner)
 		shop = Shopkeeper.new()
 		world.add_child(shop)
-		shop.global_position = corner + Vector3(SHOP_GAP, 0.0, 0.0)
+		shop.global_position = corner + Vector3(0.0, 0.0, -SHOP_GAP)
 		_waterpark_used = false
 		# 사탕이 없으면 물놀이터가 "사탕이 모자랍니다" 만 말합니다. 실험하는
 		# 자리에서는 값이 아니라 **일어나는 일**을 봐야 합니다.
@@ -795,12 +805,18 @@ func build_floor() -> void:
 		shop_room = rng.randi_range(1, dungeon.rooms.size() - 2)
 		var heart: Vector3 = dungeon.room_center(shop_room)
 		_place_waterpark(heart)
-		# **물물교환하는 아이**를 풀장 곁에 세웁니다. 같은 방에 두는 이유:
-		# 사탕을 쓰는 곳이 둘(교환·물놀이)인데 방이 갈리면 "어느 쪽에 쓸까" 가
-		# 한 화면에서 안 보입니다. 나란히 있어야 그게 선택이 됩니다.
+		# **물물교환하는 아이는 풀장 안에 앉습니다.**
+		#
+		# 자리는 **화면에서 먼 쪽**입니다. 카메라가 +Z 쪽에서 내려다보므로
+		# -Z 가 먼 쪽 물가이고, 거기 기대앉으면 얼굴이 이쪽을 봅니다 - 가까운
+		# 쪽에 앉히면 등만 보입니다.
+		#
+		# 같은 방(같은 물)에 두는 이유: 사탕을 쓰는 곳이 둘(교환·물놀이)인데
+		# 갈라 두면 "어느 쪽에 쓸까" 가 한 화면에서 안 보입니다. 물가에 서면
+		# 물놀이, 그 아이 앞까지 돌아가면 교환입니다(`Shopkeeper.RANGE`).
 		shop = Shopkeeper.new()
 		world.add_child(shop)
-		shop.global_position = heart + Vector3(SHOP_GAP, 0.0, 0.0)
+		shop.global_position = heart + Vector3(0.0, 0.0, -SHOP_GAP)
 
 	_spawn_enemies(exit_room, shop_room)
 	_place_teacher(exit_room)
@@ -1793,6 +1809,137 @@ func _drive_pose() -> void:
 						str(_probe_foe._die_when_landed)])
 			elif _frames % 30 == 0:
 				print("[좀비] f=%d 적이 죽어 사라졌습니다" % _frames)
+		"framing":
+			# 캐릭터가 화면 세로의 몇 %에 있는지 잽니다. 0.5 가 한가운데.
+			if _frames % 40 == 0 and _frames > 60 and is_instance_valid(player):
+				var vp := get_viewport().get_visible_rect().size
+				var feet := camera.unproject_position(player.global_position)
+				var head := camera.unproject_position(
+					player.global_position + Vector3(0, 1.25, 0))
+				print("[화면] 발 %.2f  머리 %.2f  (0.5=한가운데, 클수록 아래)" % [
+					feet.y / vp.y, head.y / vp.y])
+		"lane":
+			# **서진의 돌진 예고**를 보는 자리. 사거리 안에 세워 두면 알아서
+			# 겨누기 시작합니다.
+			if _frames == 10 and is_instance_valid(player):
+				player.bot_active = false
+				debug_aim = Vector3(0, 0, -1)
+				var foe := Enemy.new()
+				world.add_child(foe)
+				# **서진은 `grunt`** 입니다(brute 는 소품을 던지는 큰 아이).
+				foe.setup("grunt", 3, dungeon, player)
+				foe.global_position = player.global_position + Vector3(0, 0, -4.0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+				_alive += 1
+			if _frames % 30 == 0 and _frames > 20 and is_instance_valid(_probe_foe):
+				print("[돌진선] f=%d 예고 %.2f 거리 %.1f 띠보임=%s 폭 %.2fm 길이 %.1fm" % [
+					_frames, _probe_foe._windup,
+					_probe_foe.global_position.distance_to(player.global_position),
+					str(_probe_foe._lane != null and _probe_foe._lane.visible),
+					_probe_foe.charge_width(),
+					float(_probe_foe.stats["charge_dist"])])
+		"charge":
+			# **고함을 모으는 것**을 잽니다. 살짝 눌렀다 뗀 것과 끝까지
+			# 누른 것의 부채꼴이 실제로 다른지 봅니다.
+			if _frames == 20 and is_instance_valid(player):
+				debug_aim = Vector3(1, 0, 0)
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				# **최소 사거리 밖, 최대 사거리 안**에 세웁니다(3.7 < 4.8 < 5.7).
+				foe.global_position = player.global_position + Vector3(4.8, 0, 0)
+				_probe_foe = foe
+				state.skill_lv["shout"] = 3
+				state._recompute()
+			if _frames == 30:
+				player.shout_press()
+			if _frames in [34, 50, 70] and is_instance_valid(player):
+				player.bot_active = true
+				player.bot_move = Vector2(1, 0)
+			if _frames in [36, 52, 72]:
+				print("[모으는중] f=%d 모은 %.2f 속도 %.2f (평소 %.2f) 팔뒤=%.2f" % [
+					_frames, player._shout_charge,
+					Vector2(player.velocity.x, player.velocity.z).length(),
+					state.move_speed, player._pose.weight])
+			if _probe_arg == "keep":
+				# **계속 누르고 있습니다.** 떼지 않아도 나가야 맞습니다.
+				if _frames % 6 == 0 and _frames > 30 and _frames < 140:
+					print("[계속누름] f=%d 모으는중=%s 미리보기=%s" % [
+						_frames, str(player._shout_charge >= 0.0),
+						str(player._shout_prev != null and is_instance_valid(player._shout_prev))])
+			elif _frames == 30 + (3 if _probe_arg == "tap" else (52 if _probe_arg == "sync" else 62)):
+				var before := state.breath
+				player.shout_release()
+				print("[모으기] %s  모은 %.2f  사거리 %.2f  각도 %.0f도  숨 %.0f -> %.0f" % [
+					("살짝 눌렀다 뗌" if _probe_arg == "tap" else "끝까지 누름"),
+					player._shout_fired, player.shout_reach(player._shout_fired),
+					player.shout_arc(player._shout_fired), before, state.breath])
+			if _frames == 130 and is_instance_valid(_probe_foe):
+				print("[모으기] 4.8m 앞의 적 체력 %.0f / %.0f  (맞음=%s)" % [
+					_probe_foe.hp, _probe_foe.max_hp,
+					str(_probe_foe.hp < _probe_foe.max_hp)])
+		"dodge":
+			# **굴러 피하기가 되는지** 잽니다.
+			#
+			# 적을 눈앞에 세워 두고 공격을 시켜, 예고 도중에 옆으로 비켜
+			# 섰을 때와 가만히 서 있을 때의 체력을 견줍니다. 예고 방향이
+			# 굳어 있으면 옆으로 반 발만 나가도 빗나가야 합니다.
+			if _frames == 10 and is_instance_valid(player):
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.global_position = player.global_position + Vector3(1.2, 0, 0)
+				_probe_foe = foe
+				debug_aim = Vector3(1, 0, 0)
+				state.hp = 500.0
+				state.max_hp = 500.0
+			if _frames > 20 and _frames % 2 == 0 and is_instance_valid(_probe_foe):
+				# 예고가 시작되면 **옆으로** 비켜섭니다(_side=dodge 일 때만).
+				if _probe_foe._windup > 0.0 and _probe_arg == "dodge" and not _dodged:
+					_dodged = true
+					_hp_at_windup = state.hp
+					player.global_position += Vector3(0, 0, 1.3)
+				elif _probe_foe._windup > 0.0 and _probe_arg != "dodge" and not _dodged:
+					_dodged = true
+					_hp_at_windup = state.hp
+			if _frames == 240:
+				print("[회피] %s  예고 때 %.0f -> 지금 %.0f  (맞음=%s)" % [
+					("옆으로 굴러 나감" if _probe_arg == "dodge" else "가만히 서 있음"),
+					_hp_at_windup, state.hp, str(state.hp < _hp_at_windup)])
+		"zombie":
+			# **밀어도 안 죽는 적**을 재현합니다.
+			#
+			# 체력을 1 로 깎아 두고 계속 밉니다. 규칙대로면 첫 밀기에서
+			# 밀려난 뒤 쓰러져야 합니다.
+			player.bot_active = true
+			player.bot_move = Vector2.ZERO
+			if _probe_foe == null and _frames > 12:
+				_probe_foe = Enemy.new()
+				world.add_child(_probe_foe)
+				_probe_foe.setup("grunt", 1, dungeon, player)
+				var fwd := -player.pivot.global_transform.basis.z
+				_probe_foe.global_position = player.global_position + fwd.normalized() * 1.3
+				_probe_foe.died.connect(_on_enemy_died)
+				Toon.refresh(_probe_foe)
+				_alive += 1
+			if is_instance_valid(_probe_foe):
+				var to: Vector3 = _probe_foe.global_position - player.global_position
+				to.y = 0.0
+				if to.length() > 0.05:
+					player.aim = to.normalized()
+				if _frames == 40:
+					_probe_foe.hp = 1.0
+				# 0.95초(대기)마다 한 번씩 밉니다.
+				if _frames >= 45 and (_frames - 45) % 58 == 0:
+					player.grab_press()
+				if _frames % 30 == 0 and _frames > 45:
+					print("[좀비] f=%d 체력=%.1f 죽음=%s 밀림=%.4f 휘청=%.2f 보류=%s" % [
+						_frames, _probe_foe.hp, str(_probe_foe._dead),
+						_probe_foe._knock, _probe_foe._stagger,
+						str(_probe_foe._die_when_landed)])
+			elif _frames % 30 == 0:
+				print("[좀비] f=%d 적이 죽어 사라졌습니다" % _frames)
 		"lane":
 			# **서진의 돌진 예고**를 보는 자리. 사거리 안에 세워 두면 알아서
 			# 겨누기 시작합니다.
@@ -1901,24 +2048,89 @@ func _drive_pose() -> void:
 					str(_waterpark != null),
 					len(get_tree().get_nodes_in_group("props").filter(
 						func(n: Node) -> bool: return (n as Prop).kind == "ridecar"))])
+			if _frames == 20 and _waterpark != null and is_instance_valid(player):
+				# 물놀이터를 화면에 담습니다 - 카메라는 주인공을 따라갑니다.
+				player.global_position = _waterpark.global_position + Vector3(0, 0, 1.0)
 			if _frames == 40 and _waterpark != null and is_instance_valid(player):
 				# 물놀이터로 걸어가 씁니다.
 				player.global_position = _waterpark.global_position + Vector3(-1.6, 0, 0)
 				state.hp = 20.0
 				state.breath = 5.0
 				state.gold = 200
+			if _frames == 30 and shop != null and is_instance_valid(shop):
+				var boxes := []
+				for n in [shop, player]:
+					var lo := Vector3.INF
+					var hi := -Vector3.INF
+					var stack: Array = [n]
+					while not stack.is_empty():
+						var cur: Node = stack.pop_back()
+						if cur is VisualInstance3D:
+							var ab: AABB = (cur as VisualInstance3D).global_transform * (cur as VisualInstance3D).get_aabb()
+							lo = lo.min(ab.position); hi = hi.max(ab.position + ab.size)
+						stack.append_array(cur.get_children())
+					boxes.append([lo, hi])
+				print("[아이] 교환아이 키 %.2f (바닥 %.2f~%.2f)  주인공 키 %.2f" % [
+					boxes[0][1].y - boxes[0][0].y, boxes[0][0].y, boxes[0][1].y,
+					boxes[1][1].y - boxes[1][0].y])
+			if _frames == 26 and _waterpark != null:
+				var lo := Vector3.INF
+				var hi := -Vector3.INF
+				var stack: Array = [_waterpark]
+				while not stack.is_empty():
+					var cur: Node = stack.pop_back()
+					if cur is VisualInstance3D:
+						var ab: AABB = (cur as VisualInstance3D).global_transform * (cur as VisualInstance3D).get_aabb()
+						lo = lo.min(ab.position); hi = hi.max(ab.position + ab.size)
+					stack.append_array(cur.get_children())
+				print("[풀장] 테두리 높이 %.2f  지름 %.2f x %.2f  바닥 %.2f" % [
+					hi.y - _waterpark.global_position.y, hi.x - lo.x, hi.z - lo.z,
+					lo.y - _waterpark.global_position.y])
+			if _frames == 34 and shop != null and is_instance_valid(shop):
+				var sk: Skeleton3D = Models.find_skeleton(shop)
+				var head := sk.find_bone("Head") if sk != null else -1
+				var foot := sk.find_bone("LeftFoot") if sk != null else -1
+				var hy := 0.0
+				var fy := 0.0
+				if head >= 0:
+					hy = (sk.global_transform * sk.get_bone_global_pose(head)).origin.y
+				if foot >= 0:
+					fy = (sk.global_transform * sk.get_bone_global_pose(foot)).origin.y
+				print("[앉음] 자리 z=%.2f(풀 기준 %.2f)  머리 %.2fm  발 %.2fm  물 위 %s" % [
+					shop.global_position.z, shop.global_position.z - _waterpark.global_position.z,
+					hy, fy, str(fy > 0.2)])
+				print("[앉음] 무릎 %.0f도  얼굴 방향 yaw %.0f도 (180 이면 화면 쪽)" % [
+					shop._pose.pose["LeftLeg"].x,
+					rad_to_deg(shop.get_node("Node3D").rotation.y) if shop.get_node_or_null("Node3D") != null else 999.0])
 			if _frames == 46:
 				print("[균형] 물놀이 전 체력 %.0f 숨 %.0f" % [state.hp, state.breath])
 				try_interact()
 				print("[균형] 물놀이 후 체력 %.0f 숨 %.0f" % [state.hp, state.breath])
-			if _frames == 60 and is_instance_valid(player):
+			if _frames == 170 and is_instance_valid(player):
 				var car := get_tree().get_nodes_in_group("props").filter(
 					func(n: Node) -> bool: return (n as Prop).kind == "ridecar")
 				if not car.is_empty():
 					player.global_position = (car[0] as Node3D).global_position + Vector3(0.8, 0, 0)
-			if _frames == 66:
+			if _frames == 176:
 				print("[균형] 자동차 탐=%s" % str(try_interact()))
-			if _frames == 130:
+			if _frames in [200, 260, 320] and is_instance_valid(player):
+				# 조작이 먹는지: 한쪽으로 계속 밀어 보고 그쪽 성분을 봅니다.
+				player.bot_active = true
+				player.bot_move = Vector2(1, 0)
+			if _frames in [230, 290] and is_instance_valid(player):
+				print("[질주] f=%d 가는쪽 x=%+.2f (밀고 있는 쪽 +x)" % [
+					_frames, player.velocity.normalized().x])
+			if _frames in [290, 370, 385]:
+				print("  [질주상태] f=%d 남은=%.2f 차=%s" % [
+					_frames, player._joy_time,
+					str(player._joy_car != null)])
+			if _frames == 400:
+				var cars := get_tree().get_nodes_in_group("props").filter(
+					func(n: Node) -> bool: return (n as Prop).kind == "ridecar")
+				var used := cars.filter(func(n: Node) -> bool: return (n as Prop).spent)
+				print("[질주] 다 쓴 차 %d/%d 대  다시 탐=%s" % [
+					used.size(), cars.size(), str(_ride_car())])
+			if _frames == 240:
 				print("[균형] 질주 끝난 뒤 무적=%s" % str(player.is_invulnerable()))
 			# ── 고함 피해와 밀기 연쇄 ────────────────────────────────
 			if _frames == 300 and is_instance_valid(player):
@@ -1949,7 +2161,7 @@ func _drive_pose() -> void:
 			if _frames == 352 and is_instance_valid(_probe_foe):
 				print("[균형] 고함 Lv3 뒤 적 체력 %.0f / %.0f  (깎여야 맞음)" % [
 					_probe_foe.hp, _probe_foe.max_hp])
-			if _frames == 380:
+			if _frames == 470:
 				# 문은 적이 다 죽어야 열립니다. 여기서는 **들어간 것으로**
 				# 치고 부릅니다 - 보려는 것은 5층 뒤에 무엇이 오는가입니다.
 				print("[균형] 출구 전 층=%d" % state.floor_num)
@@ -2997,7 +3209,9 @@ func _ride_car() -> bool:
 	var closest := CAR_REACH
 	for node in get_tree().get_nodes_in_group("props"):
 		var prop := node as Prop
-		if prop == null or not is_instance_valid(prop) or prop.kind != "ridecar":
+		# 다 쓴 것은 건너뜁니다. 그래야 그 앞에서 밀기를 눌렀을 때 아무 일도
+		# 안 일어나는 대신 **밀기가 그대로 나갑니다**.
+		if prop == null or not is_instance_valid(prop) or prop.kind != "ridecar" 				or prop.spent:
 			continue
 		var to: Vector3 = prop.global_position - player.global_position
 		to.y = 0.0
@@ -3242,7 +3456,17 @@ func _process(delta: float) -> void:
 	# 다만 줌인한 뒤로는 늦는 정도를 조여야 합니다. 보이는 범위가 절반이 되면
 	# 같은 지연이 화면에서 차지하는 비율은 두 배가 되고, 구르기(13.5m/s) 중에
 	# 캐릭터가 화면 밖으로 밀려났습니다.
+	# **캐릭터를 화면 한가운데보다 조금 아래에 둡니다.**
+	#
+	# 가운데에 두면 발밑에 보이는 것과 앞에 보이는 것이 같은 넓이라, 가는
+	# 쪽이 답답합니다. 카메라가 보는 점을 **앞쪽(-Z)** 으로 옮기면 캐릭터가
+	# 화면에서 그만큼 내려오고, 위쪽에 갈 곳이 더 보입니다.
+	#
+	# 어깨 너머에서는 안 옮깁니다 - 그쪽은 카메라가 거의 수평이라 같은 값이
+	# 하늘을 비춥니다.
 	var want := player.global_position
+	if cam_mode != CamMode.SHOULDER:
+		want.z -= CAM_LOOK_AHEAD
 	cam_rig.global_position = cam_rig.global_position.lerp(want, 1.0 - exp(-17.0 * delta))
 	if cam_mode == CamMode.SHOULDER:
 		_drive_shoulder(delta)
