@@ -675,6 +675,42 @@ static func _all(root: Node) -> Array:
 	return out
 
 
+static func shout_fan(parent: Node3D, at: Vector3, dir: Vector3,
+		radius: float, arc_deg: float) -> void:
+	## 주인공이 지른 **그 순간의 판정 범위**를 바닥에 칠합니다.
+	##
+	## 퍼져 나가는 고리 셋을 걷어낸 자리입니다. 고리는 "소리가 퍼진다" 는
+	## 그림으로는 좋았지만 **어디까지 닿는지**를 못 가르쳤습니다 - 테두리는
+	## 선 위가 위험한 것처럼 읽히고, 셋이 시차를 두고 나가니 어느 고리가
+	## 사거리인지도 알 수 없었습니다. 적의 호통이 이미 칠한 부채꼴을 쓰고
+	## 있어서(enemy.gd), 같은 그림을 같은 뜻으로 쓰면 배울 것이 하나로
+	## 줄어듭니다.
+	##
+	## 크기와 각도를 **판정에서 그대로 받습니다.** 여기서 숫자를 따로 정하면
+	## 사거리를 고쳤을 때 그림만 옛날 값으로 남습니다.
+	if parent == null:
+		return
+	var fan := MeshInstance3D.new()
+	fan.mesh = fan_mesh(radius, arc_deg)
+	var mat := fan_material()
+	mat.albedo_color = Color(1.0, 0.90, 0.55, 0.34)
+	fan.material_override = mat
+	fan.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# 카툰 외곽선이 바닥 판을 두르면 판이 아니라 구멍이 됩니다.
+	fan.set_meta("flat", true)
+	parent.add_child(fan)
+	var flat := Vector3(dir.x, 0.0, dir.z)
+	if flat.length_squared() < 0.0001:
+		flat = Vector3.FORWARD
+	fan.global_position = at + Vector3(0, 0.05, 0)
+	fan.rotation.y = atan2(-flat.x, -flat.z)
+	# 번쩍 떴다 스러집니다. 남아 있으면 다음에 지를 때 겹쳐서, 몇 번을
+	# 질렀는지가 바닥에 쌓입니다.
+	var tw := fan.create_tween()
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.30)
+	tw.tween_callback(fan.queue_free)
+
+
 static func fan_mesh(radius: float, arc_deg: float, steps: int = 20) -> ArrayMesh:
 	## 바닥에 까는 **부채꼴 판**. 공격이 실제로 닿는 범위를 그대로 칠합니다.
 	##

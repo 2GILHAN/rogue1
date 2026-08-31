@@ -190,6 +190,8 @@ var _idle := ""
 
 var _aggro := false
 var _windup := -1.0
+## 맨손 공격을 예고한 방향. **예고가 시작될 때 굳고 끝까지 안 돕니다.**
+var _melee_dir := Vector3.FORWARD
 var _cooldown := 0.0
 var _repath := 0.0
 var _path: PackedVector3Array = PackedVector3Array()
@@ -203,6 +205,10 @@ var _carry: Prop = null
 var _stagger := 0.0
 ## 호통을 시작한 순간의 방향. 예고 중에 이 방향이 따라오면 피할 수가 없습니다.
 var _shout_dir := Vector3.FORWARD
+## 맨손 공격의 판정 범위를 칠하는 바닥 판.
+var _melee_fan: MeshInstance3D = null
+var _melee_fan_mat: StandardMaterial3D = null
+var _melee_flash := 0.0
 ## 호통의 판정 범위를 칠하는 바닥 판. 그 공격을 쓰는 적만 만듭니다.
 var _shout_fan: MeshInstance3D = null
 var _shout_fan_mat: StandardMaterial3D = null
@@ -239,19 +245,33 @@ var _bar_root: Node3D
 var _bar_mat: StandardMaterial3D
 
 
+## 적 하나의 기본 배수. **수를 줄인 만큼 곱합니다.**
+##
+## 한 층의 적이 절반 가까이 줄었으므로(game.gd 의 `_spawn_enemies`), 같은
+## 배수로 곱해 층 전체의 무게를 비슷하게 맞춥니다. 줄이기만 하면 층이
+## 텅 비고, 세게만 하면 처음부터 못 지나갑니다.
+const FOE_POWER := 1.45
+
+
 func setup(enemy_kind: String, floor_num: int, level: Dungeon, player: Node3D) -> void:
 	kind = enemy_kind
 	stats = KINDS.get(kind, KINDS["grunt"])
 	dungeon = level
 	target = player
 
-	# 층당 강화. 체력은 곱으로, 피해는 그보다 완만하게 올립니다. 피해가 빨리
-	# 오르면 실수 한 번에 죽어 배울 기회가 사라집니다.
+	# 층당 강화. **수가 줄어든 만큼 한 마리가 세집니다.**
+	#
+	# 다섯 층이 끝이라(Game.FINAL_FLOOR) 예전 곡선으로는 마지막 층에서도
+	# 1.9 배밖에 안 올랐습니다 - 깊이 갈수록 어려워지는 느낌이 나오지 않고,
+	# 층마다 하나씩 찍는 스킬 쪽이 훨씬 빨리 세집니다.
+	#
+	# 한 마리가 세지면 **한 마리를 어떻게 처리할지**가 생깁니다. 여럿이면
+	# 밀기 한 번에 무리가 정리되는 것이 늘 답이었습니다.
 	var f := float(floor_num - 1)
-	max_hp = float(stats["hp"]) * (1.0 + f * 0.30)
+	max_hp = float(stats["hp"]) * FOE_POWER * (1.0 + f * 0.42)
 	hp = max_hp
-	damage = float(stats["damage"]) * (1.0 + f * 0.16)
-	speed = float(stats["speed"]) * (1.0 + f * 0.02)
+	damage = float(stats["damage"]) * FOE_POWER * (1.0 + f * 0.26)
+	speed = float(stats["speed"]) * (1.0 + f * 0.03)
 	gold = int(round(float(stats["gold"]) * (1.0 + f * 0.18)))
 
 	collision_layer = 1 << 2
@@ -741,6 +761,7 @@ func _physics_process(delta: float) -> void:
 	_drive_ghost_trail(delta)
 	_drive_attack_pose(delta)
 	_drive_shout_fan(delta)
+	_drive_melee_fan(delta)
 	_drive_animation()
 
 
@@ -1007,9 +1028,24 @@ func _begin_attack() -> void:
 			Fx.ring(get_parent(), at, Color(1.0, 0.45, 0.3), 0.85, _windup)
 		return
 
-	var ring_color := Color(0.5, 1.0, 0.5) if mode == "spit" else Color(1.0, 0.4, 0.3)
-	var ring_size: float = 1.4 if mode == "spit" else float(stats["range"]) * 0.9
-	Fx.ring(get_parent(), global_position, ring_color, ring_size, _windup)
+	if mode == "spit":
+		Fx.ring(get_parent(), global_position, Color(0.5, 1.0, 0.5), 1.4, _windup)
+		return
+
+	# ── 맨손 공격. **방향을 고정하고 그 부채꼴을 칠합니다.** ──────────
+	#
+	# 예전에는 예고가 끝나는 순간 **거리만** 봤습니다. 그래서 옆으로 굴러
+	# 나가도 가까이만 있으면 맞았고, 굴러 피한다는 것이 사실은 "멀리 도망친다"
+	# 뿐이었습니다 - 아슬아슬하게 스치는 맛이 나올 자리가 없었습니다.
+	#
+	# 방향을 예고 시작에 굳히고, 끝날 때 **그 부채꼴 안에 있는지**를 봅니다.
+	# 옆으로 반 발만 굴러 나가도 빗나갑니다. 예고 내내 따라오면 그 선택이
+	# 아무 의미가 없으므로, 고정하는 것이 핵심입니다(호통·돌진과 같은 규칙).
+	var to4: Vector3 = (target.global_position - global_position) if is_instance_valid(target) else -_pivot.global_transform.basis.z
+	to4.y = 0.0
+	if to4.length_squared() > 0.001:
+		_melee_dir = to4.normalized()
+	_show_melee_fan()
 
 
 func _tick_windup(delta: float, to_target: Vector3, dist: float) -> void:
@@ -1067,8 +1103,14 @@ func _tick_windup(delta: float, to_target: Vector3, dist: float) -> void:
 	elif mode == "slam":
 		_slam_hit()
 	else:
-		# 예고가 끝난 시점에 아직 사거리 안에 있어야 맞습니다.
-		if dist <= float(stats["range"]) + 0.4:
+		# **예고한 부채꼴 안에 있어야 맞습니다.**
+		#
+		# 거리만 보던 것을 방향까지 보게 바꿨습니다. 예전에는 옆으로 굴러
+		# 나가도 가까이만 있으면 맞아서, 구르기가 "아슬아슬하게 피하는 것" 이
+		# 아니라 "멀리 도망치는 것" 뿐이었습니다. 이제 반 발만 옆으로 빠져도
+		# 빗나갑니다 - 칠해 둔 부채꼴이 그대로 답입니다.
+		_melee_flash = FAN_FLASH
+		if _melee_in_fan(dist):
 			_strike()
 		Fx.burst(get_parent(), global_position + to_target.normalized() * 1.2
 			+ Vector3(0, 0.7, 0), Color(1.0, 0.6, 0.35), 8, 3.0)
@@ -1102,6 +1144,52 @@ func _shout(to_target: Vector3, dist: float) -> void:
 
 ## 때린 뒤 빨간 판이 남는 시간.
 const FAN_FLASH := 0.26
+
+
+## 맨손 공격이 닿는 각도. 호통(78도)보다 좁습니다 - 팔로 치는 것이라
+## 넓으면 옆으로 굴러 나가도 안 빠집니다.
+const MELEE_ARC := 96.0
+
+
+func _show_melee_fan() -> void:
+	## 맨손 공격의 판정 범위를 바닥에 칠합니다. **판정과 같은 값**입니다 -
+	## `_melee_hits` 가 이 사거리와 각도를 그대로 다시 씁니다.
+	if _melee_fan == null:
+		_melee_fan_mat = Fx.fan_material()
+		_melee_fan = MeshInstance3D.new()
+		_melee_fan.name = "MeleeFan"
+		_melee_fan.mesh = Fx.fan_mesh(float(stats["range"]) + 0.4, MELEE_ARC)
+		_melee_fan.material_override = _melee_fan_mat
+		_melee_fan.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_melee_fan.set_meta("flat", true)
+		_melee_fan.position = Vector3(0, 0.04, 0)
+		# `_pivot` 이 아니라 적 노드에 답니다 - 몸통은 계속 도는데 예고
+		# 방향은 굳어 있어야 합니다(호통 부채꼴과 같은 사정).
+		add_child(_melee_fan)
+	_melee_fan.rotation.y = atan2(-_melee_dir.x, -_melee_dir.z)
+	_melee_fan.visible = true
+	_melee_flash = 0.0
+
+
+func _drive_melee_fan(delta: float) -> void:
+	## 호통 부채꼴과 같은 규칙입니다 - 예고 동안 붉어지고, 때리는 순간
+	## 새빨개졌다 사라집니다.
+	if _melee_fan == null or _melee_fan_mat == null:
+		return
+	if _melee_flash > 0.0:
+		_melee_flash -= delta
+		var k := clampf(_melee_flash / FAN_FLASH, 0.0, 1.0)
+		_melee_fan_mat.albedo_color = Color(1.0, 0.14, 0.10, 0.58 * k)
+		_melee_fan.visible = _melee_flash > 0.0
+		return
+	if _windup >= 0.0 and stats.get("attack", "melee") == "melee" and not _dead:
+		var total := maxf(float(stats["windup"]), 0.001)
+		var t := clampf(1.0 - _windup / total, 0.0, 1.0)
+		_melee_fan_mat.albedo_color = Color(1.0, 0.84, 0.38, 0.13).lerp(
+			Color(1.0, 0.34, 0.20, 0.42), t)
+		_melee_fan.visible = true
+		return
+	_melee_fan.visible = false
 
 
 func _show_shout_fan() -> void:
@@ -1417,6 +1505,20 @@ func _guard_bounce(from_pos: Vector3) -> void:
 		Fx.punch(_pillow, 0.28)
 
 
+func _melee_in_fan(dist: float) -> bool:
+	## 주인공이 **예고한 부채꼴 안**에 있나. 그림(`_show_melee_fan`)과 같은
+	## 사거리·각도를 씁니다 - 두 곳에서 따로 정하면 언젠가 어긋납니다.
+	if not is_instance_valid(target):
+		return false
+	if dist > float(stats["range"]) + 0.4:
+		return false
+	var to: Vector3 = target.global_position - global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return true      # 발밑까지 붙었으면 각도를 물을 것이 없습니다
+	return to.normalized().dot(_melee_dir) >= cos(deg_to_rad(MELEE_ARC) * 0.5)
+
+
 func _strike() -> void:
 	if not is_instance_valid(target):
 		return
@@ -1726,8 +1828,12 @@ func _drive_ghost_trail(delta: float) -> void:
 	tw.tween_callback(ghost.queue_free)
 
 
-func knock_back(impulse: Vector3) -> void:
-	## 밖에서 밀어냅니다(돌풍 축복).
+func knock_back(impulse: Vector3, chain: int = 0) -> void:
+	## 밖에서 밀어냅니다.
+	##
+	## `chain` 은 **「밀기」 Lv3 의 연쇄**가 몇 번 더 남았는지입니다. 이 몸이
+	## 다른 적에 부딪히면 그 적도 밀리고(`_crash_into_foe`), 남은 횟수가
+	## 하나 줄어 넘어갑니다. 0 이면 부딪혀도 아프기만 하고 안 밀립니다.
 	##
 	## **돌진도 끊습니다.** 밀려나면서도 계속 달려오면 밀어낸 것으로 보이지
 	## 않고, 무엇보다 "달려드는 것을 막는 수단" 이라는 쓸모가 사라집니다.
@@ -1736,6 +1842,7 @@ func knock_back(impulse: Vector3) -> void:
 	_charge = 0.0
 	_knock = 0.45
 	_crash_used = false
+	_chain_left = maxi(_chain_left, chain)
 	# **밀기 전에 가던 속도를 끊습니다.**
 	#
 	# 달려오던 적을 밀면 그 운동량이 밀림을 거의 다 먹습니다(실측: 1.73m/s 로
@@ -1899,7 +2006,15 @@ func _crash_into_foe(speed: float) -> bool:
 		# 되고, 그러면 적을 벽이 아니라 적에게 던지는 것만 답이 됩니다.
 		var hurt := speed * CRASH_FOE
 		other.take_damage(hurt, false, Vector3.ZERO)
-		other.knock_back(_crash_dir * (throw_knock * 0.6))
+		# **연쇄(「밀기」 Lv3).** 부딪힌 적도 같은 방향으로 밀리고, 그 적이
+		# 또 부딪히면 한 번 더 - 남은 횟수를 하나 줄여 넘깁니다.
+		#
+		# 속도를 그대로 넘기지 않고 0.7 배로 깎습니다. 같은 힘이 계속 전해지면
+		# 방 하나가 한 번에 정리되고, 그러면 밀기 말고 쓸 기술이 없어집니다.
+		if _chain_left > 0:
+			other.knock_back(_crash_dir * (speed * 0.7), _chain_left - 1)
+		else:
+			other.knock_back(_crash_dir * (throw_knock * 0.6))
 		take_damage(hurt * 0.6, false, Vector3.ZERO)
 		_crash_mark()
 		return true
@@ -1960,6 +2075,8 @@ var slam_stun := 0.0
 ## 날아가며 다른 적을 칠 때 미는 세기. 던진 쪽(주인공)이 자기 밀기 세기를
 ## 그대로 넘겨 줍니다 - 던지기는 밀기의 연장입니다.
 var throw_knock := 3.0
+## 연쇄로 더 밀 수 있는 횟수(「밀기」 Lv3). 0 이면 연쇄가 없습니다.
+var _chain_left := 0
 
 
 func _slam_landing() -> void:

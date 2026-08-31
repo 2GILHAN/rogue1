@@ -11,6 +11,7 @@ signal restart_requested
 signal start_requested
 signal toon_toggled
 signal grade_toggled
+signal lock_toggled
 ## 게임을 그만둡니다. 무엇을 할지는 game.gd 가 정합니다
 ## (데스크톱은 앱 종료, 웹은 제목 화면).
 signal quit_pressed
@@ -599,7 +600,7 @@ func _build_test_panel() -> void:
 	grid.add_theme_constant_override("h_separation", 4)
 	grid.add_theme_constant_override("v_separation", 4)
 	col.add_child(grid)
-	for fam in ["push", "shout", "roll", "move", "passive"]:
+	for fam in ["push", "shout", "roll", "hp", "move", "breath"]:
 		var name: String = RunState.FAMILY_NAME.get(fam, fam)
 		var fb := _small_button(name, func() -> void: test_skill_picked.emit(fam))
 		fb.custom_minimum_size = Vector2(88, 28)
@@ -622,11 +623,17 @@ func _build_test_panel() -> void:
 
 
 var _perf_button: Button
+var _lock_button: Button
 var _perf_label: Label
 var _perf_wait := 0.0
 ## 프레임 시간의 **가장 나쁜 값**도 같이 보여 줍니다. 평균만 보면 0.5초마다
 ## 한 번씩 멎는 것이 안 보입니다 - 사람이 렉이라고 부르는 것은 대개 그쪽입니다.
 var _perf_worst := 0.0
+
+
+func set_lock_on(on: bool) -> void:
+	if _lock_button != null:
+		_lock_button.text = "켬" if on else "끔"
 
 
 func _toggle_perf() -> void:
@@ -731,6 +738,22 @@ func _build_options() -> void:
 	_grade_button = _small_button("끔", func() -> void: grade_toggled.emit())
 	_grade_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grade_row.add_child(_grade_button)
+
+	# **록온(자동 조준).** 기본은 **끔**입니다.
+	#
+	# 켜 두면 3.9m 안의 가장 가까운 적으로 몸이 저절로 돌아갑니다. 편하지만
+	# 겨누는 일이 통째로 사라져서, 어디를 보고 있느냐로 갈리는 것들(등 뒤
+	# 잡기, 베개 아기의 앞뒤, 굴러 피하기)이 다 같이 무의미해집니다.
+	var lock_row := HBoxContainer.new()
+	lock_row.add_theme_constant_override("separation", 6)
+	col.add_child(lock_row)
+	var lock_name := UiTheme.label("록온", 15, UiTheme.DIM)
+	lock_name.custom_minimum_size = Vector2(64, 34)
+	lock_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lock_row.add_child(lock_name)
+	_lock_button = _small_button("끔", func() -> void: lock_toggled.emit())
+	_lock_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lock_row.add_child(_lock_button)
 
 	# **성능 표시.** 폰에서만 나타나는 느려짐을 재려고 답니다 - 데스크톱에서
 	# 11분을 돌려도 아무것도 쌓이지 않아서, 폰에서 직접 읽는 수밖에 없습니다.
@@ -1374,17 +1397,43 @@ func show_death(state: RunState) -> void:
 	_overlay.visible = true
 
 
+func show_win(state: RunState) -> void:
+	## **5층을 정리했습니다.** 끝이 있어야 한 판이 이야기가 됩니다 - 끝없이
+	## 깊어지기만 하면 죽는 것 말고는 판이 끝나는 길이 없습니다.
+	_clear_overlay()
+	_title("나갔다!", UiTheme.ACCENT)
+	_sub("지하 %d층을 다 지났습니다. 처치 %d · 금화 %d · %d분 %d초" % [
+		Game.FINAL_FLOOR, state.kills, state.gold,
+		int(state.elapsed) / 60, int(state.elapsed) % 60], UiTheme.TEXT)
+	_sub("다음 던전은 다른 모양입니다.")
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_overlay_box.add_child(row)
+	var b := Button.new()
+	b.text = "  다시 도전  (R)  "
+	b.custom_minimum_size = Vector2(240, 52)
+	b.pressed.connect(func() -> void: restart_requested.emit())
+	row.add_child(b)
+	_overlay.visible = true
+
+
 func show_help(paused_text: String) -> void:
 	_clear_overlay()
 	_title(paused_text)
 	_sub("이동 WASD    조준 마우스    고함 좌클릭    밀기(잡기) F    구르기 Space", UiTheme.TEXT)
-	_sub("바닥의 소품을 F 로 집어 던질 수 있습니다. 무거운 가구는 밀어서 굴리세요.
+	_sub("**고함은 아프지 않습니다.** 넓게 굳혀 놓고, 아픈 일은 밀기가 합니다.
 "
-		+ "인형·쿠션은 아프진 않지만 맞은 적이 잠깐 멈춥니다.")
-	_sub("구르는 동안은 무적입니다. 적의 붉은 고리는 곧 때린다는 뜻이니, 그때 구르세요.")
-	_sub("붉은 큰 적은 돌진합니다 - 정면으로 맞서지 말고 옆으로 빠지세요.\n"
+		+ "바닥에 칠해지는 부채꼴이 곧 닿는 범위입니다.")
+	_sub("적의 공격도 **바닥에 칠해집니다.** 예고가 시작되면 방향이 굳으므로,
+"
+		+ "옆으로 반 발만 굴러 나가면 빗나갑니다 - 멀리 도망칠 필요가 없습니다.")
+	_sub("붉은 큰 적은 돌진합니다 - 정면으로 맞서지 말고 옆으로 빠지세요.
+"
 		+ "초록 적은 멀리서 가시를 뱉습니다 - 벽을 방패로 쓰면서 붙으세요.")
-	_sub("층을 정리하면 축복을 하나 고르고, 상인을 만나면 금화를 씁니다.")
+	_sub("**자동차**에 F 로 올라타면 잠깐 무적으로 방을 휘젓습니다(조종은 안 됩니다).
+"
+		+ "**물놀이터**에서는 층마다 한 번 체력과 숨을 다 채웁니다.")
+	_sub("층을 정리하면 계통 하나를 올립니다 - 여섯 계통, 각 3 단계가 끝입니다.")
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_overlay_box.add_child(row)

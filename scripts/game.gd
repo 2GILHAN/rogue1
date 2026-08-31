@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.20.1"
+const VERSION := "v0.21"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -18,6 +18,14 @@ const VERSION := "v0.20.1"
 ## 것이 거의 없습니다.
 
 enum Phase { TITLE, PLAYING, BOON, SHOP, PAUSED, DEAD }
+
+## **마지막 층.** 여기를 지나면 판이 끝납니다.
+##
+## 끝을 정한 이유: 끝없이 깊어지기만 하면 판이 끝나는 길이 죽는 것뿐이라,
+## 잘한 판과 못한 판의 결말이 같습니다. 다섯 층이면 스킬을 네 번 고르므로
+## (층마다 하나) 계통 하나를 끝까지 파고 다른 하나를 맛볼 수 있습니다 -
+## 상한이 3 인 것과 맞물린 값입니다.
+const FINAL_FLOOR := 5
 
 ## 카메라까지의 거리 6.24m. 예전(12.5m)의 절반이라 캐릭터가 두 배로 보입니다.
 ##
@@ -67,7 +75,12 @@ const SHOULDER_TURN := 3.5
 const SHOULDER_SIDE := 0.42
 ## 어깨 너머일 때 벽을 걷어내는 반경. 카메라가 가까워 크게 잡으면 벽이
 ## 통째로 사라집니다.
-const SHOULDER_FADE := 0.55
+## 어깨 너머일 때의 걷어내는 반경. 위에서 볼 때(2.20)보다 좁습니다 -
+## 카메라가 3m 뒤라 같은 반경이면 화면 절반이 지워집니다.
+##
+## 칸 단위로 바꾸면서 0.55 -> 1.10 으로 올렸습니다. 0.55 는 한 칸(1.5m)의
+## 절반이라, 칸 한 장도 온전히 안 비쳤습니다.
+const SHOULDER_FADE := 1.10
 ## 카메라가 벽에 파묻히지 않도록 앞으로 당겨 오는 최소 여유.
 const SHOULDER_CLEAR := 0.25
 ## 벽에 몰려도 이만큼은 물러섭니다.
@@ -84,6 +97,20 @@ var dungeon: Dungeon
 var player: Player
 var portal: Portal
 var shop: Shopkeeper
+## 물놀이터의 풀장. 상호작용 거리를 여기서 잽니다.
+var _waterpark: Prop = null
+## 이 층에서 물놀이터를 이미 썼는가. 층마다 한 번입니다.
+var _waterpark_used := false
+## 회피 확인용.
+var _dodged := false
+var _hp_at_windup := 0.0
+## 풀장 한가운데에서 미끄럼틀까지의 거리(m).
+##
+## 풀장이 지름 3.7m(반지름 1.85)라 2.35 면 가장자리 바깥 0.5m 입니다 -
+## 물에 잠기지도, 따로 떨어져 보이지도 않는 자리입니다.
+const WATERPARK_GAP := 2.35
+## **록온(자동 조준).** 기본은 끔 - 옵션 판에서 켭니다.
+var lock_on := false
 var ui: Ui
 
 var world_env: Environment
@@ -257,6 +284,7 @@ func _ready() -> void:
 		ui.touch.interact_pressed.connect(_do_interact)
 	ui.toon_toggled.connect(toggle_toon)
 	ui.grade_toggled.connect(toggle_grade)
+	ui.lock_toggled.connect(toggle_lock_on)
 	ui.test_requested.connect(start_test)
 	ui.test_kind_picked.connect(_on_test_kind)
 	ui.test_boons_requested.connect(_on_test_boons)
@@ -683,7 +711,13 @@ func build_floor() -> void:
 	player.ultimate_changed.connect(_on_ultimate)
 	player.bot_active = _bot
 	# 폰에서는 마우스가 없으니 가장 가까운 적을 자동으로 겨눕니다.
-	player.auto_aim = ui.touch != null and DisplayServer.is_touchscreen_available()
+	# **록온은 기본으로 끕니다.** 옵션 판에서 켤 수 있습니다.
+	#
+	# 예전에는 폰이면 자동으로 켰습니다 - 손가락으로는 겨누기 어려우니까요.
+	# 그런데 켜 두면 겨누는 일이 통째로 사라져서, 어디를 보고 있느냐로 갈리는
+	# 것들(등 뒤 잡기, 베개 아기의 앞뒤, 굴러 피하기)이 다 무의미해집니다.
+	# 조준은 이제 **가는 쪽**이 정합니다(_auto_aim 의 뒷부분).
+	player.auto_aim = lock_on
 	player.global_position = dungeon.room_center(0)
 	player.died.connect(_on_player_died)
 	player.read_done.connect(_on_read_done)
@@ -717,13 +751,19 @@ func build_floor() -> void:
 	portal.global_position = dungeon.room_center(exit_room)
 	portal.entered.connect(_on_portal_entered)
 
-	# 상점은 시작 방과 출구 사이 어딘가. 1층에는 두지 않습니다 - 살 금화가 없습니다.
+	# **물놀이터가 상점 자리를 씁니다.**
+	#
+	# 상인을 뺀 이유: 금화를 모아 능력치를 사는 일이 스킬 고르기와 하는 말이
+	# 같았습니다(둘 다 "무엇을 세게 할까"). 층이 다섯뿐이라 상인을 두 번쯤
+	# 만나고 끝나는데, 그 두 번이 판을 정하지도 않았습니다.
+	#
+	# 미끄럼틀과 풀장은 **따로 놓지 않고 한 벌로** 둡니다. 미끄럼틀만 방에
+	# 서 있으면 그냥 시야를 막는 큰 물건이었습니다 - 물에 미끄러져 들어가는
+	# 모양이 되어야 그 자리가 무엇인지 읽힙니다.
 	var shop_room := -1
 	if state.floor_num >= 2 and dungeon.rooms.size() >= 4:
 		shop_room = rng.randi_range(1, dungeon.rooms.size() - 2)
-		shop = Shopkeeper.new()
-		world.add_child(shop)
-		shop.global_position = dungeon.room_center(shop_room)
+		_place_waterpark(dungeon.room_center(shop_room))
 
 	_spawn_enemies(exit_room, shop_room)
 	_place_teacher(exit_room)
@@ -733,6 +773,7 @@ func build_floor() -> void:
 	if _alive == 0:
 		portal.unlock()
 	_bot_shopped = false
+	_waterpark_used = false
 	if _bot:
 		print("[bot] 지하 %d층 시작 - 적 %d, 방 %d" % [state.floor_num, _alive, dungeon.rooms.size()])
 	ui.set_test_panel(false)
@@ -754,9 +795,41 @@ func build_floor() -> void:
 		call_deferred("_show_debug_ui")
 
 
+func _place_waterpark(at: Vector3) -> void:
+	## 풀장 하나와 그 옆에 미끄럼틀 하나. **한 벌입니다.**
+	##
+	## 미끄럼틀을 풀장 가장자리 바깥에 세우고 물 쪽을 보게 돌립니다. 자리를
+	## 재서 놓습니다 - 눈으로 고르면 모델을 바꿨을 때 미끄럼틀이 물 위에
+	## 뜨거나 방 반대편에 섭니다.
+	var pool := Prop.new()
+	world.add_child(pool)
+	pool.setup("pool")
+	pool.global_position = at
+	_waterpark = pool
+
+	# 물가에서 바라보는 쪽은 아무 쪽이나 좋습니다. 방마다 다르게 두면 같은
+	# 물놀이터가 층마다 다른 그림이 됩니다.
+	var yaw := rng.randf() * TAU
+	var away := Vector3(sin(yaw), 0.0, cos(yaw))
+	var slide := Prop.new()
+	world.add_child(slide)
+	slide.setup("slide")
+	slide.global_position = at + away * WATERPARK_GAP
+	# 미끄럼틀이 **물 쪽을 봅니다.** 등지고 서면 타고 내려가는 앞이 방바닥이라
+	# 둘이 한 벌로 안 읽힙니다.
+	slide.rotation.y = atan2(-(-away).x, -(-away).z)
+
+
 func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 	## 방마다 조금씩. 한 방에 몰아넣으면 나머지 방이 빈 복도가 됩니다.
-	var budget := 4 + state.floor_num * 2
+	##
+	## **수를 줄이고 한 마리를 세게 했습니다**(예전 4 + 층×2 = 1층 6마리,
+	## 5층 14마리). 여럿이면 무엇을 하든 밀기 한 번으로 무리를 정리하는 것이
+	## 답이라, 적 종류를 나눠 만든 것이 화면에서 안 보였습니다. 한 마리가
+	## 세면 **그 한 마리를 어떻게 처리할지**가 생깁니다.
+	##
+	## 줄인 몫은 적 쪽 `FOE_POWER`(1.45배)가 받습니다.
+	var budget := 3 + state.floor_num
 	var rooms_available: Array[int] = []
 	for i in range(1, dungeon.rooms.size()):
 		if i != shop_room:
@@ -792,26 +865,26 @@ func _kind_pool() -> Array:
 	## 그러면 관문이 아니라 잡몹이 됩니다. 배치는 _spawn_enemies 가 직접 합니다.
 	## 새 종류는 **한 층에 하나씩** 들어옵니다. 두 가지를 같은 층에서 처음
 	## 만나면 어느 쪽 때문에 죽었는지 알 수 없어, 배우는 대신 외우게 됩니다.
+	## **다섯 층이 끝이므로**(FINAL_FLOOR) 종류가 들어오는 층을 앞당겼습니다.
+	## 7층부터 나오던 것은 영영 안 나오는 것과 같았습니다.
 	var pool := ["grunt", "grunt", "grunt"]
 	if state.floor_num >= 2:
 		pool.append("spitter")
 		pool.append("screamer")
 	if state.floor_num >= 3:
 		pool.append("brute")
-		pool.append("spitter")
-	if state.floor_num >= 4:
-		# 붙잡는 아이는 **혼자서는 약합니다.** 다른 적이 여럿 있어야 위협이
+		# 붙잡는 아이는 **혼자서는 약합니다.** 다른 적이 곁에 있어야 위협이
 		# 되므로, 방에 둘셋씩 서기 시작하는 층부터 넣습니다.
 		pool.append("clinger")
-		pool.append("screamer")
-	if state.floor_num >= 5:
-		pool.append("brute")
+	if state.floor_num >= 4:
+		pool.append("spitter")
 		# 베개는 "뒤로 돌아가라" 를 묻는 적입니다. 구르기와 고함의 쓰임을
 		# 어느 정도 익힌 뒤라야 그 질문에 답이 있습니다.
 		pool.append("pillow")
-	if state.floor_num >= 7:
-		pool.append("clinger")
+	if state.floor_num >= 5:
+		pool.append("brute")
 		pool.append("pillow")
+		pool.append("screamer")
 	return pool
 
 
@@ -825,33 +898,26 @@ func _scatter_props() -> void:
 	# 서너 개씩 굴러다니고, 그러면 체력이 자원이 아니라 배경이 됩니다.
 	# 층마다 새로 셉니다. 안 비우면 아래층에서 벽 자리가 점점 줄어듭니다.
 	_wall_taken.clear()
-	var kinds := []
-	for k in Prop.KINDS:
-		# 마시는 것과 붙박이는 뽑기에서 뺍니다. 같이 두면 종류 수만큼 나와서
-		# 층마다 서너 개씩 굴러다닙니다 - 회복은 자원이 아니라 배경이 되고,
-		# 풀장은 방을 가로막는 장애물이 됩니다. 개수를 직접 정합니다.
-		var st: Dictionary = Prop.KINDS[k]
-		if st.has("heal") or String(st.get("class", "")) == "fixed":
-			continue
-		kinds.append(k)
-	for room in dungeon.rooms.size():
-		var count := rng.randi_range(2, 5)
-		for _i in count:
-			var at := dungeon.random_point_in_room(room, rng)
-			if at.distance_to(dungeon.room_center(room)) < 2.2:
-				continue
-			var prop := Prop.new()
-			world.add_child(prop)
-			prop.setup(String(kinds[rng.randi_range(0, kinds.size() - 1)]))
-			# 살짝 띄워 놓으면 물리가 알아서 바닥에 앉힙니다. 정확한 높이를
-			# 계산하는 것보다 이쪽이 소품 종류에 상관없이 맞습니다.
-			prop.global_position = at + Vector3(0, 0.45, 0)
-			prop.rotation.y = rng.randf() * TAU
+	# **던질 수 있는 소품을 흩는 일을 그만뒀습니다.**
+	#
+	# 집어서 던지는 데 두 손과 몇 초가 드는데, 그동안 밀기를 두 번 하는 편이
+	# 언제나 나았습니다. 쓰이지 않는 물건이 방마다 서넛씩 굴러다니면 밟고
+	# 걸리는 잡동사니일 뿐입니다 - 밀기·고함·구르기 셋이 서로 겨루게 하는
+	# 것이 지금 하려는 일이고, 넷째 선택지는 그걸 흐립니다.
+	#
+	# `Prop.KINDS` 의 `light`/`soft`/`heavy` 는 그대로 둡니다 - 적이 던지는
+	# 쪽(brute)과 확인용 인자가 아직 씁니다. 여기서 **안 놓을 뿐**입니다.
 
+	# **자동차.** 타면 무적으로 방을 휘젓습니다(`player.begin_joyride`) -
+	# 밀기·고함·구르기 말고 방을 뒤집는 수단이 하나 있어야, 몰렸을 때
+	# "도망갈까" 말고 다른 답이 생깁니다. 층에 둘이면 충분합니다.
+	_scatter_fixed_count("ridecar", 2)
+	# 우유는 남깁니다. 던지는 물건이 아니라 **마시는 물건**이고, 체력이 자원인
+	# 이상 방에서 찾아내는 것 자체가 할 일입니다.
 	_scatter_fixed_count("milk", 2)
-	# 풀장은 방 하나에 하나면 충분합니다. 몸으로 부딪히는 물건이라
-	# 여러 개를 흩으면 방이 통로가 됩니다.
-	_scatter_fixed_count("pool", 1)
+	# 풀장과 미끄럼틀은 여기서 안 놓습니다 - **한 벌(물놀이터)로만** 나옵니다
+	# (`_place_waterpark`). 따로 흩으면 방마다 미끄럼틀이 서서, 무엇을 하는
+	# 물건인지 알기 전에 시야만 가립니다.
 	# 책장은 벽 가구라 여러 개 있어도 방을 막지 않습니다.
 	_scatter_fixed_count("bookshelf", 3)
 	# 액자는 벽 위쪽이라 바닥을 차지하지 않습니다. 방마다 하나쯤 보이도록.
@@ -868,9 +934,6 @@ func _scatter_props() -> void:
 	_scatter_fixed_count("wardrobe", 1)
 	_scatter_fixed_count("toyshelf", 1)
 	_scatter_fixed_count("kidcloset", 1)
-	# 미끄럼틀은 방 안에 섭니다. 큰 물건이라 하나면 충분하고, 들어갈 고리가
-	# 없는 작은 방은 `_spot_for` 가 알아서 건너뜁니다.
-	_scatter_fixed_count("slide", 1)
 	# 깔리는 것은 막지 않으므로 여럿이어도 길을 좁히지 않습니다.
 	_scatter_fixed_count("rug", 2)
 	_scatter_fixed_count("playmat", 1)
@@ -976,10 +1039,16 @@ func _spot_on_wall(depth: float):
 
 
 func _scatter_traps() -> void:
-	## 함정을 흩습니다. 층이 깊어질수록 조금씩 늘어납니다.
+	## **지금은 함정을 안 놓습니다.**
 	##
-	## 시작 방은 건너뜁니다 - 나오자마자 밟는 함정은 배울 기회가 아니라
-	## 그냥 손해입니다. 방 한가운데도 비워 둡니다(출구·상인 자리).
+	## 뺀 이유: 함정은 "여기를 밟지 마라" 만 말하는데, 이 게임에서 발을
+	## 어디에 두느냐는 이미 적과 굴러 피하기가 정하고 있습니다. 하나 더
+	## 얹으면 볼 것만 늘고 고를 것은 안 늘어납니다 - 특히 예고 소리가 적의
+	## 공격 예고와 같아서, 피해야 할 때도 "함정이겠거니" 하게 됩니다.
+	##
+	## `trap.gd` 는 그대로 둡니다(`--pose=trap` 으로 아직 볼 수 있습니다).
+	## 되돌리려면 이 `return` 한 줄입니다.
+	return
 	if dungeon.rooms.size() < 2:
 		return
 	var count := 2 + state.floor_num / 2
@@ -1058,12 +1127,26 @@ func _on_portal_entered() -> void:
 	if phase != Phase.PLAYING:
 		return
 	Sfx.play(Sfx.STAIRS, -5.0)
+	if state.floor_num >= FINAL_FLOOR:
+		_on_run_cleared()
+		return
 	state.floor_num += 1
+	# **「체력」 Lv2 는 층을 넘을 때마다 가득 찹니다.**
+	if state.has_floor_heal():
+		state.heal(state.max_hp)
 	_boon_from_shelf = false
 	_boon_options = _label_boons(state.offer_boons(rng))
 	phase = Phase.BOON
 	get_tree().paused = true
 	ui.show_boons(_boon_options)
+
+
+func _on_run_cleared() -> void:
+	## 마지막 층을 지났습니다.
+	phase = Phase.DEAD
+	get_tree().paused = true
+	ui.stop_recording()
+	ui.show_win(state)
 
 
 func _label_boons(options: Array) -> Array:
@@ -1660,6 +1743,113 @@ func _drive_pose() -> void:
 						str(_probe_foe._die_when_landed)])
 			elif _frames % 30 == 0:
 				print("[좀비] f=%d 적이 죽어 사라졌습니다" % _frames)
+		"dodge":
+			# **굴러 피하기가 되는지** 잽니다.
+			#
+			# 적을 눈앞에 세워 두고 공격을 시켜, 예고 도중에 옆으로 비켜
+			# 섰을 때와 가만히 서 있을 때의 체력을 견줍니다. 예고 방향이
+			# 굳어 있으면 옆으로 반 발만 나가도 빗나가야 합니다.
+			if _frames == 10 and is_instance_valid(player):
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.global_position = player.global_position + Vector3(1.2, 0, 0)
+				_probe_foe = foe
+				debug_aim = Vector3(1, 0, 0)
+				state.hp = 500.0
+				state.max_hp = 500.0
+			if _frames > 20 and _frames % 2 == 0 and is_instance_valid(_probe_foe):
+				# 예고가 시작되면 **옆으로** 비켜섭니다(_side=dodge 일 때만).
+				if _probe_foe._windup > 0.0 and _probe_arg == "dodge" and not _dodged:
+					_dodged = true
+					_hp_at_windup = state.hp
+					player.global_position += Vector3(0, 0, 1.3)
+				elif _probe_foe._windup > 0.0 and _probe_arg != "dodge" and not _dodged:
+					_dodged = true
+					_hp_at_windup = state.hp
+			if _frames == 240:
+				print("[회피] %s  예고 때 %.0f -> 지금 %.0f  (맞음=%s)" % [
+					("옆으로 굴러 나감" if _probe_arg == "dodge" else "가만히 서 있음"),
+					_hp_at_windup, state.hp, str(state.hp < _hp_at_windup)])
+		"balance":
+			# **이번 개편이 실제로 도는지** 한 자리에서 봅니다.
+			#
+			#   숨 100 · 고함 피해 0 · 밀기 연쇄 · 물놀이터 · 자동차 · 5층 끝
+			#
+			# 봇 소크는 6000 프레임에 두 층밖에 못 가서 5층 마무리를 못 봅니다.
+			# 여기서는 층을 5로 놓고 시작해 출구로 걸어 들어갑니다.
+			if _frames == 10:
+				print("[균형] 숨 %.0f/%.0f  이속 %.2f  최대체력 %.0f" % [
+					state.breath, state.max_breath, state.move_speed, state.max_hp])
+				for fam in ["push", "shout", "roll", "hp", "move", "breath"]:
+					print("  %s -> %s" % [fam, state.apply_family(fam, rng)])
+				print("[균형] 다 찍은 뒤: 숨 %.0f  이속 %.2f  체력 %.0f  넉백+%.1f  고함범위+%.1f" % [
+					state.max_breath, state.move_speed, state.max_hp,
+					state.shove_knock, state.shout_range])
+				print("[균형] 규칙: 연격=%s 연쇄=%s 고함피해=%s 통과=%s 구르기피해=%s 부활=%s" % [
+					str(state.has_push_combo()), str(state.has_push_chain()),
+					str(state.has_shout_damage()), str(state.has_roll_ghost()),
+					str(state.has_roll_damage()), str(state.has_revive())])
+				# 다 찍었으면 더 내밀 것이 없어야 합니다.
+				print("[균형] 남은 선택지 %d 개" % state.offer_boons(rng).size())
+				print("[균형] 물놀이터=%s 자동차=%d대" % [
+					str(_waterpark != null),
+					len(get_tree().get_nodes_in_group("props").filter(
+						func(n: Node) -> bool: return (n as Prop).kind == "ridecar"))])
+			if _frames == 40 and _waterpark != null and is_instance_valid(player):
+				# 물놀이터로 걸어가 씁니다.
+				player.global_position = _waterpark.global_position + Vector3(1.6, 0, 0)
+				state.hp = 20.0
+				state.breath = 5.0
+			if _frames == 46:
+				print("[균형] 물놀이 전 체력 %.0f 숨 %.0f" % [state.hp, state.breath])
+				try_interact()
+				print("[균형] 물놀이 후 체력 %.0f 숨 %.0f" % [state.hp, state.breath])
+			if _frames == 60 and is_instance_valid(player):
+				var car := get_tree().get_nodes_in_group("props").filter(
+					func(n: Node) -> bool: return (n as Prop).kind == "ridecar")
+				if not car.is_empty():
+					player.global_position = (car[0] as Node3D).global_position + Vector3(0.8, 0, 0)
+			if _frames == 66:
+				print("[균형] 자동차 탐=%s" % str(try_interact()))
+			if _frames == 130:
+				print("[균형] 질주 끝난 뒤 무적=%s" % str(player.is_invulnerable()))
+			# ── 고함 피해와 밀기 연쇄 ────────────────────────────────
+			if _frames == 300 and is_instance_valid(player):
+				phase = Phase.PLAYING
+				get_tree().paused = false
+				state.skill_lv = {"push": 0, "shout": 1, "roll": 0,
+					"hp": 0, "move": 0, "breath": 0}
+				state._recompute()
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.global_position = player.global_position + Vector3(1.4, 0, 0)
+				_probe_foe = foe
+				# **조준을 붙들어 둡니다.** 그냥 aim 을 쓰면 다음 프레임에
+				# _update_aim 이 마우스 자리(0,0)로 덮어써서, 부채꼴 판정이
+				# 엉뚱한 쪽을 봅니다.
+				debug_aim = Vector3(1, 0, 0)
+			if _frames == 306 and is_instance_valid(_probe_foe):
+				var before: float = _probe_foe.hp
+				player.attack()
+			if _frames == 330 and is_instance_valid(_probe_foe):
+				print("[균형] 고함 Lv1 뒤 적 체력 %.0f / %.0f  (안 깎여야 맞음)" % [
+					_probe_foe.hp, _probe_foe.max_hp])
+				state.skill_lv["shout"] = 3
+				state._recompute()
+				player.state.breath = 100.0
+				player.attack()
+			if _frames == 352 and is_instance_valid(_probe_foe):
+				print("[균형] 고함 Lv3 뒤 적 체력 %.0f / %.0f  (깎여야 맞음)" % [
+					_probe_foe.hp, _probe_foe.max_hp])
+			if _frames == 380:
+				# 문은 적이 다 죽어야 열립니다. 여기서는 **들어간 것으로**
+				# 치고 부릅니다 - 보려는 것은 5층 뒤에 무엇이 오는가입니다.
+				print("[균형] 출구 전 층=%d" % state.floor_num)
+				_on_portal_entered()
+				print("[균형] 5층 출구 뒤 단계=%d (5=DEAD/끝) 층=%d" % [
+					phase, state.floor_num])
 		"wallhug":
 			# 벽에 등을 붙였을 때 생기는 **거뭇한 얼룩**을 재는 자리.
 			#
@@ -2537,7 +2727,16 @@ func toggle_cam_mode() -> void:
 func cam_yaw() -> float:
 	## 이동 입력을 이 각도로 돌려서 씁니다. 내려다보는 화면에서는 0 이라
 	## 예전과 똑같이 동작합니다.
-	return cam_rig.rotation.y if cam_mode == CamMode.SHOULDER else 0.0
+	return cam_rig.rotation.y if cam_mode == CamMode.SHOULDER else 3.20
+
+
+func toggle_lock_on() -> void:
+	## 록온(자동 조준)을 켜고 끕니다. **기본은 끔**입니다.
+	lock_on = not lock_on
+	if is_instance_valid(player):
+		player.auto_aim = lock_on
+	ui.set_lock_on(lock_on)
+	ui.toast("록온 " + ("켬" if lock_on else "끔"), UiTheme.ACCENT)
 
 
 func toggle_grade() -> void:
@@ -2598,14 +2797,72 @@ func try_interact() -> bool:
 	## 대로 이어집니다.
 	if phase != Phase.PLAYING:
 		return false
-	if shop != null and shop.is_near():
-		_open_shop()
+	if _use_waterpark():
+		return true
+	if _ride_car():
 		return true
 	var shelf := _shelf_near()
 	if shelf != null:
 		_read_shelf(shelf)
 		return true
 	return false
+
+
+## 물놀이터에 닿는 거리. 풀장 반지름(1.85)에 한 걸음 더.
+const WATERPARK_REACH := 2.6
+## 자동차에 올라타는 거리.
+const CAR_REACH := 1.6
+
+
+func _use_waterpark() -> bool:
+	## 물놀이터. **층마다 한 번, 공짜로 체력과 숨을 채웁니다.**
+	##
+	## 상인이 있던 자리라 하는 일도 상인과 같습니다 - 다만 값이 금화가 아니라
+	## **가는 수고**입니다. 물놀이터는 시작 방과 출구 사이 어딘가에 있어서,
+	## 들를지 말지가 곧 "돌아가는 길에 적을 더 만날까" 입니다.
+	##
+	## 금화를 안 받는 이유: 층이 다섯뿐이라 금화를 모을 틈이 없고, 모아 봐야
+	## 쓸 곳이 여기 하나뿐이면 그건 값이 아니라 절차입니다.
+	if _waterpark == null or not is_instance_valid(_waterpark):
+		return false
+	if not is_instance_valid(player):
+		return false
+	var to: Vector3 = _waterpark.global_position - player.global_position
+	to.y = 0.0
+	if to.length() > WATERPARK_REACH:
+		return false
+	if _waterpark_used:
+		ui.toast("물이 다 빠졌습니다", UiTheme.DIM)
+		return true
+	_waterpark_used = true
+	state.heal(state.max_hp)
+	state.breath = state.max_breath
+	player.health_changed.emit(state.hp, state.max_hp)
+	Sfx.play(Sfx.STAIRS, -4.0, 0.08)
+	Fx.burst(world, _waterpark.global_position + Vector3(0, 0.5, 0),
+		Color(0.55, 0.85, 1.0), 22, 3.4)
+	ui.toast("첨벙! 체력과 숨을 다 채웠습니다", UiTheme.ACCENT)
+	return true
+
+
+func _ride_car() -> bool:
+	## 자동차에 올라탑니다. 자세한 것은 `player.begin_joyride`.
+	if not is_instance_valid(player):
+		return false
+	var best: Prop = null
+	var closest := CAR_REACH
+	for node in get_tree().get_nodes_in_group("props"):
+		var prop := node as Prop
+		if prop == null or not is_instance_valid(prop) or prop.kind != "ridecar":
+			continue
+		var to: Vector3 = prop.global_position - player.global_position
+		to.y = 0.0
+		if to.length() < closest:
+			closest = to.length()
+			best = prop
+	if best == null:
+		return false
+	return player.begin_joyride(best)
 
 
 func _do_interact() -> void:
@@ -2857,7 +3114,10 @@ func _process(delta: float) -> void:
 	# 캐릭터를 가리는 벽을 걷어내려면 셰이더가 두 점을 알아야 합니다.
 	if dungeon != null and is_instance_valid(player):
 		var focus: Vector3 = player.global_position + Vector3(0, 0.7, 0)
-		var radius: float = SHOULDER_FADE if cam_mode == CamMode.SHOULDER else 1.15
+		# 1.15 -> 2.20. 판정을 **칸 단위**로 바꾸면서 넓혔습니다 - 좁게 두면
+		# 벽 한 칸만 비쳐서 캐릭터가 판 가장자리에 걸립니다. 두세 칸이 함께
+		# 비쳐야 "저 벽면이 비친다" 로 읽힙니다.
+		var radius: float = SHOULDER_FADE if cam_mode == CamMode.SHOULDER else 2.20
 		dungeon.set_fade_focus(camera.global_position, focus, radius)
 		# 벽에 걸린 소품(시계·액자·책장)도 **같은 값**으로 함께 비칩니다.
 		# 값을 여기서 한 번 만들어 둘에 나눠 주므로 어긋날 자리가 없습니다.

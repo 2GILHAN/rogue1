@@ -95,7 +95,21 @@ const LUNGE_SWING_TIME := 0.16
 ## (enemy.gd 의 THROW_PUSH).
 const SHOVE_KNOCK := 3.6
 const PUSH_TIME := 0.42
-const GRAB_COOLDOWN := 0.95
+## 밀기 대기. **연격(밀기 Lv2)이면 절반**입니다.
+##
+## 0.95 에서 0.55 로 줄였습니다. 대기가 길면 밀기가 "가끔 쓰는 것" 이 되는데,
+## 이 게임의 기본기는 밀기입니다. 막는 일은 숨(8)이 합니다.
+const GRAB_COOLDOWN := 0.55
+## 고함 대기. 0.55 -> 0.34.
+const SHOUT_COOLDOWN := 0.34
+
+
+func _grab_cooldown() -> float:
+	## 밀기 대기. **「밀기」 Lv2(연격)면 절반**입니다 - 연달아 밀 수 있게
+	## 하는 것이 그 단계가 파는 물건입니다.
+	if state != null and state.has_push_combo():
+		return GRAB_COOLDOWN * 0.5
+	return GRAB_COOLDOWN
 const THROW_MULT := 1.5
 
 const ATTACK_RANGE := 2.7
@@ -169,6 +183,28 @@ const HIP := 0.55
 ## 것처럼 보였습니다. 축이 올라가야 몸이 바닥에서 떠서 넘어가는 것으로
 ## 읽힙니다.
 const ROLL_LIFT := HIP * 0.5
+## 구르고 나온 직후 빨라지는 시간과 배율(「이속」 Lv2).
+##
+## 0.55초는 한 걸음 반쯤입니다 - 더 길면 그냥 이동 속도가 오른 것이 되고,
+## 더 짧으면 손에 안 잡힙니다.
+const ROLL_BURST_TIME := 0.55
+const ROLL_BURST_MULT := 1.35
+
+## ── 자동차 질주 ──────────────────────────────────────────────────
+##
+## 타면 **정해진 시간 동안 무적으로 방을 휘젓습니다.** 조종은 못 합니다 -
+## 조종되면 그냥 "빨라지고 무적인 상태" 라 다른 기술이 다 쓸모없어집니다.
+## 못 모는 대신 아무 대가도 없고(숨도 안 듭니다), 그래서 몰렸을 때 "도망갈까"
+## 말고 다른 답이 하나 생깁니다.
+const JOY_TIME := 3.4
+const JOY_SPEED := 7.2
+## 부딪힌 적이 받는 피해 배율과 닿는 거리.
+const JOY_DAMAGE := 1.6
+const JOY_REACH := 1.15
+## 방향을 새로 뽑는 주기. 짧으면 제자리에서 떨고, 길면 벽만 보고 갑니다.
+const JOY_TURN_EVERY := 0.62
+## 부딪힌 적을 밀어내는 힘.
+const JOY_KNOCK := 7.0
 ## 클립 재생 배속. test3 의 걷기 사이클은 32프레임/24fps 라 한 걸음에 1.3초로,
 ## 초당 6.5m 로 달리는 캐릭터에 붙이면 미끄러지듯 보입니다.
 ## 클립이 **1배속에서 바닥을 미는 속도**(m/s). 재생 속도를 여기에 맞추면
@@ -344,6 +380,21 @@ var _bound_by: Node3D = null
 var _struggle_show := 0.0
 var _attack_cd := 0.0
 var _swing_time := 0.0
+## 구르고 나온 직후의 질주가 남은 시간(「이속」 Lv2).
+var _roll_burst := 0.0
+## 지난 프레임에 구르는 중이었나. 끝나는 **그 프레임**을 잡으려는 값입니다.
+var _was_rolling := false
+## 자동차를 타고 달리는 동안 남은 시간.
+var _joy_time := 0.0
+## 지금 타고 있는 자동차.
+var _joy_car: Prop = null
+## 지금 달려가는 쪽. 벽에 부딪히거나 때가 되면 새로 뽑습니다.
+var _joy_dir := Vector3.ZERO
+## 다음에 방향을 새로 뽑기까지 남은 시간.
+var _joy_turn := 0.0
+## 이번 질주에서 이미 친 적. 한 번씩만 칩니다 - 안 그러면 붙어 있는 적을
+## 매 프레임 쳐서 즉사시킵니다.
+var _joy_hit: Dictionary = {}
 ## 고함 자세를 붙잡고 있는 시간. 판정(_swing_time, 0.30초)보다 깁니다.
 ##
 ## 목소리 클립이 1.05초인데 자세가 0.30초에 풀리면, 아직 지르고 있는데 아이는
@@ -459,7 +510,11 @@ func _physics_process(delta: float) -> void:
 
 	_update_aim()
 
-	if _bound_time > 0.0:
+	if _joy_time > 0.0:
+		# **자동차를 타는 동안에는 다른 것이 아무것도 안 됩니다.** 걷지도,
+		# 구르지도, 밀지도 못합니다 - 못 모는 것이 이 물건의 값입니다.
+		_drive_joyride(delta)
+	elif _bound_time > 0.0:
 		# 붙잡혀 있으면 걷지도 구르지도 못합니다. 구르기는 애초에 들어올 수
 		# 없지만(_try_dash 가 막습니다), 붙잡히기 직전에 시작한 구르기가
 		# 남아 있을 수 있어 여기서도 끊습니다.
@@ -484,8 +539,20 @@ func _physics_process(delta: float) -> void:
 	_shout_hold = maxf(0.0, _shout_hold - delta)
 	_hurt_time = maxf(0.0, _hurt_time - delta)
 	_hold_min = maxf(0.0, _hold_min - delta)
-	if _roll_time > 0.0 and state.roll_pierce > 0.0:
+	if _roll_time > 0.0 and state.has_roll_damage():
 		_roll_pierce_hits()
+	# 구르기가 **막 끝난 프레임**을 잡습니다. 끄는 곳(_try_dash)과 켜는 곳을
+	# 떨어뜨려 두면, 어느 갈래로 구르기가 끝나든(맞아서·붙잡혀서·층이
+	# 바뀌어서) 통과가 남지 않습니다.
+	var rolling := _roll_time > 0.0 or _dash_time > 0.0
+	if _was_rolling and not rolling:
+		collision_mask |= (1 << 2)
+		# **「이속」 Lv2**: 구르고 나온 직후 잠깐 빨라집니다. 구르기를 도망이
+		# 아니라 **파고드는 수단**으로 만드는 값입니다.
+		if state.has_roll_burst():
+			_roll_burst = ROLL_BURST_TIME
+	_was_rolling = rolling
+	_roll_burst = maxf(0.0, _roll_burst - delta)
 	if _swing_time > 0.0:
 		_swing_time -= delta
 		# 휘두르기 시작하고 조금 뒤에 판정합니다. 예고 없이 맞으면 억울합니다.
@@ -589,7 +656,11 @@ func _ground_move(delta: float) -> void:
 	if wish.length() > 1.0:
 		wish = wish.normalized()
 
-	var target := wish * state.move_speed
+	var speed := state.move_speed
+	# 구르고 나온 직후의 질주(「이속」 Lv2).
+	if _roll_burst > 0.0:
+		speed *= ROLL_BURST_MULT
+	var target := wish * speed
 	# 뒤로 갈 때는 느립니다. 사람이 그렇기도 하고, 무엇보다 **뒤로도 같은
 	# 속도로 도망칠 수 있으면 돌아설 이유가 없습니다** - 적에게 등을 보이는
 	# 위험을 감수할지가 선택이 되려면 값이 있어야 합니다.
@@ -1218,8 +1289,15 @@ func _drive_breath(delta: float) -> void:
 		return
 	_breath_pause = maxf(0.0, _breath_pause - delta)
 	if _breath_pause <= 0.0:
-		state.breath = minf(state.max_breath,
-			state.breath + (BREATH_REGEN + state.breath_regen) * delta)
+		var regen := BREATH_REGEN + state.breath_regen
+		# **「이속」 Lv3 은 걸으면 숨이 두 배로 찹니다.**
+		#
+		# 가만히 서서 차는 것보다 움직이며 차는 편이 낫게 만드는 값입니다 -
+		# 숨을 기다리는 동안 화면 구석에 서 있는 것이 최선이면, 기다리는
+		# 시간이 곧 아무것도 안 하는 시간이 됩니다.
+		if state.has_walk_regen() and Vector2(velocity.x, velocity.z).length() > 0.6:
+			regen *= 2.0
+		state.breath = minf(state.max_breath, state.breath + regen * delta)
 
 
 func breath_cost(kind: String, base: float) -> float:
@@ -1425,8 +1503,10 @@ func _roll_afterimage() -> void:
 	##
 	## 값이 싸지 않으므로(뼈 38개짜리 subtree 복제) 구르는 0.28초 동안 넷까지만
 	## 떨굽니다. 그보다 촘촘해도 눈에는 같습니다.
+	# 계통 상한이 3 이 되면서 문턱을 2 로 내렸습니다(옛 3). 잔상이 Lv3 에서만
+	# 뜨면, 마지막 한 단계까지 구르기가 눈에 아무 변화도 없는 기술이 됩니다.
 	var lv := skill_lv("roll")
-	if lv < 3 or body == null:
+	if lv < 2 or body == null:
 		return
 	# 밝은 잔상은 **뚫는 몸**(「구르는 돌」)입니다. 장수는 여기서 안 셉니다 -
 	# 잔상은 **거리마다** 떨구므로 「먼 구르기」를 찍으면 그만큼 늘어납니다.
@@ -1491,7 +1571,7 @@ func grab_press() -> void:
 		return
 	if ultimate_press("grab"):
 		return
-	if _dash_time > 0.0 or _dead or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _dash_time > 0.0 or _dead or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
 	if _held != null:
 		if not is_instance_valid(_held):
@@ -1541,7 +1621,7 @@ func grab_press() -> void:
 	if prop != null and _grab_distance(prop) <= GRAB_RANGE:
 		_spend_breath(grab_cost)
 		_note_repeat("grab")
-		_grab_cd = GRAB_COOLDOWN * 0.15
+		_grab_cd = _grab_cooldown() * 0.15
 		_grab_cd_max = maxf(_grab_cd, 0.001)
 		_hold_min = HOLD_MIN
 		_push_time = PUSH_TIME
@@ -1585,12 +1665,12 @@ func grab_press() -> void:
 		# 적 앞에서는 밀기가 사실상 대기 없는 기술이었습니다.
 		#
 		# 실측(테스트 방에서 매 프레임 누름, 3초): 적 있음 20회 / 없음 4회.
-		_grab_cd = GRAB_COOLDOWN
+		_grab_cd = _grab_cooldown()
 		_grab_cd_max = maxf(_grab_cd, 0.001)
 	else:
 		# 아무도 없으면 제자리에서 한 번 밀칩니다. 헛손질도 동작은 나가야
 		# 버튼이 먹은 것으로 느껴집니다.
-		_grab_cd = GRAB_COOLDOWN
+		_grab_cd = _grab_cooldown()
 		_grab_cd_max = maxf(_grab_cd, 0.001)
 		Sfx.play(Sfx.PUSH, -1.0, 0.06)
 
@@ -1620,7 +1700,7 @@ func _throw_held() -> void:
 	# 바로 놓지 않습니다. **돌려서** 던집니다 - 뒤로 조금 느리게 감았다가,
 	# 가속하며 던질 방향으로 더 돕니다. 던지는 힘이 어디서 나오는지가 보여야
 	# 날아가는 거리가 납득됩니다.
-	_grab_cd = GRAB_COOLDOWN * 0.15
+	_grab_cd = _grab_cooldown() * 0.15
 	_grab_cd_max = maxf(_grab_cd, 0.001)
 	_hold_min = HOLD_MIN
 	_throw_dir = _throw_direction(dir)
@@ -1784,12 +1864,17 @@ func _throw_direction(wish: Vector3) -> Vector3:
 ## 떨어지는 값이라, 끌고 가는 동안에는 걷기 동작만 나옵니다.
 ## 기술이 쓰는 숨. 100 이 가득입니다.
 ##
-## 고함 80 은 한 번 지르면 거의 바닥난다는 뜻입니다. 대신 맞은 적이 1초
-## 굳으므로, 그 틈에 잡기(10)를 붙이라는 값입니다. 구르기 60 은 피하기와
-## 지르기 중 하나만 고르게 만듭니다.
-const BREATH_SHOUT := 80.0
-const BREATH_ROLL := 60.0
-const BREATH_GRAB := 10.0
+## 숨이 100 이므로 **한 번에 몇 번 쓸 수 있나**가 곧 이 값입니다.
+##
+##   고함 28   세 번 지르면 바닥
+##   구르기 20  다섯 번 - 연달아 굴러 피할 수 있어야 합니다
+##   밀기 8    열 번 이상. 기본기라 세면 안 됩니다
+##
+## 재사용 대기는 짧게 두고 **여기서 막습니다.** 대기로 막으면 기다리는 것이
+## 답이 되지만, 숨으로 막으면 섞어 쓰는 것이 답이 됩니다.
+const BREATH_SHOUT := 28.0
+const BREATH_ROLL := 20.0
+const BREATH_GRAB := 8.0
 ## 잡고 있는 동안 새는 양(초당). 0.1초에 0.5 씩 = 초당 5.
 const BREATH_CARRY_DRAIN := 5.0
 ## 무거운 가구를 들고 있을 때. 세 배로 닳습니다 - 6.7초면 숨이 바닥납니다.
@@ -1815,9 +1900,12 @@ const THROW_SNAP_ARC := deg_to_rad(45.0)
 ## 뜸이 없으면 고함 직후에도 조금씩 차올라서 "바닥났다" 는 순간이 안
 ## 생깁니다. 60/초면 가득 차는 데 1.7초, 잡기 한 번 몫(10)은 0.17초입니다.
 ##
-## 30 에서 두 배로 올렸습니다. 뜸(0.3초)은 그대로라 "바닥났다" 는 순간은
-## 남기고, 바닥에서 다시 채우는 대기만 짧아집니다.
-const BREATH_REGEN := 60.0
+## 숨이 100 이 되면서 24 로 내렸습니다. 가득 차는 데 4.2초 - 구르기(20)
+## 한 번 몫이 0.83초입니다. 60 을 그대로 두면 100 짜리 게이지가 1.7초에
+## 가득 차서, 값을 100 으로 되돌린 이유가 사라집니다.
+##
+## 「스테미나」 계통이 여기에 더합니다(Lv3 이면 64/초).
+const BREATH_REGEN := 24.0
 const BREATH_PAUSE := 0.3
 
 ## 같은 기술을 잇달아 쓸 때 숨이 더 드는 비율.
@@ -1975,7 +2063,7 @@ func _begin_drink(prop: Prop) -> void:
 	## 되고, 적 앞에서 눌러 놓고 도망가도 이득입니다. 0.85초를 버텨야
 	## 받는 것이라야 "지금 마셔도 되나" 가 판단이 됩니다.
 	_spend_breath(BREATH_GRAB)
-	_grab_cd = GRAB_COOLDOWN * 0.15
+	_grab_cd = _grab_cooldown() * 0.15
 	_grab_cd_max = maxf(_grab_cd, 0.001)
 	_drink_time = DRINK_TIME
 	_gulped = false
@@ -2355,7 +2443,12 @@ func _shove_one(enemy: Node3D) -> void:
 	# "밀리는 중이면 멈춘 뒤에" 를 판단할 근거가 없습니다. 밀어 두고 때리면
 	# 죽어도 끝까지 밀려간 뒤에 쓰러집니다.
 	if enemy.has_method("knock_back"):
-		enemy.knock_back(dir * (SHOVE_KNOCK + state.shove_knock))
+		# **「밀기」 Lv3 이면 연쇄가 두 번 남습니다** - 밀린 적1 에 부딪힌
+		# 적2 가 밀리고, 그 적2 에 부딪힌 적3 까지입니다. 셋에서 끊는 이유는
+		# 끝이 없으면 밀기 한 번이 방 하나를 정리해서, 다른 기술을 쓸 이유가
+		# 사라지기 때문입니다.
+		enemy.knock_back(dir * (SHOVE_KNOCK + state.shove_knock),
+			2 if state.has_push_chain() else 0)
 	if enemy.has_method("stagger_for"):
 		enemy.stagger_for(0.45)
 	enemy.call("take_damage", float(roll[0]) * shove_mult, bool(roll[1]),
@@ -2374,8 +2467,13 @@ func _shove_one(enemy: Node3D) -> void:
 	# 실루엣 뒤로 파란 직선을 깔고(만화가 속도를 그리는 방법), 팔에만 잔상을
 	# 남깁니다. 색은 구르기 잔상과 같은 파랑입니다 - 같은 힘에서 나온 것으로
 	# 읽히게.
+	# **이펙트는 계통 Lv2 부터** 붙습니다(Lv3 이 강한 쪽).
+	#
+	# 예전 문턱은 3 과 5 였는데, 계통 상한이 3 이 되면서 5 는 영영 안 옵니다.
+	# 세기는 여전히 **실제로 오른 값**에서 뽑습니다 - 레벨로 세면 이펙트가
+	# 수치와 따로 놀아 거짓말을 합니다.
 	var plv := skill_lv("push")
-	if plv >= 3:
+	if plv >= 2:
 		# **장수는 넉백, 진하기는 피해**입니다(위 _picks 참고).
 		var knock := _picks(state.shove_knock, 0.7)
 		var ghosts := clampi(2 + knock, 2, 6)
@@ -2500,7 +2598,7 @@ func _try_attack() -> void:
 		return
 	# 끌고 있으면 고함도 못 지릅니다. 두 손이 이미 차 있습니다 - 자세가
 	# 서로 덮어써서 팔이 두 곳을 동시에 가리키게 됩니다.
-	if _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
 	var shout_cost := breath_cost("shout", BREATH_SHOUT)
 	if not _has_breath(shout_cost):
@@ -2508,7 +2606,7 @@ func _try_attack() -> void:
 		return
 	_spend_breath(shout_cost)
 	_note_repeat("shout")
-	_attack_cd = 0.55 / maxf(0.2, state.attack_rate)
+	_attack_cd = SHOUT_COOLDOWN / maxf(0.2, state.attack_rate)
 	_attack_cd_max = _attack_cd
 	_swing_time = SWING_TIME
 	_shout_hold = SHOUT_POSE_TIME
@@ -2520,16 +2618,105 @@ func _try_attack() -> void:
 	# 사거리는 이미 `shout_range()` 가 그림 크기를 정하므로 여기서 안 셉니다 -
 	# 「멀리 가는 소리」를 찍으면 구슬이 그만큼 멀리 퍼집니다.
 	var slv := skill_lv("shout")
-	if slv >= 5:
+	if slv >= 3:
 		# **Lv5 는 호랑이입니다.** 구슬은 "퍼졌다" 까지이고, 계통을 끝까지 판
 		# 자리에는 그만한 그림이 있어야 합니다.
 		Fx.tiger(get_parent(), global_position + Vector3(0, 0.35, 0), aim,
 			shout_range())
-	elif slv >= 3:
+	elif slv >= 2:
 		Fx.orbs(get_parent(), global_position + Vector3(0, 0.7, 0), aim,
-			shout_range(),
-			clampi(5 + _picks(state.shout_stun, 0.5) * 3, 5, 14),
-			state.shout_knock > 0.0)
+			shout_range(), 5 + slv * 3, state.shout_knock > 0.0)
+
+
+func begin_joyride(car: Prop) -> bool:
+	## 자동차에 올라탑니다. 이미 타고 있거나 다른 일을 하는 중이면 안 탑니다.
+	if _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
+		return false
+	if car == null or not is_instance_valid(car):
+		return false
+	if _held != null:
+		# 두 손이 차 있으면 못 탑니다. 들고 있던 것은 놓습니다.
+		if _held is Prop:
+			(_held as Prop).drop()
+		_held = null
+	_joy_car = car
+	_joy_time = JOY_TIME
+	_joy_hit.clear()
+	# 처음 방향은 **보고 있는 쪽**입니다. 아무 데로나 튀어 나가면 탄 것이
+	# 아니라 사고를 당한 것으로 보입니다.
+	_joy_dir = aim if aim.length_squared() > 0.01 else Vector3.FORWARD
+	_joy_turn = JOY_TURN_EVERY
+	# 타는 동안은 물리에서 빼 둡니다. 안 그러면 밑에 깔린 차와 몸이 서로
+	# 밀어내며 튕깁니다.
+	car.freeze = true
+	car.held_by = self
+	Sfx.play(Sfx.THROW, -2.0, 0.05)
+	return true
+
+
+func _drive_joyride(delta: float) -> void:
+	## 무적으로 방을 휘젓습니다. **조종은 안 됩니다** - 방향은 스스로 바뀌고,
+	## 벽에 닿으면 튕겨 나옵니다.
+	_joy_time -= delta
+	_invuln = maxf(_invuln, 0.12)
+	_joy_turn -= delta
+	if _joy_turn <= 0.0:
+		_joy_turn = JOY_TURN_EVERY
+		# 지금 가던 쪽에서 크게 꺾습니다. 완전히 무작위로 뽑으면 제자리에서
+		# 갈팡질팡하고, 조금만 꺾으면 직선으로만 갑니다.
+		_joy_dir = _joy_dir.rotated(Vector3.UP, rng.randf_range(-2.0, 2.0)).normalized()
+	# 벽에 닿았으면 튕깁니다. 벽을 밀고 있으면 제자리에서 부르릉거립니다.
+	if is_on_wall():
+		var n := get_wall_normal()
+		n.y = 0.0
+		if n.length_squared() > 0.0001:
+			_joy_dir = _joy_dir.bounce(n.normalized()).normalized()
+	velocity.x = _joy_dir.x * JOY_SPEED
+	velocity.z = _joy_dir.z * JOY_SPEED
+	aim = _joy_dir
+	_joyride_hits()
+	# 차가 발밑을 따라옵니다.
+	if is_instance_valid(_joy_car):
+		_joy_car.global_position = global_position + Vector3(0, 0.12, 0)
+		_joy_car.rotation.y = atan2(-_joy_dir.x, -_joy_dir.z)
+	if _joy_time <= 0.0:
+		_end_joyride()
+
+
+func _joyride_hits() -> void:
+	## 지나가며 치는 적. 한 번의 질주에서 같은 적은 **한 번만** 칩니다.
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var enemy := node as Node3D
+		if not is_instance_valid(enemy) or _joy_hit.has(enemy.get_instance_id()):
+			continue
+		var to: Vector3 = enemy.global_position - global_position
+		to.y = 0.0
+		if to.length() > JOY_REACH + float(enemy.get_meta("body_radius", 0.4)):
+			continue
+		_joy_hit[enemy.get_instance_id()] = true
+		var roll := state.roll_damage(rng)
+		enemy.call("take_damage", float(roll[0]) * JOY_DAMAGE, bool(roll[1]),
+			Vector3.ZERO, 0.5, global_position)
+		if enemy.has_method("knock_back"):
+			var away: Vector3 = to.normalized() if to.length() > 0.05 else _joy_dir
+			enemy.knock_back(away * JOY_KNOCK)
+		note_hit()
+		Game.shake(0.18, 0.12)
+		Fx.burst(get_parent(), enemy.global_position + Vector3(0, 0.6, 0),
+			Color(1.0, 0.9, 0.6), 10, 3.6)
+
+
+func _end_joyride() -> void:
+	_joy_time = 0.0
+	if is_instance_valid(_joy_car):
+		# 내린 자리에 세워 둡니다. 다시 탈 수 있어야 이 물건이 방의 자원으로
+		# 남습니다 - 한 번 쓰고 사라지면 그냥 이벤트입니다.
+		_joy_car.held_by = null
+		_joy_car.freeze = false
+		_joy_car.global_position = global_position + aim * -1.1 + Vector3(0, 0.3, 0)
+	_joy_car = null
+	velocity.x *= 0.3
+	velocity.z *= 0.3
 
 
 func _try_dash() -> void:
@@ -2541,9 +2728,9 @@ func _try_dash() -> void:
 		return
 	# 끌고 있으면 못 구릅니다. 사람을 잡은 채로 앞구르기를 하면 잡은 손이
 	# 어디로 가야 할지 정할 수가 없습니다.
-	if _dash_cd > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _dash_cd > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _read_time > 0.0:
 		return
-	var roll_cost := breath_cost("roll", BREATH_ROLL)
+	var roll_cost := breath_cost("roll", BREATH_ROLL) * state.roll_cost_mult()
 	if not _has_breath(roll_cost):
 		_out_of_breath()
 		return
@@ -2556,12 +2743,22 @@ func _try_dash() -> void:
 	_dash_time = DASH_TIME
 	_roll_time = ROLL_TIME
 	_pierced.clear()
+	# **대기는 거의 없습니다.** 연달아 구르는 것을 막는 것은 숨이지 시계가
+	# 아닙니다 - 시계로 막으면 굴러 피해야 하는 순간에 "아직 안 됨" 이 되고,
+	# 그건 실력이 아니라 운입니다.
 	_dash_cd = state.dash_cooldown
 	_dash_cd_max = maxf(_dash_cd, 0.001)
 	# 구르는 **동작 내내** 무적입니다. 예전에는 이동이 끝나는 순간(0.28초)
 	# 까지만이라, 아직 굴러가는 그림인데 맞았습니다 - 눈에 보이는 것과 판정이
 	# 어긋나면 억울하게 느껴집니다.
 	_invuln = maxf(_invuln, ROLL_TIME)
+	# **「구르기」 Lv2 는 적을 통과합니다.**
+	#
+	# 무적만으로는 부족합니다 - 안 아픈데 몸이 걸려서, 적 무리 한가운데로
+	# 굴러 들어가면 그 안에 끼입니다. 피하는 기술이 갇히는 기술이 됩니다.
+	# 적 층(1<<2)만 뺍니다. 벽은 그대로 막아야 방 밖으로 나갑니다.
+	if state.has_roll_ghost():
+		collision_mask &= ~(1 << 2)
 	_swing_time = 0.0
 	if _jiggle != null:
 		_jiggle.kick(_dash_dir * 26.0)
@@ -2624,9 +2821,14 @@ func _resolve_swing() -> void:
 			continue
 		if to.normalized().dot(aim) < cos(ATTACK_ARC * 0.5):
 			continue
-		var roll := state.roll_damage(rng)
-		# 고함은 아프기보다 **굳히는** 기술입니다. 1초 동안 움직이지도
-		# 돌지도 못하므로, 그 사이에 뒤로 돌아 들어가 잡을 수 있습니다.
+		# **고함은 「고함」 Lv3 전까지 아프지 않습니다.**
+		#
+		# 범위가 넓고 굳히기까지 하는데 피해까지 있으면 다른 기술을 쓸 이유가
+		# 없어집니다 - 실제로 그렇게 굴러가고 있었습니다. 지금 이 기술이 파는
+		# 것은 **판을 정리하는 것**이고, 정리한 뒤 때리는 일은 밀기가 합니다.
+		var roll: Array = [0.0, false]
+		if state.has_shout_damage():
+			roll = state.roll_damage(rng)
 		if state.shout_knock > 0.0:
 			# **「돌풍」을 찍었으면** 맞은 자리에서 한 번 더 터집니다.
 			# 밀어내는 힘이 있다는 것을 맞는 쪽에서 보여 줍니다 - 예전에는
@@ -2651,7 +2853,7 @@ func _resolve_swing() -> void:
 			enemy.knock_back(away.normalized() * state.shout_knock)
 		hit_any = true
 		note_hit()
-		if state.lifesteal > 0.0:
+		if state.lifesteal > 0.0 and float(roll[0]) > 0.0:
 			var healed: float = float(roll[0]) * state.lifesteal
 			state.heal(healed)
 			health_changed.emit(state.hp, state.max_hp)
@@ -2674,12 +2876,10 @@ func _show_swing() -> void:
 	##
 	## 시차는 **목소리 길이에 맞춥니다**. 셋을 앞쪽에 몰아 내보내면 목소리가
 	## 아직 한창일 때 화면에는 아무것도 남지 않습니다(RING_GAP 주석 참고).
-	var origin := global_position + Vector3(0, 0.95, 0)
-	for i in 3:
-		var delay := RING_GAP * i
-		get_tree().create_timer(delay).timeout.connect(
-			func() -> void: _shout_ring(origin + aim * (0.35 + 0.30 * i),
-				1.0 - 0.19 * i, 0.72 - 0.14 * i))
+	# **닿는 범위를 그대로 칠합니다.** 사거리와 각도를 판정에서 받아 오므로
+	# (`shout_range()`, `ATTACK_ARC`), 수치를 바꾸면 그림도 같이 바뀝니다.
+	Fx.shout_fan(get_parent(), global_position, aim,
+		shout_range() + 0.4, rad_to_deg(ATTACK_ARC))
 
 	# 목소리. vtos 프로젝트에서 자른 클립(a1)입니다.
 	#
@@ -2957,6 +3157,23 @@ func take_damage(amount: float, from: Vector3 = Vector3.ZERO,
 			velocity += push.normalized() * knock
 
 	if state.hp <= 0.0:
+		# **「체력」 Lv3 은 한 판에 한 번 버팁니다.**
+		#
+		# 완전 회복이 아니라 절반입니다 - 다 채워 주면 죽을 자리에서 죽지
+		# 않는 것이 아니라 판이 하나 더 생기는 것이 되고, 그러면 계통 하나가
+		# 다른 다섯보다 압도적으로 좋아집니다. 절반은 "한 번 더 실수하면
+		# 끝" 이라는 자리에 세워 줍니다.
+		if state.has_revive():
+			state.revive_used = true
+			state.hp = state.max_hp * 0.5
+			_invuln = maxf(_invuln, 1.4)
+			health_changed.emit(state.hp, state.max_hp)
+			Game.shake(0.5, 0.34)
+			Fx.burst(get_parent(), global_position + Vector3(0, 0.8, 0),
+				Color(1.0, 0.9, 0.5), 26, 4.2)
+			if Game.instance != null:
+				Game.instance.ui.toast("버텼다!", UiTheme.ACCENT)
+			return
 		state.hp = 0.0
 		_die()
 

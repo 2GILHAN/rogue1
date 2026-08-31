@@ -452,6 +452,9 @@ func set_fade_focus(camera_position: Vector3, player_position: Vector3,
 		mat.set_shader_parameter("cam_pos", camera_position)
 		mat.set_shader_parameter("player_pos", player_position)
 		mat.set_shader_parameter("fade_radius", radius)
+		# 칸 크기를 그대로 넘깁니다. 셰이더에 숫자를 박아 두면 TILE 을
+		# 고쳤을 때 벽면이 어긋난 격자로 비칩니다.
+		mat.set_shader_parameter("cell_size", TILE)
 
 
 func _textured(path: String, tint: Color, rough: float) -> StandardMaterial3D:
