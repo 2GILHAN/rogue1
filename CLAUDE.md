@@ -49,6 +49,9 @@ GODOT="/c/Users/GilhanLee/Downloads/Godot_v4.7.1-stable_win64.exe/Godot_v4.7.1-s
   것 두 번.
 - 한글 문자열을 늘렸으면 `python tools/make_font.py`(서브셋을 다시 만들지 않으면
   폰에서 글자가 빕니다).
+- 공개 주소: https://2gilhan.github.io/rogue1/ — `gh-pages` 가지에
+  `build/web` 을 통째로 올립니다. **`variant/thread_support` 를 켜지 마세요**
+  (GitHub Pages 는 교차 출처 격리 헤더를 못 붙입니다).
 - 폰 빌드 주소: https://home.tailc06b21.ts.net:8456/ — `tools/serve.py`가 8807에
   붙습니다. `index.pck`는 `no-cache`여야 합니다(캐시되면 폰이 옛 코드를 돕니다).
 

@@ -1301,6 +1301,53 @@ python tools/make_source_props.py --force   # 전부 다시 (한 개 45초쯤)
 같은 자리에서 글로우와 그림자도 끕니다. 데스크톱에서 그 설정을 재현하려면
 `--lean` 입니다.
 
+### 텍스처는 폰 규격으로 들여옵니다
+
+화면에서 아이는 **60~150 픽셀**입니다. 원본은 2048² 였는데, 무압축 2048² 한 장이
+VRAM 에서 16MB 라 열 장이면 그것만으로 폰 브라우저 탭에 안 들어갑니다.
+
+`.import` 파일에 두 가지를 겁니다.
+
+| | 값 | 무엇 |
+|---|---|---|
+| `process/size_limit` | **1024** | 원본은 그대로 두고 들여올 때만 자릅니다 |
+| `compress/mode` | **2**(VRAM 압축) | 웹 프리셋의 `for_mobile` 이 ETC2 를 만듭니다 |
+
+거는 곳은 `assets/models/*_texture.png`, `assets/props/*.png`, 바닥, 벽지입니다.
+호랑이 선화 둘(`tiger_side`·`tiger_front`)은 **뺐습니다** — 444px 선 그림이라
+VRAM 압축이 선을 뭉갭니다.
+
+```
+텍스처 262MB → 41MB      pck 57MB → 28.6MB
+```
+
+`vram_texture_compression/for_desktop` 은 **끕니다**. 켜 두면 S3TC 와 ETC2 가 둘
+다 pck 에 들어가 오히려 커집니다(57 → 63.5MB 로 늘어난 적이 있습니다).
+
+**빌드에서 빼는 것**은 `export_presets.cfg` 의 `exclude_filter` 입니다. 파일은
+저장소에 남기고 빌드에서만 뺍니다 — 지우면 되돌릴 수 없습니다.
+
+| 뺀 것 | 왜 |
+|---|---|
+| `assets/source/*` | 소품을 구울 때 쓴 4면도 원본. 주석에만 나옵니다 (45MB) |
+| `assets/textures/wall1*`·`wall2*` | 벽지(`wall3`)로 갈아탄 뒤로 안 씁니다 |
+| `assets/models/tiger.glb`·`tiger_0*` | 호랑이를 옆얼굴 그림으로 바꾼 뒤로 안 씁니다 |
+
+### 깃허브 페이지로 나갑니다
+
+| | |
+|---|---|
+| 주소 | https://2gilhan.github.io/rogue1/ |
+| 소스 | `main` 가지 |
+| 빌드 | `gh-pages` 가지 뿌리 (`build/web` 을 통째로) |
+
+`main` 은 `build/` 를 안 담습니다 — 소스를 고칠 때마다 30MB 짜리 바이너리가
+역사에 한 벌씩 쌓입니다.
+
+**`variant/thread_support` 는 반드시 꺼 둡니다.** 켜면 SharedArrayBuffer 를 쓰고,
+그러면 `Cross-Origin-Opener-Policy` 헤더가 필요한데 **GitHub Pages 는 헤더를 못
+붙입니다** — 폰에서 흰 화면이 됩니다.
+
 ### 색감 필터 — `assets/shaders/ghibli.gdshader`
 
 화면 전체에 마지막으로 한 번 거는 필터입니다. 버튼 그림에 쓴 것과 **같은 세
