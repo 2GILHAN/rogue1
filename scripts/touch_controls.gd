@@ -19,6 +19,7 @@ extends Control
 ## 키보드 입력과 섞이면 어긋납니다. 그냥 Player 가 읽는 값을 직접 채웁니다.
 
 signal attack_pressed
+signal attack_released
 signal dash_pressed
 signal grab_pressed
 signal grab_released
@@ -293,8 +294,11 @@ func _build_buttons() -> void:
 		dash_pressed)
 	# 고함은 원의 **위쪽**입니다. 멀리서 쓰는 기술이라 엄지가 가장 멀리
 	# 뻗는 자리에 둡니다.
+	# **뗄 때의 신호도 보냅니다.** 고함은 누르는 동안 모으는 기술이라,
+	# 떼는 순간이 곧 지르는 순간입니다.
 	_button(BUTTON_ART["shout"], "shout",
-		_spot(c, BUTTON_ANGLES["shout"], BUTTON_ARC), BUTTON_SIZE, attack_pressed)
+		_spot(c, BUTTON_ANGLES["shout"], BUTTON_ARC), BUTTON_SIZE,
+		attack_pressed, attack_released)
 	# 뗄 때의 신호도 그대로 보냅니다. 지금은 받는 쪽이 아무 일도 하지 않지만
 	# (한 번 눌러 잡고 다시 눌러 던집니다), 신호를 끊어 두면 나중에 길게 누르기
 	# 같은 것을 붙일 때 세 곳을 다시 이어야 합니다.

@@ -395,6 +395,20 @@ var _joy_turn := 0.0
 ## 이번 질주에서 이미 친 적. 한 번씩만 칩니다 - 안 그러면 붙어 있는 적을
 ## 매 프레임 쳐서 즉사시킵니다.
 var _joy_hit: Dictionary = {}
+## 물장난이 남은 시간.
+var _splash_time := 0.0
+## 팔을 바꾸기까지 남은 시간과, 지금 어느 쪽 팔이 물을 치고 있나.
+var _splash_swap := 0.0
+var _splash_left := true
+## 고함을 모은 정도(0~1). **-1 이면 모으는 중이 아닙니다.**
+var _shout_charge := -1.0
+## 이번에 지른 고함이 얼마나 모은 것인가. 판정과 그림이 같이 씁니다.
+var _shout_fired := 1.0
+## 모으는 동안 도는 목소리. 손을 떼면 끊습니다.
+var _shout_voice: AudioStreamPlayer = null
+## 모으는 동안 발밑에 자라는 부채꼴.
+var _shout_prev: MeshInstance3D = null
+var _shout_prev_mat: StandardMaterial3D = null
 ## 고함 자세를 붙잡고 있는 시간. 판정(_swing_time, 0.30초)보다 깁니다.
 ##
 ## 목소리 클립이 1.05초인데 자세가 0.30초에 풀리면, 아직 지르고 있는데 아이는
@@ -418,8 +432,15 @@ var bot_move := Vector2.ZERO
 
 ## 화면 조작(폰)에서 들어오는 값. 키보드 입력과 더해집니다.
 var touch_move := Vector2.ZERO
-## 마우스가 없을 때 가장 가까운 적을 겨눕니다.
+## 록온. 켜면 가장 가까운 적을 겨눕니다. **기본은 끔**입니다.
 var auto_aim := false
+## 마우스로 겨누는가. **화면 조작(폰)에서는 false** 입니다.
+##
+## 폰에는 마우스가 없는데 `get_mouse_position()` 은 **마지막으로 닿은 자리**를
+## 계속 돌려줍니다. 그래서 록온을 끄면 몸이 조금 전에 누른 버튼 쪽을 향한 채로
+## 굳고, 걸어가는 쪽과 보는 쪽이 따로 놉니다 - 게걸음으로 걷는 것처럼
+## 보입니다. 그럴 때는 **가는 쪽**이 조준입니다.
+var mouse_aim := true
 
 
 func setup(run_state: RunState, generator: RandomNumberGenerator) -> void:
@@ -510,7 +531,11 @@ func _physics_process(delta: float) -> void:
 
 	_update_aim()
 
-	if _joy_time > 0.0:
+	if _splash_time > 0.0:
+		# 물장난 중에는 발이 묶입니다. 짧고(1.8초) 안전한 방에서만 도는
+		# 것이라 답답할 자리가 없습니다.
+		_drive_splash(delta)
+	elif _joy_time > 0.0:
 		# **자동차를 타는 동안에는 다른 것이 아무것도 안 됩니다.** 걷지도,
 		# 구르지도, 밀지도 못합니다 - 못 모는 것이 이 물건의 값입니다.
 		_drive_joyride(delta)
@@ -609,6 +634,7 @@ func _physics_process(delta: float) -> void:
 	# 맡습니다. 층이 달라 서로 싸우지 않습니다.
 	_drive_animation()
 	_drive_body(delta)
+	_drive_shout_charge(delta)
 	_drive_pose_layer(delta)
 	_drive_breath(delta)
 	_drive_ultimate(delta)
@@ -834,6 +860,15 @@ func _update_aim() -> void:
 		_auto_aim()
 		return
 	if auto_aim and _auto_aim():
+		return
+	if not mouse_aim:
+		# 마우스가 없습니다. **가는 쪽**을 봅니다.
+		#
+		# 멈추면 마지막으로 보던 쪽을 그대로 둡니다 - 0 으로 되돌리면 손을
+		# 뗄 때마다 몸이 한 방향으로 홱 돌아갑니다.
+		var going := Vector3(velocity.x, 0.0, velocity.z)
+		if going.length_squared() > 0.25:
+			aim = going.normalized()
 		return
 	var cam := get_viewport().get_camera_3d()
 	if cam == null:
@@ -1351,6 +1386,14 @@ func _drive_pose_layer(delta: float) -> void:
 	if _pose == null or _roll_time > 0.0:
 		return
 	var want := 0.0
+	if _splash_time > 0.0:
+		# **물장난이 가장 앞입니다.** 이때는 다른 아무 일도 안 일어나므로
+		# 뒤엣것과 겨룰 일이 없습니다.
+		_pose.pose = PoseOverride.SPLASH_A if _splash_left else PoseOverride.SPLASH_B
+		# 팔을 바꿀 때마다 **덜 섞인 데서 출발**합니다. 1.0 에 붙여 두면 두
+		# 자세 사이를 미끄러지듯 오가서 첨벙거리는 맛이 없습니다.
+		_pose.weight = lerpf(_pose.weight, 1.0, 1.0 - exp(-16.0 * delta))
+		return
 	if _lunge_time > 0.0 and _lunge_at != null:
 		# 달려드는 자세가 맞은 자세 다음입니다. 달려가다 맞으면 그쪽이
 		# 먼저 보여야 합니다.
@@ -1480,7 +1523,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _dead:
 		return
 	if event.is_action_pressed("attack"):
-		_try_attack()
+		_begin_shout()
+	elif event.is_action_released("attack"):
+		_release_shout()
 	elif event.is_action_pressed("dash"):
 		_try_dash()
 	elif event.is_action_pressed("grab"):
@@ -1490,7 +1535,51 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func attack() -> void:
-	_try_attack()
+	## 한 번에 지릅니다. **확인용 배치와 봇이 씁니다** - 사람 손으로는
+	## 누르고 떼는 두 걸음입니다(`_begin_shout` / `_release_shout`).
+	if not _begin_shout():
+		return
+	_shout_charge = SHOUT_CHARGE_MIN
+	_release_shout()
+
+
+func shout_press() -> void:
+	_begin_shout()
+
+
+func shout_release() -> void:
+	_release_shout()
+
+
+## 고함을 모으는 것에 대하여.
+##
+## 누르는 동안 부채꼴이 **길이와 넓이 둘 다** 커집니다. 살짝 눌렀다 떼면 최소
+## 범위이고 소리도 거기서 끊깁니다 - 소리가 온전히 다 나는 동안 누르고 있어야
+## 최대입니다. 귀와 눈이 같은 것을 말하므로 언제까지 눌러야 하는지를 따로
+## 배울 필요가 없습니다.
+##
+## 값을 안 받는 이유: 모으는 **시간 자체가 값**입니다. 그동안 서 있어야 하고,
+## 적은 그 사이에 다가옵니다. 숨까지 더 받으면 최대로 지르는 일이 두 번
+## 비싸집니다.
+const SHOUT_CHARGE_TIME := Sfx.SHOUT_LEN
+## 살짝 눌렀을 때의 몫. 0 이면 스쳐 누른 것이 헛손질이 되어, 눌렀는데 아무 일도
+## 안 일어난 것처럼 보입니다.
+const SHOUT_CHARGE_MIN := 0.22
+## 최소일 때와 최대일 때의 사거리 배수.
+const SHOUT_REACH_MIN := 0.55
+## 최소일 때와 최대일 때의 각도(도).
+const SHOUT_ARC_MIN := 62.0
+const SHOUT_ARC_MAX := 132.0
+
+
+func shout_arc(charge: float) -> float:
+	## 그때의 부채꼴 각도. **판정과 그림이 같은 함수를 씁니다.**
+	return lerpf(SHOUT_ARC_MIN, SHOUT_ARC_MAX, clampf(charge, 0.0, 1.0))
+
+
+func shout_reach(charge: float) -> float:
+	## 그때의 사거리.
+	return shout_range() * lerpf(SHOUT_REACH_MIN, 1.0, clampf(charge, 0.0, 1.0))
 
 
 func _roll_afterimage() -> void:
@@ -1571,7 +1660,7 @@ func grab_press() -> void:
 		return
 	if ultimate_press("grab"):
 		return
-	if _joy_time > 0.0 or _dash_time > 0.0 or _dead or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+	if _splash_time > 0.0 or _joy_time > 0.0 or _dash_time > 0.0 or _dead or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
 	if _held != null:
 		if not is_instance_valid(_held):
@@ -2591,6 +2680,84 @@ func _nearest_prop() -> Prop:
 	return best
 
 
+func _begin_shout() -> bool:
+	## 누르는 순간. **모으기 시작만 하고 아직 안 지릅니다.**
+	if _mash():
+		return false
+	if ultimate_press("shout"):
+		return false
+	if _shout_charge >= 0.0:
+		return false        # 이미 모으는 중
+	if _splash_time > 0.0 or _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 			or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+		return false
+	# **숨은 여기서 확인만** 하고 뺏지 않습니다. 모으다 그만두는 일이 값을
+	# 치르는 일이 되면, 잘못 눌렀을 때 손해가 두 번입니다.
+	if not _has_breath(breath_cost("shout", BREATH_SHOUT)):
+		_out_of_breath()
+		return false
+	_shout_charge = 0.0
+	_shout_voice = Sfx.play_loose(Sfx.SHOUT, 0.0)
+	return true
+
+
+func _drive_shout_charge(delta: float) -> void:
+	## 모으는 동안. 부채꼴이 자라는 것은 `_shout_preview` 가 그립니다.
+	if _shout_charge < 0.0:
+		return
+	_shout_charge = minf(1.0, _shout_charge + delta / SHOUT_CHARGE_TIME)
+	# 모으는 동안에는 천천히 걷습니다. 아주 못 움직이면 예고가 아니라 벌이
+	# 되고, 평소대로 걸으면 모으는 일에 값이 없습니다.
+	_shout_preview()
+
+
+func _shout_preview() -> void:
+	## 모으는 동안 **자라는 부채꼴**을 발밑에 그립니다.
+	##
+	## 지를 때 칠하는 것과 같은 함수로 만듭니다(`Fx.fan_mesh`) - 미리 보는
+	## 것과 실제로 닿는 것이 다르면 그림이 거짓말입니다.
+	var charge := maxf(_shout_charge, SHOUT_CHARGE_MIN)
+	if _shout_prev == null:
+		_shout_prev_mat = Fx.fan_material()
+		_shout_prev = MeshInstance3D.new()
+		_shout_prev.material_override = _shout_prev_mat
+		_shout_prev.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_shout_prev.set_meta("flat", true)
+		get_parent().add_child(_shout_prev)
+	# 자라는 것을 보여 주는 것이 일이라 메시를 매번 새로 만듭니다. 부채꼴은
+	# 삼각형 스무 장이라 값이 없습니다(0.0x ms).
+	_shout_prev.mesh = Fx.fan_mesh(shout_reach(charge) + 0.4, shout_arc(charge))
+	_shout_prev.global_position = global_position + Vector3(0, 0.05, 0)
+	_shout_prev.rotation.y = atan2(-aim.x, -aim.z)
+	# 다 모이면 진해집니다. 언제가 최대인지 눈으로도 알 수 있어야 합니다.
+	_shout_prev_mat.albedo_color = Color(1.0, 0.88, 0.5, 0.16).lerp(
+		Color(1.0, 0.72, 0.32, 0.40), charge)
+
+
+func _clear_shout_preview() -> void:
+	if _shout_prev != null and is_instance_valid(_shout_prev):
+		_shout_prev.queue_free()
+	_shout_prev = null
+	_shout_prev_mat = null
+
+
+func _release_shout() -> void:
+	## 손을 뗐습니다. **모은 만큼** 지릅니다.
+	if _shout_charge < 0.0:
+		return
+	var charge := maxf(_shout_charge, SHOUT_CHARGE_MIN)
+	_shout_charge = -1.0
+	_shout_fired = charge
+	# **소리도 여기서 끊깁니다.** 살짝 눌렀다 떼면 소리가 잘리는 것이 곧
+	# "덜 모았다" 입니다.
+	if _shout_voice != null and is_instance_valid(_shout_voice):
+		if charge < 0.999:
+			_shout_voice.stop()
+			_shout_voice.queue_free()
+	_shout_voice = null
+	_clear_shout_preview()
+	_try_attack()
+
+
 func _try_attack() -> void:
 	if _mash():
 		return
@@ -2598,7 +2765,7 @@ func _try_attack() -> void:
 		return
 	# 끌고 있으면 고함도 못 지릅니다. 두 손이 이미 차 있습니다 - 자세가
 	# 서로 덮어써서 팔이 두 곳을 동시에 가리키게 됩니다.
-	if _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+	if _splash_time > 0.0 or _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
 	var shout_cost := breath_cost("shout", BREATH_SHOUT)
 	if not _has_breath(shout_cost):
@@ -2622,10 +2789,51 @@ func _try_attack() -> void:
 		# **Lv5 는 호랑이입니다.** 구슬은 "퍼졌다" 까지이고, 계통을 끝까지 판
 		# 자리에는 그만한 그림이 있어야 합니다.
 		Fx.tiger(get_parent(), global_position + Vector3(0, 0.35, 0), aim,
-			shout_range())
+			shout_reach(_shout_fired))
 	elif slv >= 2:
 		Fx.orbs(get_parent(), global_position + Vector3(0, 0.7, 0), aim,
-			shout_range(), 5 + slv * 3, state.shout_knock > 0.0)
+			shout_reach(_shout_fired), 5 + slv * 3, state.shout_knock > 0.0)
+
+
+## 물장난이 도는 시간과, 팔을 좌우로 바꾸는 주기.
+##
+## 1.8초는 "쉬었다" 가 몸에 남는 최소 길이입니다. 0.28초마다 팔을 바꾸면
+## 여섯 번쯤 첨벙거립니다 - 두세 번이면 실수처럼 보이고, 더 잦으면 떠는
+## 것처럼 보입니다.
+const SPLASH_TIME := 1.8
+const SPLASH_SWAP := 0.28
+
+
+func begin_splash(at: Vector3) -> void:
+	## 물놀이터에 들어가 물장난을 칩니다.
+	##
+	## 회복이 숫자로만 일어나면 그 자리가 무엇을 하는 곳인지 화면에 안
+	## 남습니다 - 값을 치른 것이 몸으로 보여야 다음 층에서도 찾아갑니다.
+	_splash_time = SPLASH_TIME
+	# 물 한가운데로 걸어 들어갑니다. 가장자리에 선 채로 팔만 저으면 물에
+	# 들어간 것이 아니라 물을 향해 손짓하는 것으로 보입니다.
+	global_position = Vector3(at.x, global_position.y, at.z)
+	velocity = Vector3.ZERO
+	_splash_burst(at)
+
+
+func _splash_burst(at: Vector3) -> void:
+	Fx.burst(get_parent(), at + Vector3(0, 0.35, 0),
+		Color(0.62, 0.88, 1.0), 14, 3.0)
+	Sfx.play(Sfx.STEP, -4.0, 0.18)
+
+
+func _drive_splash(delta: float) -> void:
+	## 물장난이 도는 동안. 걷지도 기술을 쓰지도 못합니다.
+	_splash_time -= delta
+	velocity.x = 0.0
+	velocity.z = 0.0
+	_splash_swap -= delta
+	if _splash_swap <= 0.0:
+		_splash_swap = SPLASH_SWAP
+		_splash_left = not _splash_left
+		# 팔을 바꿀 때마다 물이 튑니다. 자세만 오가면 소리 없는 체조입니다.
+		_splash_burst(global_position)
 
 
 func begin_joyride(car: Prop) -> bool:
@@ -2646,9 +2854,14 @@ func begin_joyride(car: Prop) -> bool:
 	# 아니라 사고를 당한 것으로 보입니다.
 	_joy_dir = aim if aim.length_squared() > 0.01 else Vector3.FORWARD
 	_joy_turn = JOY_TURN_EVERY
-	# 타는 동안은 물리에서 빼 둡니다. 안 그러면 밑에 깔린 차와 몸이 서로
-	# 밀어내며 튕깁니다.
+	# **타는 동안 차를 물리에서 통째로 뺍니다.**
+	#
+	# `freeze` 만으로는 부족했습니다 - 얼린 차는 움직이지 않는 벽이 되는데,
+	# 그 벽을 매 프레임 발밑으로 옮기니 물리가 몸을 밖으로 밀어냈습니다.
+	# 빠져나갈 곳이 위뿐이라 **하늘로 날아갔습니다.** 층을 0 으로 두면
+	# 아무와도 안 부딪히므로 밀려날 일이 없습니다.
 	car.freeze = true
+	car.set_solid(false)
 	car.held_by = self
 	Sfx.play(Sfx.THROW, -2.0, 0.05)
 	return true
@@ -2673,6 +2886,9 @@ func _drive_joyride(delta: float) -> void:
 			_joy_dir = _joy_dir.bounce(n.normalized()).normalized()
 	velocity.x = _joy_dir.x * JOY_SPEED
 	velocity.z = _joy_dir.z * JOY_SPEED
+	# **위로는 안 갑니다.** 무엇에 걸려 튀어 오르더라도 그 자리에서 눌러
+	# 둡니다 - 자동차는 바닥을 달리는 물건입니다.
+	velocity.y = minf(velocity.y, 0.0)
 	aim = _joy_dir
 	_joyride_hits()
 	# 차가 발밑을 따라옵니다.
@@ -2713,6 +2929,7 @@ func _end_joyride() -> void:
 		# 남습니다 - 한 번 쓰고 사라지면 그냥 이벤트입니다.
 		_joy_car.held_by = null
 		_joy_car.freeze = false
+		_joy_car.set_solid(true)
 		_joy_car.global_position = global_position + aim * -1.1 + Vector3(0, 0.3, 0)
 	_joy_car = null
 	velocity.x *= 0.3
@@ -2728,7 +2945,7 @@ func _try_dash() -> void:
 		return
 	# 끌고 있으면 못 구릅니다. 사람을 잡은 채로 앞구르기를 하면 잡은 손이
 	# 어디로 가야 할지 정할 수가 없습니다.
-	if _joy_time > 0.0 or _dash_cd > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _read_time > 0.0:
+	if _splash_time > 0.0 or _joy_time > 0.0 or _dash_cd > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _read_time > 0.0:
 		return
 	var roll_cost := breath_cost("roll", BREATH_ROLL) * state.roll_cost_mult()
 	if not _has_breath(roll_cost):
@@ -2816,10 +3033,12 @@ func _resolve_swing() -> void:
 			continue
 		var to := enemy.global_position - global_position
 		to.y = 0.0
-		var reach: float = shout_range() + float(enemy.get_meta("body_radius", 0.4))
+		# **모은 만큼**입니다. 그림(`Fx.shout_fan`)과 같은 함수를 쓰므로,
+		# 눈에 보인 부채꼴이 곧 닿는 범위입니다.
+		var reach: float = shout_reach(_shout_fired) 			+ float(enemy.get_meta("body_radius", 0.4))
 		if to.length() > reach:
 			continue
-		if to.normalized().dot(aim) < cos(ATTACK_ARC * 0.5):
+		if to.normalized().dot(aim) < cos(deg_to_rad(shout_arc(_shout_fired)) * 0.5):
 			continue
 		# **고함은 「고함」 Lv3 전까지 아프지 않습니다.**
 		#
@@ -2879,13 +3098,14 @@ func _show_swing() -> void:
 	# **닿는 범위를 그대로 칠합니다.** 사거리와 각도를 판정에서 받아 오므로
 	# (`shout_range()`, `ATTACK_ARC`), 수치를 바꾸면 그림도 같이 바뀝니다.
 	Fx.shout_fan(get_parent(), global_position, aim,
-		shout_range() + 0.4, rad_to_deg(ATTACK_ARC))
+		shout_reach(_shout_fired) + 0.4, shout_arc(_shout_fired))
 
 	# 목소리. vtos 프로젝트에서 자른 클립(a1)입니다.
 	#
 	# 음높이를 매번 조금씩 흔듭니다. 같은 파일이 그대로 반복되면 세 번째부터
 	# 기계음으로 들립니다.
-	Sfx.play(Sfx.SHOUT, 0.0, 0.06)
+	# **목소리는 여기서 안 냅니다.** 누르는 순간(`_begin_shout`)에 시작해서
+	# 떼는 순간 끊깁니다 - 모은 만큼만 들리는 것이 이 기술의 규칙입니다.
 
 	# 외치는 순간 발밑에서 먼지가 한 번 튑니다.
 	#

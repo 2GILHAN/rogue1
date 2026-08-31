@@ -30,7 +30,11 @@ const GIRL := "res://assets/models/girl.glb"
 const BOY := "res://assets/models/boy.glb"
 ## 선생님. 유일한 어른이라 키가 1.65m 로 아이들(1.25m)보다 확연히 큽니다.
 const TEACHER := "res://assets/models/teacher.glb"
-const SHOPKEEPER := "res://assets/models/npc_shopkeeper.glb"
+## 물물교환하는 여자아이. **어린이집에도 아군은 있습니다.**
+##
+## 예전 상인(npc_shopkeeper)은 어른이었습니다. 이 게임의 적이 전부 또래
+## 아이들인데 도와주는 쪽만 어른이면, 아이들 사이의 일이라는 것이 흐려집니다.
+const SHOPKEEPER := "res://assets/models/witch.glb"
 ## 안 쓰는 이전 에셋. 되돌리고 싶을 때를 위해 남겨 둡니다.
 const HERO_EMBERLING := "res://assets/models/hero_emberling.glb"
 const ENEMY_SPROUT := "res://assets/models/enemy_sprout.glb"
@@ -54,7 +58,9 @@ const SIZE := {
 	GIRL: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.728},
 	BOY: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.754},
 	TEACHER: {"height": 1.65, "radius": 0.30},
-	SHOPKEEPER: {"height": 1.4, "radius": 0.43},
+	# 원본이 0.76m 라 다른 아이들과 같은 키(1.25m)로 세웁니다 - 새 주인공
+	# (0.85m)에 쓴 방법 그대로입니다.
+	SHOPKEEPER: {"height": 1.25, "radius": 0.40, "scale": 1.25 / 0.76},
 	HERO_EMBERLING: {"height": 1.5, "radius": 0.43},
 	ENEMY_SPROUT: {"height": 1.1, "radius": 0.42},
 }

@@ -344,27 +344,33 @@ func skill_summary() -> Array:
 
 ## 가격은 층이 오를수록 비싸집니다. 초반에 다 사 버리면 후반에 살 게 없어집니다.
 func shop_stock(rng: RandomNumberGenerator) -> Array:
+	## 물물교환 재고 셋. **또래가 가진 것들**입니다 - 숫돌이나 가죽 손잡이는
+	## 어린이집에 없습니다.
+	##
+	## 값은 층이 오를수록 비싸집니다. 초반에 다 바꿔 버리면 후반에 바꿀 것이
+	## 없어집니다.
 	var scale := 1.0 + (floor_num - 1) * 0.22
 	var catalog := [
-		{"id": "heal", "name": "따뜻한 스튜", "desc": "체력 60 회복",
-			"price": int(28 * scale), "icon": "♨"},
-		{"id": "power", "name": "숫돌", "desc": "공격력 +6",
-			"price": int(52 * scale), "icon": "†"},
+		{"id": "heal", "name": "딸기 우유", "desc": "체력 60 회복",
+			"price": int(22 * scale), "icon": "♨"},
+		{"id": "power", "name": "단단한 주먹밥", "desc": "공격력 +6",
+			"price": int(42 * scale), "icon": "†"},
 		{"id": "vigor", "name": "두꺼운 조끼", "desc": "최대 체력 +25",
-			"price": int(48 * scale), "icon": "▣"},
-		{"id": "swift", "name": "가벼운 부츠", "desc": "이동 속도 +0.29",
-			"price": int(45 * scale), "icon": "▼"},
-		{"id": "keen", "name": "매의 깃", "desc": "치명타 확률 +8%",
-			"price": int(58 * scale), "icon": "◈"},
-		{"id": "flurry", "name": "가죽 손잡이", "desc": "공격 속도 +12%",
-			"price": int(55 * scale), "icon": "○"},
+			"price": int(40 * scale), "icon": "▣"},
+		{"id": "swift", "name": "새 운동화", "desc": "이동 속도 +0.29",
+			"price": int(38 * scale), "icon": "▼"},
+		{"id": "keen", "name": "돋보기", "desc": "치명타 확률 +8%",
+			"price": int(46 * scale), "icon": "◈"},
+		{"id": "breath", "name": "박하 사탕", "desc": "숨 회복 +8/초",
+			"price": int(44 * scale), "icon": "≈"},
 	]
 	catalog.shuffle()
 	var stock := catalog.slice(0, 3)
-	# 회복약은 항상 하나 놓습니다. 살 것이 공격력뿐이면 상점이 함정이 됩니다.
+	# 회복은 항상 하나 놓습니다. 바꿀 것이 공격력뿐이면 이 자리가 함정이
+	# 됩니다 - 물놀이터가 바로 옆에 있어 사탕을 쓸 곳이 이미 둘입니다.
 	var has_heal := false
-	for s in stock:
-		if s["id"] == "heal":
+	for item in stock:
+		if item["id"] == "heal":
 			has_heal = true
 	if not has_heal:
 		for c in catalog:
@@ -386,5 +392,5 @@ func buy(item: Dictionary) -> bool:
 			heal(25.0)
 		"swift": move_speed += 0.29
 		"keen": crit_chance = minf(0.75, crit_chance + 0.08)
-		"flurry": attack_rate += 0.12
+		"breath": breath_regen += 8.0
 	return true

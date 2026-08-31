@@ -181,7 +181,7 @@ func _build_version() -> void:
 	## 합니다. 시작하기 전에 "새로고침이 먹었나" 를 확인하는 것이 이 표시의
 	## 쓸모라, 판이 시작된 뒤에만 보이면 늦습니다.
 	##
-	## 오른쪽 아래 구석입니다. 왼쪽 위는 층·금화·체력, 아래 가운데는 조작
+	## 오른쪽 아래 구석입니다. 왼쪽 위는 층·사탕·체력, 아래 가운데는 조작
 	## 안내, 위 가운데는 녹화 표시가 이미 차 있습니다.
 	var label := UiTheme.label(Game.VERSION, 13, UiTheme.DIM)
 	# 테두리를 두릅니다. 흐린 글자가 밝은 바닥이나 흰 소품 위에 오면 통째로
@@ -267,7 +267,7 @@ func _build_hud() -> void:
 	# 폰에서는 키 안내가 거짓말입니다. 조작 방법이 화면에 이미 그려져 있으니
 	# 대신 자동 조준을 알려 줍니다 - 안 알려 주면 "왜 조준이 안 되지" 가 됩니다.
 	var hint := UiTheme.label(
-		"왼쪽을 끌어 이동   밀기(잡기)로 밀거나 집고, 상인·책장 앞에서는 말을 겁니다" if TouchControls.wanted()
+		"왼쪽을 끌어 이동   고함은 **누르는 만큼** 넓어집니다   물놀이터·책장 앞에서는 밀기로 말을 겁니다" if TouchControls.wanted()
 		else "이동 WASD   고함 좌클릭   밀기(잡기) F   구르기 Space   도움말 F1",
 		14, UiTheme.DIM)
 	hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
@@ -339,14 +339,14 @@ func _outlined(label: Label) -> Label:
 func _build_vitals() -> void:
 	## 체력과 호흡을 **화면 아래 가운데**에 둡니다.
 	##
-	## 예전에는 왼쪽 위 판에 층·금화·적 수와 함께 있었습니다. 거기서는 두
+	## 예전에는 왼쪽 위 판에 층·사탕·적 수와 함께 있었습니다. 거기서는 두
 	## 가지가 나빴습니다.
 	##
 	## **눈이 가 있는 곳과 멉니다.** 싸우는 동안 시선은 화면 가운데, 주인공과
 	## 그 앞의 적에 있습니다. 체력이 얼마 안 남은 것을 왼쪽 위를 봐야 알면
 	## 그 순간 적을 못 봅니다.
 	##
-	## **위험한 것과 참고할 것이 섞여 있었습니다.** 층·금화·남은 적은 언제
+	## **위험한 것과 참고할 것이 섞여 있었습니다.** 층·사탕·남은 적은 언제
 	## 봐도 되는 값이고 체력·호흡은 지금 봐야 하는 값인데, 한 판에 있으면
 	## 급할 때 그 안에서 다시 찾아야 합니다.
 	##
@@ -551,7 +551,7 @@ func _build_test_panel() -> void:
 	_test_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
 	_test_panel.offset_left = 12
 	_test_panel.offset_right = 212
-	# 왼쪽 위 판(층·금화·능력치)의 아래를 살짝 피해 내려 답니다.
+	# 왼쪽 위 판(층·사탕·능력치)의 아래를 살짝 피해 내려 답니다.
 	_test_panel.offset_top = -228
 	_test_panel.offset_bottom = 272
 	_hud.add_child(_test_panel)
@@ -1117,7 +1117,9 @@ func set_ultimate(ratio: float, on: bool, note: String, shown: bool) -> void:
 
 func update_hud(state: RunState, enemies_left: int, _unused: float) -> void:
 	_floor.text = "지하 %d층" % state.floor_num
-	_gold.text = "◆ %d" % state.gold
+	# 사탕 개수. 마름모(◆)는 금화의 기호라 그대로 두면 이름만 바뀐 것이
+	# 됩니다.
+	_gold.text = "사탕 %d" % state.gold
 	_hp_bar.max_value = state.max_hp
 	_hp_bar.value = state.hp
 	_hp_text.text = "%d / %d" % [int(ceil(state.hp)), int(state.max_hp)]
@@ -1335,8 +1337,14 @@ func show_boons(options: Array, title: String = "층을 정리했다",
 func show_shop(items: Array, gold: int) -> void:
 	_clear_overlay()
 	_shop_items = items
-	_title("상점")
-	_shop_gold_label = UiTheme.label("가진 금화 ◆ %d" % gold, 20, Fx.GOLD_COLOR)
+	# **「상점」 이 아니라 「물물교환」 입니다.**
+	#
+	# 파는 사람과 사는 사람이 아니라 **같은 처지의 아이 둘**이 가진 것을
+	# 바꾸는 자리입니다. 이 게임의 적이 전부 또래인데 도와주는 쪽도 또래라야,
+	# 어린이집 안의 일이라는 것이 흐려지지 않습니다.
+	_title("물물교환")
+	_sub("어린이집에도 아군은 있다.", UiTheme.ACCENT)
+	_shop_gold_label = UiTheme.label("가진 사탕 %d 개" % gold, 20, Fx.GOLD_COLOR)
 	_shop_gold_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_overlay_box.add_child(_shop_gold_label)
 	var row := HBoxContainer.new()
@@ -1346,7 +1354,7 @@ func show_shop(items: Array, gold: int) -> void:
 	for i in items.size():
 		var item: Dictionary = items[i]
 		var b := _card(String(item["icon"]), String(item["name"]), String(item["desc"]),
-			"◆ %d   [%d]" % [int(item["price"]), i + 1])
+			"사탕 %d   [%d]" % [int(item["price"]), i + 1])
 		var idx := i
 		b.pressed.connect(func() -> void: shop_bought.emit(idx))
 		row.add_child(b)
@@ -1365,7 +1373,7 @@ func show_shop(items: Array, gold: int) -> void:
 
 func refresh_shop(gold: int) -> void:
 	if _shop_gold_label != null:
-		_shop_gold_label.text = "가진 금화 ◆ %d" % gold
+		_shop_gold_label.text = "가진 사탕 %d 개" % gold
 	for i in _shop_items.size():
 		if i < _shop_buttons.size():
 			var sold: bool = _shop_items[i].get("sold", false)
@@ -1382,7 +1390,7 @@ func mark_sold(index: int) -> void:
 func show_death(state: RunState) -> void:
 	_clear_overlay()
 	_title("쓰러졌다", UiTheme.BAD)
-	_sub("지하 %d층까지. 처치 %d · 금화 %d · %d분 %d초" % [
+	_sub("지하 %d층까지. 처치 %d · 사탕 %d · %d분 %d초" % [
 		state.floor_num, state.kills, state.gold,
 		int(state.elapsed) / 60, int(state.elapsed) % 60], UiTheme.TEXT)
 	_sub("다음 던전은 다른 모양입니다.")
@@ -1402,7 +1410,7 @@ func show_win(state: RunState) -> void:
 	## 깊어지기만 하면 죽는 것 말고는 판이 끝나는 길이 없습니다.
 	_clear_overlay()
 	_title("나갔다!", UiTheme.ACCENT)
-	_sub("지하 %d층을 다 지났습니다. 처치 %d · 금화 %d · %d분 %d초" % [
+	_sub("지하 %d층을 다 지났습니다. 처치 %d · 사탕 %d · %d분 %d초" % [
 		Game.FINAL_FLOOR, state.kills, state.gold,
 		int(state.elapsed) / 60, int(state.elapsed) % 60], UiTheme.TEXT)
 	_sub("다음 던전은 다른 모양입니다.")

@@ -183,6 +183,28 @@ const DRINK := {
 }
 
 
+## 물장난. **두 팔을 번갈아 물을 첨벙거립니다.**
+##
+## 자세를 둘로 나눠 오가게 합니다 - 한 자세만 두면 물에 서서 팔을 든 채로
+## 굳은 그림이 됩니다. 물장난은 **움직임 자체**가 그림이라, 정지 자세로는
+## 무엇을 하는지 전달되지 않습니다.
+##
+## 다리는 안 건드립니다. 물에 잠긴 아래쪽은 어차피 안 보이고, 걷기 클립이
+## 그대로 돌면 물을 밟는 것으로 읽힙니다.
+const SPLASH_A := {
+	"Spine": Vector3(8, -10, 0), "Chest": Vector3(4, -8, 0),
+	"Neck": Vector3(-8, 0, 0), "Head": Vector3(-12, -10, 0),
+	"LeftArm": Vector3(96, 0, 26), "RightArm": Vector3(34, 0, -10),
+	"LeftForeArm": Vector3(28, 0, 0), "RightForeArm": Vector3(52, 0, 0),
+}
+const SPLASH_B := {
+	"Spine": Vector3(8, 10, 0), "Chest": Vector3(4, 8, 0),
+	"Neck": Vector3(-8, 0, 0), "Head": Vector3(-12, 10, 0),
+	"LeftArm": Vector3(34, 0, 10), "RightArm": Vector3(96, 0, -26),
+	"LeftForeArm": Vector3(52, 0, 0), "RightForeArm": Vector3(28, 0, 0),
+}
+
+
 ## 몹을 잡고 있는 자세. 두 팔을 앞으로 모읍니다.
 ##
 ## 다리는 건드리지 않습니다 - 잡은 채로 걸어야 하므로 걷기 클립이 그대로

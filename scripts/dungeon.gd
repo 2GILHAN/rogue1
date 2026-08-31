@@ -455,6 +455,10 @@ func set_fade_focus(camera_position: Vector3, player_position: Vector3,
 		# 칸 크기를 그대로 넘깁니다. 셰이더에 숫자를 박아 두면 TILE 을
 		# 고쳤을 때 벽면이 어긋난 격자로 비칩니다.
 		mat.set_shader_parameter("cell_size", TILE)
+		# 벽을 따라 같이 비치는 길이. 방 하나가 8~13칸(12~20m)이라 앞뒤로
+		# 3.4m 면 방 한 벽의 3분의 1쯤입니다 - 캐릭터가 선 자리의 벽 한 판이
+		# 비치고 나머지는 남습니다.
+		mat.set_shader_parameter("run_span", 3.4)
 
 
 func _textured(path: String, tint: Color, rough: float) -> StandardMaterial3D:

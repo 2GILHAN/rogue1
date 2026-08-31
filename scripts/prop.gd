@@ -240,7 +240,7 @@ func setup(prop_kind: String) -> void:
 	if mount_height() > 0.0:
 		# 벽에 걸린 것은 부딪히지도 않습니다. 위 주석 참고 - 사람 키보다
 		# 높은 자리라 막을 것이 없고, 충돌체만 남으면 벽이 두꺼워집니다.
-		_set_solid(false)
+		set_solid(false)
 		freeze = true
 	if is_flat():
 		# 바닥에 깔린 것. 못 움직이지만 **막지도 않습니다.**
@@ -248,7 +248,7 @@ func setup(prop_kind: String) -> void:
 		# 벽에 걸린 액자와 같은 처리입니다 - 손이 닿지 않는 자리의 장식에
 		# 충돌체를 두면 보이지 않는 턱이 생깁니다. 카페트는 그 턱이 방
 		# 한가운데에 생깁니다.
-		_set_solid(false)
+		set_solid(false)
 		freeze = true
 	if is_fixed():
 		# 얼려 두면 어떤 충격을 줘도 안 움직입니다. 질량을 크게 주는 것과
@@ -259,7 +259,7 @@ func setup(prop_kind: String) -> void:
 	# 강체가 사람을 미는 것이 아니라 사람이 강체를 미는 방향이라야, 발밑의
 	# 인형이 플레이어를 벽으로 밀어 넣는 일이 없습니다.
 	if mount_height() <= 0.0 and not is_flat():
-		_set_solid(true)
+		set_solid(true)
 	contact_monitor = false
 	can_sleep = true
 	linear_damp = 0.8 if is_heavy() else 0.4
@@ -575,12 +575,12 @@ func grab(by: Node3D) -> bool:
 	freeze = true
 	_armed = false
 	_hit.clear()
-	_set_solid(false)
+	set_solid(false)
 	picked_up.emit(self)
 	return true
 
 
-func _set_solid(on: bool) -> void:
+func set_solid(on: bool) -> void:
 	## 들고 있는 동안에는 **충돌 세계에서 빠집니다.**
 	##
 	## 들린 소품은 매 프레임 손 위치로 순간이동합니다. 그런데 얼린 강체는
@@ -608,7 +608,7 @@ func carry_to(point: Vector3, delta: float) -> void:
 func throw(direction: Vector3, damage: float) -> void:
 	held_by = null
 	freeze = false
-	_set_solid(true)
+	set_solid(true)
 	_damage = damage
 	_armed = true
 	_hit.clear()
@@ -686,7 +686,7 @@ func push(direction: Vector3, damage: float) -> void:
 	## 무거운 소품을 밀어 굴립니다. 들 수 없는 것에 주는 대안입니다.
 	held_by = null
 	freeze = false
-	_set_solid(true)
+	set_solid(true)
 	_damage = damage
 	_armed = true
 	_hit.clear()
@@ -698,7 +698,7 @@ func drop() -> void:
 	## 방향 없이 놓습니다. 던지는 것과 달리 그 자리에 툭 내려놓습니다.
 	held_by = null
 	freeze = false
-	_set_solid(true)
+	set_solid(true)
 	_armed = false
 	linear_velocity = Vector3(0, -0.5, 0)
 	angular_velocity = Vector3.ZERO

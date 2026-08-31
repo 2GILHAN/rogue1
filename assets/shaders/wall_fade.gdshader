@@ -59,6 +59,17 @@ uniform float fade_ahead = 0.05;
 // 벽인지도 안 읽힙니다. 칸으로 재면 **가리는 벽면이 통째로** 비칩니다 -
 // 벽 한 장이 유리가 되는 것이라, 방의 모양이 그대로 남습니다.
 uniform float cell_size = 1.5;
+// 벽을 따라 얼마나 멀리까지 같이 비칠지(m).
+//
+// **이 값이 없어서 화면이 깨졌습니다.** 축을 따라 자리를 주인공에게 맞추면
+// 그 축 위의 벽이 전부 같은 답을 내는데, 그 축은 지도 끝까지 이어집니다 -
+// 가리지도 않는 먼 벽까지 통째로 비쳐서 방이 사라지고, 뚫린 자리 뒤에는
+// 아무것도 없어 거뭇한 쐐기만 남았습니다.
+//
+// 벽을 따라 이만큼 떨어지면 도로 불투명해집니다. 앞뒤로 이 거리씩이므로
+// 한 번에 비치는 것은 그 두 배 길이의 **벽 한 판**입니다.
+uniform float run_span = 3.4;
+uniform float run_fade = 2.0;
 
 varying vec3 world_pos;
 // 이 면이 어느 쪽을 보는지(월드 기준). **벽면을 통째로 판정하는 데** 씁니다.
@@ -139,6 +150,17 @@ void fragment() {
 	if (flat_len > 0.001) {
 		ahead = dot(player_pos.xz - probe.xz, seg.xz / flat_len);
 	}
+	// **벽을 따라 얼마나 떨어졌나.** 축을 맞추면서 잃어버린 값입니다 -
+	// probe 는 주인공에게 맞춘 자리라 이 거리가 거기서는 언제나 0 입니다.
+	float along;
+	if (abs(world_normal.y) > 0.7) {
+		along = min(abs(world_pos.x - player_pos.x), abs(world_pos.z - player_pos.z));
+	} else if (abs(world_normal.z) > abs(world_normal.x)) {
+		along = abs(world_pos.x - player_pos.x);
+	} else {
+		along = abs(world_pos.z - player_pos.z);
+	}
+
 	if (t > 0.02 && t < 0.98 && ahead > fade_ahead) {
 		float d = distance(probe, cam_pos + seg * t);
 		// 칸 단위라 가장자리가 계단으로 끊깁니다. `fade_radius` 를 넉넉히
@@ -146,6 +168,10 @@ void fragment() {
 		// 딱 잘리는 것보다 눈이 훨씬 편합니다.
 		visible = mix(fade_keep, 1.0,
 			smoothstep(fade_radius * 0.35, fade_radius, d));
+		// 벽을 따라 멀어지면 도로 닫힙니다. 이 한 줄이 "가리는 벽 한 판" 과
+		// "그 축의 벽 전부" 를 가릅니다.
+		visible = mix(visible, 1.0,
+			smoothstep(run_span, run_span + run_fade, along));
 	}
 	// 부드럽게 섞습니다. 가장자리는 `smoothstep` 이 이미 완만하게 만들어
 	// 두었으므로, 여기서는 그 값을 그대로 알파로 씁니다.
