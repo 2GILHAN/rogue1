@@ -1321,8 +1321,15 @@ VRAM 압축이 선을 뭉갭니다.
 텍스처 262MB → 41MB      pck 57MB → 28.6MB
 ```
 
-`vram_texture_compression/for_desktop` 은 **끕니다**. 켜 두면 S3TC 와 ETC2 가 둘
-다 pck 에 들어가 오히려 커집니다(57 → 63.5MB 로 늘어난 적이 있습니다).
+**`vram_texture_compression` 은 `for_desktop`·`for_mobile` 을 둘 다 켜 둡니다.**
+pck 가 28.6 → 44.3MB 로 커지지만, 이건 줄일 수 있는 값이 아닙니다 — 데스크톱
+GPU 는 WebGL 에서 **ETC2 를 못 읽고**, 폰은 S3TC 를 못 읽습니다. 한쪽만 담으면
+다른 쪽에서 텍스처가 통째로 안 올라와 화면이 민무늬 + 갈색 안개가 됩니다
+(v0.20 에서 실제로 그랬습니다).
+
+한 벌만 담고 싶으면 `compress/mode=4`(Basis Universal)가 답입니다 — 기기에서
+맞는 형식으로 풀어 쓰므로 어디서나 돌고 pck 는 34.9MB 입니다. 지금 안 쓰는
+이유는 **확인 경로가 없어서**입니다(폰에서 화질이 어떤지 여기서 못 봅니다).
 
 **빌드에서 빼는 것**은 `export_presets.cfg` 의 `exclude_filter` 입니다. 파일은
 저장소에 남기고 빌드에서만 뺍니다 — 지우면 되돌릴 수 없습니다.
