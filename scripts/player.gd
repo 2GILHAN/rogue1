@@ -1597,7 +1597,19 @@ func shout_release() -> void:
 ## 줄이면서 바꿨습니다 - 거의 안 닿는 고함에 온 숨을 내면 살짝 누르는 일이
 ## 그냥 낭비가 되고, 그러면 "짧게 지를 수도 있다" 는 선택이 사라집니다.
 ## 최소에서 30%, 최대에서 100% 입니다.
-const SHOUT_CHARGE_TIME := Sfx.SHOUT_LEN
+## 다 모으는 데 걸리는 시간(초).
+##
+## **0.86 에서 0.60 으로 줄였습니다.** 0.86 은 목소리가 살아 있는 길이에
+## 맞춘 값이었는데, 손으로 쥐고 있기에는 깁니다 - 최대로 지르려면 매번 거의
+## 1초를 서 있어야 하고, 그동안 발이 0.2배로 묶입니다.
+##
+## **소리는 그대로 끝까지 납니다.** 다 모여 저절로 나갈 때는 목소리를 끊지
+## 않습니다(`_release_shout`) - 남은 0.45초가 지르고 난 여운이 됩니다.
+## 끊으면 최대로 질렀는데 소리가 제일 짧아지는, 거꾸로 된 일이 생깁니다.
+##
+## 살짝 눌렀다 뗄 때만 거기서 끊깁니다. 그건 "덜 모았다" 가 귀에 남아야 해서
+## 그렇습니다.
+const SHOUT_CHARGE_TIME := 0.60
 const SHOUT_COST_MIN := 0.30
 ## 살짝 눌렀을 때의 몫. 0 이면 스쳐 누른 것이 헛손질이 되어, 눌렀는데 아무 일도
 ## 안 일어난 것처럼 보입니다.
@@ -1611,6 +1623,11 @@ const SHOUT_REACH_MIN := 0.14
 ## 보입니다.
 const SHOUT_ARC_MIN := 30.0
 const SHOUT_ARC_MAX := 132.0
+## 입의 높이(m). 소용돌이의 꼭짓점이 여기서 시작합니다.
+##
+## 키가 1.25m 이고 머리뼈가 키의 81% 쯤이라(베개를 놓을 때 재 둔 값) 입은
+## 0.92 근처입니다.
+const MOUTH_HEIGHT := 0.92
 
 
 func shout_arc(charge: float) -> float:
@@ -2801,8 +2818,12 @@ func _release_shout() -> void:
 	var charge := maxf(_shout_charge, SHOUT_CHARGE_MIN)
 	_shout_charge = -1.0
 	_shout_fired = charge
-	# **소리도 여기서 끊깁니다.** 살짝 눌렀다 떼면 소리가 잘리는 것이 곧
-	# "덜 모았다" 입니다.
+	# **덜 모았을 때만 소리가 끊깁니다.** 살짝 눌렀다 떼면 소리가 잘리는 것이
+	# 곧 "덜 모았다" 입니다.
+	#
+	# 다 모았으면 그대로 둡니다. 모으는 시간(0.60초)이 목소리(1.05초)보다
+	# 짧아서 남은 0.45초가 **지르고 난 여운**으로 이어집니다 - 여기서 끊으면
+	# 최대로 질렀는데 소리가 제일 짧아지는, 거꾸로 된 일이 생깁니다.
 	if _shout_voice != null and is_instance_valid(_shout_voice):
 		if charge < 0.999:
 			_shout_voice.stop()
@@ -2845,11 +2866,16 @@ func _try_attack() -> void:
 	# 낸다**는 그림이 아니었습니다. 나선으로 감겨 빨려 드는 모양이 지르는
 	# 행위와 더 가깝고, 무엇보다 모은 만큼 커지는 것과 잘 붙습니다.
 	#
-	# 자리는 부채꼴의 **한가운데쯤**(사거리의 0.42배 앞)입니다. 발밑에 두면
-	# 아이를 덮고, 끝에 두면 무엇이 만든 것인지 안 읽힙니다.
+	# **꼭짓점이 입입니다.** 거기서 앞으로 벌어지며 뻗습니다 - 소리가 나가는
+	# 길이 그대로 그림이 됩니다.
+	#
+	# 길이는 사거리 그대로, 벌어지는 굵기는 그 0.30배입니다. 부채꼴 각도
+	# (최대 132도)를 그대로 따르면 원뿔이 아니라 원반이 됩니다 - 범위를
+	# 가르치는 일은 바닥에 칠한 부채꼴이 이미 하고 있으므로, 이쪽은 **소리가
+	# 나간다**만 말하면 됩니다.
 	var reach := shout_reach(_shout_fired)
-	Fx.vortex(get_parent(), global_position + aim * (reach * 0.42),
-		reach * 0.34, 1.15, 0.65 + 0.35 * _shout_fired)
+	Fx.vortex(get_parent(), global_position + Vector3(0, MOUTH_HEIGHT, 0) + aim * 0.12,
+		aim, reach, reach * 0.30, 0.65 + 0.35 * _shout_fired)
 
 	var slv := skill_lv("shout")
 	if slv >= 3:
@@ -2858,10 +2884,12 @@ func _try_attack() -> void:
 		Fx.tiger(get_parent(), global_position + Vector3(0, 0.35, 0), aim,
 			shout_reach(_shout_fired))
 	elif slv >= 2:
-		# Lv2 는 소용돌이가 하나 더 붙습니다 - 앞쪽에 작게 겹쳐 두 겹으로
-		# 감깁니다. 새 그림을 더하는 대신 같은 것을 겹치는 쪽이 조용합니다.
-		Fx.vortex(get_parent(), global_position + aim * (reach * 0.72),
-			reach * 0.22, 0.85, 0.5)
+		# Lv2 는 소용돌이가 하나 더 붙습니다 - 같은 자리에서 더 짧고 굵게
+		# 겹쳐 두 겹으로 감깁니다. 새 그림을 더하는 대신 같은 것을 겹치는
+		# 쪽이 조용합니다.
+		Fx.vortex(get_parent(),
+			global_position + Vector3(0, MOUTH_HEIGHT, 0) + aim * 0.12,
+			aim, reach * 0.6, reach * 0.20, 0.5)
 
 
 ## 물장난이 도는 시간과, 팔을 좌우로 바꾸는 주기.

@@ -202,7 +202,7 @@ static func warm_up(parent: Node3D) -> void:
 	shimmer(parent, Vector3(0, -40, 0), Vector3.FORWARD, 1, false)
 	# 소용돌이도 같이 데웁니다. 셰이더가 하나 더 늘었고, 그 첫 번이 고함을
 	# 지르는 순간에 오면 딱 그때 화면이 끊깁니다.
-	vortex(parent, Vector3(0, -40, 0), 0.6, 1.0, 1.0)
+	vortex(parent, Vector3(0, -40, 0), Vector3.FORWARD, 1.0, 0.5, 1.0)
 
 
 static func shimmer(parent: Node3D, at: Vector3, dir: Vector3,
@@ -714,21 +714,23 @@ static func _noise() -> NoiseTexture2D:
 	return _vortex_noise
 
 
-static func _vortex_build(radius: float, height: float) -> void:
+static func _vortex_build() -> void:
 	## 원뿔 셋의 메시와 재질을 한 번만 만듭니다.
 	##
-	## 크기를 인자로 받지만 **처음 한 번만** 씁니다 - 그 뒤로는 고함마다
-	## 홀더의 scale 로 키웁니다. 메시를 매번 다시 만들면 나눠 쓰는 뜻이
-	## 없어집니다.
+	## **길이 1, 반지름 1 로 만들어 두고** 부르는 쪽에서 늘입니다. 고함마다
+	## 새로 만들었더니 5.2ms 였습니다 - 프레임(16.7ms)의 3분의 1 입니다.
+	##
+	## 좁은 쪽(bottom)이 **입**이고 넓은 쪽(top)이 **앞**입니다. 소리가 입에서
+	## 나와 퍼지는 모양이라 이 방향이어야 합니다 - 반대로 두면 앞에서 입으로
+	## 빨려 들어갑니다.
 	if not _vortex_mesh.is_empty():
 		return
 	for i in VORTEX_CONES:
 		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
 		var cone := CylinderMesh.new()
-		# 위로 갈수록 좁아지는 깔때기. 위 칸일수록 통째로 작습니다.
-		cone.top_radius = radius * lerpf(0.10, 0.02, t)
-		cone.bottom_radius = radius * lerpf(1.0, 0.45, t)
-		cone.height = height * lerpf(0.55, 0.32, t)
+		cone.bottom_radius = lerpf(0.06, 0.02, t)   # 입 쪽
+		cone.top_radius = lerpf(1.0, 0.62, t)       # 앞 쪽
+		cone.height = 1.0
 		cone.radial_segments = 18
 		cone.rings = 3
 		_vortex_mesh.append(cone)
@@ -739,66 +741,82 @@ static func _vortex_build(radius: float, height: float) -> void:
 		mat.set_shader_parameter("vortex_color",
 			Color(RUSH_COLOR.r, RUSH_COLOR.g, RUSH_COLOR.b,
 				0.34 * lerpf(1.0, 0.55, t)))
-		# 안쪽(위) 칸일수록 빨리 흐릅니다.
+		# 안쪽(가는) 겹일수록 빨리 흐릅니다.
 		mat.set_shader_parameter("scroll_speed", lerpf(1.3, 2.4, t))
 		mat.set_shader_parameter("spiral_amount", lerpf(2.6, 3.8, t))
 		_vortex_mat.append(mat)
 
 
-## 미리 만들어 두는 원뿔의 기준 크기(m). 고함마다 여기서 배로 키웁니다.
-const VORTEX_BASE_RADIUS := 1.0
-const VORTEX_BASE_HEIGHT := 1.0
-
-
-static func vortex(parent: Node3D, at: Vector3, radius: float,
-		height: float, strength: float = 1.0) -> void:
-	## 고함이 만드는 **소용돌이**. 원뿔 여러 겹을 세우고 각각 다른 빠르기로
-	## 돌립니다.
+static func vortex(parent: Node3D, at: Vector3, dir: Vector3,
+		length: float, radius: float, strength: float = 1.0) -> void:
+	## 고함이 만드는 **소용돌이**. 원뿔 여러 겹이 **입에서 시작해 앞으로
+	## 벌어집니다.**
 	##
-	## 안쪽일수록 빠르게 돕니다 - 같은 속도로 돌리면 통째로 도는 고깔이고,
-	## 속도가 다르면 층 사이가 엇갈리며 감기는 것으로 보입니다.
+	## 처음에는 바닥에 세운 깔때기였습니다. 소용돌이로는 보였지만 **누가
+	## 만든 것인지** 안 읽혔습니다 - 발 앞에 물기둥이 하나 솟은 것에 가까웠고,
+	## 지르는 방향과도 상관이 없었습니다. 꼭짓점을 입에 두고 앞으로 벌리면
+	## 소리가 나가는 길이 그대로 그림이 됩니다.
 	##
-	## **과하지 않게** 잡았습니다. 이 게임은 수채화 배경에 카툰 외곽선이라,
-	## 화면을 채우는 이펙트는 그림체와 싸웁니다 - 원뿔 셋, 알파 0.34, 0.42초
-	## 입니다.
+	## 겹마다 다른 빠르기로 돕니다 - 같은 속도면 통째로 도는 고깔이고, 다르면
+	## 층 사이가 엇갈리며 감깁니다.
 	##
-	## 메시와 재질은 **나눠 씁니다**(`_vortex_build`). 매번 만들면 5.2ms 가
-	## 듭니다 - 지르는 순간마다 프레임의 3분의 1을 버리는 셈이었습니다.
-	## 크기와 세기는 홀더의 scale 로 냅니다.
+	## **과하지 않게** 잡았습니다. 이 게임은 수채화 배경에 카툰 외곽선이라
+	## 화면을 채우는 이펙트는 그림체와 싸웁니다 - 원뿔 셋, 알파 0.34, 0.42초.
 	if not is_instance_valid(parent):
 		return
-	_vortex_build(VORTEX_BASE_RADIUS, VORTEX_BASE_HEIGHT)
+	_vortex_build()
+	var flat := Vector3(dir.x, 0.0, dir.z)
+	if flat.length_squared() < 0.0001:
+		flat = Vector3.FORWARD
+	flat = flat.normalized()
+
 	var holder := Node3D.new()
 	parent.add_child(holder)
 	holder.global_position = at
+	# 지르는 쪽을 봅니다(-Z 가 앞).
+	holder.rotation.y = atan2(-flat.x, -flat.z)
+
 	for i in VORTEX_CONES:
 		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
+		# 원뿔의 축(+Y)을 **앞(-Z)** 으로 눕힙니다. 이 마디를 따로 두는 이유는
+		# 늘이는 축과 도는 축이 같아야 하기 때문입니다 - 홀더에서 늘이면
+		# 기울어진 상자를 늘이는 꼴이라 원뿔이 찌그러집니다.
+		var axis := Node3D.new()
+		axis.rotation.x = -PI * 0.5
+		holder.add_child(axis)
+
 		var mesh := MeshInstance3D.new()
 		mesh.mesh = _vortex_mesh[i]
 		mesh.material_override = _vortex_mat[i]
 		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		# 카툰 외곽선이 원뿔을 검게 두르면 소용돌이가 아니라 고깔이 됩니다.
 		mesh.set_meta("flat", true)
-		mesh.position.y = height * lerpf(0.18, 0.62, t)
-		holder.add_child(mesh)
+		# 메시는 가운데가 원점이라 절반만큼 앞으로 밀어야 **좁은 끝이 입에**
+		# 놓입니다.
+		mesh.position.y = 0.5
+		axis.add_child(mesh)
 
-		# **안쪽일수록 빠르게** 돕니다. 방향도 층마다 같게 두어야 감기는
-		# 것으로 보입니다 - 반대로 돌리면 서로 비비는 것처럼 보입니다.
+		# 겹마다 길이와 굵기를 조금씩 달리해 서로 안쪽에 놓입니다.
+		var len_i := length * lerpf(1.0, 0.66, t)
+		var rad_i := radius * lerpf(1.0, 0.7, t)
+		axis.scale = Vector3(rad_i, len_i, rad_i)
+
+		# **안쪽일수록 빠르게** 돕니다. 방향은 층마다 같게 - 반대로 돌리면
+		# 서로 비비는 것처럼 보입니다.
 		var spin := mesh.create_tween().set_loops()
 		spin.tween_property(mesh, "rotation:y", TAU, lerpf(0.9, 0.42, t)) 			.from(0.0)
 
-	# 솟았다 사라집니다. 커지는 쪽이 빠르고 스러지는 쪽이 느립니다 -
-	# 나타나는 것은 순간이고 사라지는 것은 여운입니다(호랑이와 같은 규칙).
+	# 뻗었다 스러집니다. 뻗는 쪽이 빠르고 스러지는 쪽이 느립니다 - 나타나는
+	# 것은 순간이고 사라지는 것은 여운입니다(호랑이와 같은 규칙).
 	#
-	# 세기는 **높이**로 냅니다. 알파는 재질에 있어 나눠 쓰는 터라 손댈 수
-	# 없는데, 낮고 넓게 퍼진 것과 높이 솟은 것이 눈에는 세기 차이로 읽힙니다.
-	var big := Vector3(radius, height * (0.7 + 0.3 * strength), radius)
-	holder.scale = big * Vector3(0.35, 0.2, 0.35)
+	# 세기는 **길이**로 냅니다. 알파는 재질에 있어 나눠 쓰는 터라 손댈 수
+	# 없는데, 짧고 뭉툭한 것과 길게 뻗은 것이 눈에는 세기 차이로 읽힙니다.
+	var big := Vector3(1.0, 0.7 + 0.3 * strength, 1.0)
+	holder.scale = Vector3(0.35, 0.25, 0.35) * big
 	var tw := holder.create_tween()
 	tw.tween_property(holder, "scale", big, VORTEX_TIME * 0.3) 		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(holder, "scale",
-		Vector3(big.x * 1.25, big.y * 0.15, big.z * 1.25),
-		VORTEX_TIME * 0.7).set_trans(Tween.TRANS_SINE)
+		Vector3(big.x * 1.2, big.y * 1.1, big.z * 1.2), VORTEX_TIME * 0.7) 		.set_trans(Tween.TRANS_SINE)
 	tw.tween_callback(holder.queue_free)
 
 

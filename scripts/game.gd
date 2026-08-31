@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.25"
+const VERSION := "v0.25.2"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1867,13 +1867,23 @@ func _drive_pose() -> void:
 					_frames, player._shout_charge,
 					Vector2(player.velocity.x, player.velocity.z).length(),
 					state.move_speed, player._pose.weight])
-			if _probe_arg == "keep":
+			if _probe_arg == "voice":
+				# 다 모여 저절로 나간 **뒤에도 소리가 이어지는지** 봅니다.
+				if _frames in [40, 70, 85, 100, 118]:
+					var v: Node = player._shout_voice
+					var live := false
+					for n in Sfx.instance.get_children():
+						if n is AudioStreamPlayer and (n as AudioStreamPlayer).playing:
+							live = true
+					print("[목소리] f=%d 모으는중=%s 소리남=%s" % [
+						_frames, str(player._shout_charge >= 0.0), str(live)])
+			elif _probe_arg == "keep":
 				# **계속 누르고 있습니다.** 떼지 않아도 나가야 맞습니다.
 				if _frames % 6 == 0 and _frames > 30 and _frames < 140:
 					print("[계속누름] f=%d 모으는중=%s 미리보기=%s" % [
 						_frames, str(player._shout_charge >= 0.0),
 						str(player._shout_prev != null and is_instance_valid(player._shout_prev))])
-			elif _frames == 30 + (3 if _probe_arg == "tap" else (52 if _probe_arg == "sync" else 62)):
+			elif _frames == 30 + (3 if _probe_arg == "tap" else (36 if _probe_arg == "sync" else 48)):
 				var before := state.breath
 				player.shout_release()
 				print("[모으기] %s  모은 %.2f  사거리 %.2f  각도 %.0f도  숨 %.0f -> %.0f" % [
