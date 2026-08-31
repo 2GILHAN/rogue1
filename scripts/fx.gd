@@ -711,6 +711,26 @@ static func shout_fan(parent: Node3D, at: Vector3, dir: Vector3,
 	tw.tween_callback(fan.queue_free)
 
 
+static func lane_mesh(length: float, width: float) -> ArrayMesh:
+	## 바닥에 까는 **띠**. 돌진이 지나갈 길을 그대로 칠합니다.
+	##
+	## 부채꼴(`fan_mesh`)과 같은 규약입니다 - 앞은 -Z 이고, 부르는 쪽에서
+	## yaw 만 맞추면 됩니다. 시작은 원점(적의 발밑)입니다.
+	var hw := width * 0.5
+	var verts := PackedVector3Array([
+		Vector3(-hw, 0.0, 0.0), Vector3(hw, 0.0, 0.0),
+		Vector3(hw, 0.0, -length), Vector3(-hw, 0.0, -length),
+	])
+	var idx := PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_INDEX] = idx
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
 static func fan_mesh(radius: float, arc_deg: float, steps: int = 20) -> ArrayMesh:
 	## 바닥에 까는 **부채꼴 판**. 공격이 실제로 닿는 범위를 그대로 칠합니다.
 	##

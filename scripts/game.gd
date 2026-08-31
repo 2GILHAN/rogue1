@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.23"
+const VERSION := "v0.23.1"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1793,6 +1793,27 @@ func _drive_pose() -> void:
 						str(_probe_foe._die_when_landed)])
 			elif _frames % 30 == 0:
 				print("[좀비] f=%d 적이 죽어 사라졌습니다" % _frames)
+		"lane":
+			# **서진의 돌진 예고**를 보는 자리. 사거리 안에 세워 두면 알아서
+			# 겨누기 시작합니다.
+			if _frames == 10 and is_instance_valid(player):
+				player.bot_active = false
+				debug_aim = Vector3(0, 0, -1)
+				var foe := Enemy.new()
+				world.add_child(foe)
+				# **서진은 `grunt`** 입니다(brute 는 소품을 던지는 큰 아이).
+				foe.setup("grunt", 3, dungeon, player)
+				foe.global_position = player.global_position + Vector3(0, 0, -4.0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+				_alive += 1
+			if _frames % 30 == 0 and _frames > 20 and is_instance_valid(_probe_foe):
+				print("[돌진선] f=%d 예고 %.2f 거리 %.1f 띠보임=%s 폭 %.2fm 길이 %.1fm" % [
+					_frames, _probe_foe._windup,
+					_probe_foe.global_position.distance_to(player.global_position),
+					str(_probe_foe._lane != null and _probe_foe._lane.visible),
+					_probe_foe.charge_width(),
+					float(_probe_foe.stats["charge_dist"])])
 		"charge":
 			# **고함을 모으는 것**을 잽니다. 살짝 눌렀다 뗀 것과 끝까지
 			# 누른 것의 부채꼴이 실제로 다른지 봅니다.

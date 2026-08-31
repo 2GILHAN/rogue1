@@ -209,6 +209,10 @@ var _shout_dir := Vector3.FORWARD
 var _melee_fan: MeshInstance3D = null
 var _melee_fan_mat: StandardMaterial3D = null
 var _melee_flash := 0.0
+## 돌진이 지나갈 길을 칠하는 바닥 띠.
+var _lane: MeshInstance3D = null
+var _lane_mat: StandardMaterial3D = null
+var _lane_flash := 0.0
 ## 호통의 판정 범위를 칠하는 바닥 판. 그 공격을 쓰는 적만 만듭니다.
 var _shout_fan: MeshInstance3D = null
 var _shout_fan_mat: StandardMaterial3D = null
@@ -762,6 +766,7 @@ func _physics_process(delta: float) -> void:
 	_drive_attack_pose(delta)
 	_drive_shout_fan(delta)
 	_drive_melee_fan(delta)
+	_drive_charge_lane(delta)
 	_drive_animation()
 
 
@@ -1014,18 +1019,20 @@ func _begin_attack() -> void:
 		return
 
 	if mode == "charge":
-		# 달려올 **길**을 그립니다. 발밑의 둥근 고리 하나로는 어디로 비켜야
-		# 할지 알 수 없습니다 - 앞으로 늘어놓아야 "이 선 위에 서 있지 말라"
-		# 가 됩니다. 방향은 여기서 고정되고, 예고 중에는 몸도 돌지 않습니다
+		# 달려올 **길**을 두꺼운 선 하나로 칠합니다.
+		#
+		# 예전에는 고리 넷을 앞으로 늘어놓았습니다. "이 선 위에 서 있지 말라"
+		# 는 뜻은 맞았지만 **넷이 각자 커졌다 사라져서 화면이 어수선했고**,
+		# 고리 사이의 빈 곳이 안전해 보였습니다 - 실제로는 그 사이도 전부
+		# 지나갑니다. 칠한 띠 하나면 그 오해가 없습니다.
+		#
+		# 방향은 여기서 고정되고, 예고 중에는 몸도 돌지 않습니다
 		# (_physics_process 의 회전 규칙). 따라오면 비켜도 소용이 없습니다.
 		var to2: Vector3 = (target.global_position - global_position) if is_instance_valid(target) else -_pivot.global_transform.basis.z
 		to2.y = 0.0
 		if to2.length_squared() > 0.001:
 			_charge_dir = to2.normalized()
-		var lane: float = float(stats["charge_dist"])
-		for i in 4:
-			var at := global_position + _charge_dir * (lane * (0.22 + 0.26 * i))
-			Fx.ring(get_parent(), at, Color(1.0, 0.45, 0.3), 0.85, _windup)
+		_show_charge_lane()
 		return
 
 	if mode == "spit":
@@ -1095,6 +1102,7 @@ func _tick_windup(delta: float, to_target: Vector3, dist: float) -> void:
 	elif mode == "charge":
 		# 방향은 예고 때 고정한 그대로입니다. 여기서 다시 겨누면 예고가
 		# 거짓말이 됩니다.
+		_lane_flash = FAN_FLASH
 		_begin_charge(_charge_dir)
 	elif mode == "shout":
 		_shout(to_target, dist)
@@ -1149,6 +1157,58 @@ const FAN_FLASH := 0.26
 ## 맨손 공격이 닿는 각도. 호통(78도)보다 좁습니다 - 팔로 치는 것이라
 ## 넓으면 옆으로 굴러 나가도 안 빠집니다.
 const MELEE_ARC := 96.0
+
+
+func charge_width() -> float:
+	## 돌진이 **실제로 맞는 폭**(m).
+	##
+	## `_charge_contact` 가 쓰는 거리와 같은 값에서 뽑습니다 - 내 반지름 +
+	## 주인공 반지름 + 손끝 여유의 두 배입니다. 그림에 폭을 따로 적어 두면
+	## 몸이 커졌을 때 선만 옛 굵기로 남습니다.
+	var mine: float = float(get_meta("body_radius", 0.35))
+	var theirs := 0.30
+	if is_instance_valid(target):
+		theirs = float(target.get("_body_radius"))
+	return (mine + theirs + 0.12) * 2.0
+
+
+func _show_charge_lane() -> void:
+	## 돌진이 지나갈 길을 바닥에 칠합니다. **길이와 폭이 판정 그대로**입니다.
+	if _lane == null:
+		_lane_mat = Fx.fan_material()
+		_lane = MeshInstance3D.new()
+		_lane.name = "ChargeLane"
+		_lane.material_override = _lane_mat
+		_lane.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_lane.set_meta("flat", true)
+		_lane.position = Vector3(0, 0.04, 0)
+		# `_pivot` 이 아니라 적 노드에 답니다 - 몸통은 도는데 예고 방향은
+		# 굳어 있어야 합니다(호통·맨손 부채꼴과 같은 사정).
+		add_child(_lane)
+	_lane.mesh = Fx.lane_mesh(float(stats["charge_dist"]), charge_width())
+	_lane.rotation.y = atan2(-_charge_dir.x, -_charge_dir.z)
+	_lane.visible = true
+	_lane_flash = 0.0
+
+
+func _drive_charge_lane(delta: float) -> void:
+	## 예고 동안 붉어지고, 달리기 시작하는 순간 새빨개졌다 사라집니다.
+	if _lane == null or _lane_mat == null:
+		return
+	if _lane_flash > 0.0:
+		_lane_flash -= delta
+		var k := clampf(_lane_flash / FAN_FLASH, 0.0, 1.0)
+		_lane_mat.albedo_color = Color(1.0, 0.14, 0.10, 0.58 * k)
+		_lane.visible = _lane_flash > 0.0
+		return
+	if _windup >= 0.0 and stats.get("attack", "melee") == "charge" and not _dead:
+		var total := maxf(float(stats["windup"]), 0.001)
+		var t := clampf(1.0 - _windup / total, 0.0, 1.0)
+		_lane_mat.albedo_color = Color(1.0, 0.82, 0.40, 0.13).lerp(
+			Color(1.0, 0.30, 0.18, 0.44), t)
+		_lane.visible = true
+		return
+	_lane.visible = false
 
 
 func _show_melee_fan() -> void:
