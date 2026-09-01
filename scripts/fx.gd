@@ -690,69 +690,91 @@ static func _all(root: Node) -> Array:
 	return out
 
 
-## 소리를 그리는 **선**과 **구**의 수.
+## 고함을 그리는 **선분 다발**.
 ##
-## 선 다섯이 부채꼴 안에 고르게 퍼지고, 그 위를 구가 셋씩 바깥으로 흘러
-## 나갑니다. 더 늘리면 겹쳐서 덩어리가 되고, 줄이면 방향만 남고 "퍼진다" 가
-## 안 됩니다.
-const RAY_LINES := 5
-const RAY_BEADS := 3
-## 구가 입에서 끝까지 한 번 흘러가는 데 걸리는 시간(초).
-const RAY_FLOW := 0.42
+## 자를 대고 그은 선처럼 균일하면 효과가 죽습니다 - 손으로 급하게 그은 느낌이
+## 나야 해서, 길이·굵기·각도·시작점을 전부 흩뜨립니다.
+const RAY_LINES := 14
+## 패턴 수. **매 프레임 통째로 갈아 끼웁니다**(보일링).
+##
+## 같은 그림을 움직이면 미끄러지는 것으로 보입니다. 아예 다른 패턴으로
+## 바뀌어야 손으로 다시 그린 것처럼 지글거립니다. 셋이면 되풀이가 눈에
+## 안 띄고, 넷 이상은 만드는 값만 늡니다.
+const RAY_PATTERNS := 3
+## 패턴을 바꾸는 간격(초). **0 이면 매 프레임**입니다.
+##
+## 60프레임에서 매 프레임 바꾸면 60Hz 로 떨립니다. 지글거림이 아니라 잡음으로
+## 보이면 0.05(초당 20번)쯤으로 올립니다 - 손으로 그린 만화가 대개 그 속도입니다.
+const RAY_BOIL := 0.0
 
 
 static func make_shout_rays(parent: Node3D) -> Node3D:
 	## 소리가 퍼져 나가는 그림 한 벌. **부르는 쪽이 들고 있다가** 모으는 동안
 	## 자리와 크기를 고쳐 씁니다(`drive_shout_rays`).
 	##
-	## 소용돌이(원뿔 + 나선 셰이더)를 걷어낸 자리입니다. 모양은 그럴듯했지만
-	## **덩어리**라, 그 뒤에 있는 적이 가려지고 어디까지가 판정인지도 흐려
-	## 졌습니다. 선과 구는 사이가 비어 있어서 **뒤가 그대로 보입니다** -
-	## 판정은 바닥의 부채꼴이 이미 칠하고 있으므로, 이쪽은 "소리가 나간다"
-	## 만 말하면 됩니다.
+	## 패턴 셋을 미리 만들어 두고 한 장만 보입니다. 매번 새로 만들면 그 값이
+	## 그대로 듭니다 - 소용돌이 시절 고함마다 원뿔을 새로 만들다 5.2ms(프레임의
+	## 3분의 1)를 먹은 적이 있습니다.
 	var holder := Node3D.new()
 	parent.add_child(holder)
-
-	# 선과 구의 **메시와 재질을 한 벌씩만** 만들어 나눠 씁니다. 매번 새로
-	# 만들던 소용돌이가 고함마다 5.2ms(프레임의 3분의 1)를 먹었습니다.
-	var line_mesh := BoxMesh.new()
-	line_mesh.size = Vector3(0.05, 0.02, 1.0)
-	var bead_mesh := SphereMesh.new()
-	bead_mesh.radius = 0.5
-	bead_mesh.height = 1.0
-	bead_mesh.radial_segments = 8
-	bead_mesh.rings = 4
-
-	for i in RAY_LINES:
-		var ray := Node3D.new()
-		holder.add_child(ray)
-		var line := MeshInstance3D.new()
-		line.mesh = line_mesh
-		line.material_override = _ray_material(0.34)
-		line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# 카툰 외곽선이 선을 검게 두르면 소리가 아니라 막대가 됩니다.
-		line.set_meta("flat", true)
-		ray.add_child(line)
-		for _b in RAY_BEADS:
-			var bead := MeshInstance3D.new()
-			bead.mesh = bead_mesh
-			bead.material_override = _ray_material(0.55)
-			bead.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			bead.set_meta("flat", true)
-			ray.add_child(bead)
+	# 선분은 **얇은 상자**입니다. 하나를 만들어 전부가 나눠 쓰고, 굵기와 길이는
+	# 노드의 `scale` 로 냅니다.
+	var seg := BoxMesh.new()
+	seg.size = Vector3(1.0, 0.02, 1.0)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260901
+	for _pat in RAY_PATTERNS:
+		var pattern := Node3D.new()
+		holder.add_child(pattern)
+		for _i in RAY_LINES:
+			# **마디를 하나 더 둡니다.** 선분의 자리는 그 선분이 향한 쪽으로
+			# 밀어야 하는데, `position` 은 자기 회전이 아니라 부모 기준입니다 -
+			# 한 노드에 둘 다 주면 방향만 돌고 자리는 안 돌아, 선분들이 부채꼴을
+			# 가로질러 엇갈립니다(실제로 그렇게 나왔습니다).
+			var ray := Node3D.new()
+			pattern.add_child(ray)
+			var line := MeshInstance3D.new()
+			line.mesh = seg
+			line.material_override = _ray_material(1.0)
+			line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			# 카툰 외곽선이 선을 검게 두르면 소리가 아니라 막대가 됩니다.
+			line.set_meta("flat", true)
+			# **하나하나 다르게 흩뜨립니다.** 부채꼴 안 어디에서 시작해서
+			# 어디까지 가는지, 얼마나 굵은지가 선마다 다릅니다.
+			#
+			#   u     부채꼴을 가로지르는 자리(-0.5 ~ 0.5)
+			#   from  입에서 얼마나 떨어져 시작하나(0 ~ 1)
+			#   span  얼마나 길게 가나
+			#   wide  굵기(m)
+			#
+			# **중간에서 시작하는 선**이 섞여야 끊긴 것으로 보입니다. 전부
+			# 입에서 출발하면 방사선이 되어 자로 그은 그림이 됩니다.
+			var u := rng.randf_range(-0.46, 0.46)
+			var from := rng.randf_range(0.0, 0.45)
+			var span := rng.randf_range(0.18, 1.0 - from)
+			line.set_meta("u", u)
+			line.set_meta("from", from)
+			line.set_meta("span", span)
+			line.set_meta("wide", rng.randf_range(0.025, 0.075))
+			# 가장자리 선은 짧게. 다 같은 길이면 끝이 호가 아니라 일자로
+			# 잘려서 부채꼴이 아니라 빗살무늬가 됩니다.
+			line.set_meta("edge", 1.0 - absf(u) * 0.9)
+			ray.add_child(line)
+		pattern.visible = false
+	if holder.get_child_count() > 0:
+		(holder.get_child(0) as Node3D).visible = true
 	return holder
 
 
 static func _ray_material(alpha: float) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(RUSH_COLOR.r, RUSH_COLOR.g, RUSH_COLOR.b, alpha)
+	# **흰색**입니다. 소리는 색이 아니라 세기라, 색을 주면 무슨 속성인가로
+	# 읽힙니다(파랑은 이 게임에서 밀기·구르기의 색입니다).
+	mat.albedo_color = Color(1.0, 1.0, 1.0, alpha)
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	# 더하기로 섞습니다. 소리는 덮는 것이 아니라 **밝아지는 것**입니다.
 	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	# 깊이를 안 씁니다. 바닥의 부채꼴과 다투면 지지직거립니다.
-	mat.no_depth_test = false
 	mat.disable_receive_shadows = true
 	return mat
 
@@ -760,11 +782,11 @@ static func _ray_material(alpha: float) -> StandardMaterial3D:
 static func drive_shout_rays(holder: Node3D, at: Vector3, dir: Vector3,
 		reach: float, mouth: float, arc_deg: float, fade: float, phase: float) -> void:
 	## 모으는 동안 매 프레임 고쳐 씁니다. **판정과 같은 값**(사거리·각)을
-	## 받으므로 부채꼴이 자라면 선도 같이 길고 넓어집니다.
+	## 받으므로 부채꼴이 자라면 선분도 같이 길고 넓어집니다.
 	##
-	## `phase` 는 구가 흐르는 위치(0~1)입니다. 시간을 밖에서 받는 이유는
-	## 이 함수가 상태를 안 들기 때문입니다 - 상태를 여기 두면 고함이 둘
-	## 이상일 때 서로 흐름을 덮어씁니다.
+	## `phase` 는 보일링의 시계(초)입니다. 시간을 밖에서 받는 이유는 이 함수가
+	## 상태를 안 들기 때문입니다 - 상태를 여기 두면 고함이 둘 이상일 때 서로
+	## 덮어씁니다.
 	if holder == null or not is_instance_valid(holder):
 		return
 	var flat := Vector3(dir.x, 0.0, dir.z)
@@ -773,55 +795,60 @@ static func drive_shout_rays(holder: Node3D, at: Vector3, dir: Vector3,
 	flat = flat.normalized()
 	holder.global_position = at
 	holder.rotation.y = atan2(-flat.x, -flat.z)
-	for i in holder.get_child_count():
-		var ray := holder.get_child(i) as Node3D
-		if ray == null:
+
+	# **패턴을 통째로 갈아 끼웁니다.**
+	var n := holder.get_child_count()
+	if n <= 0:
+		return
+	var pick := 0
+	if RAY_BOIL <= 0.0:
+		pick = int(Engine.get_physics_frames()) % n
+	else:
+		pick = int(phase / RAY_BOIL) % n
+	for i in n:
+		var pat := holder.get_child(i) as Node3D
+		if pat != null:
+			pat.visible = (i == pick)
+	var shown := holder.get_child(pick) as Node3D
+	if shown == null:
+		return
+	for i in shown.get_child_count():
+		var ray := shown.get_child(i) as Node3D
+		if ray == null or ray.get_child_count() == 0:
 			continue
-		# **부채꼴 안에 고르게 폅니다.** 가운데 선이 정면이고 나머지가
-		# 좌우로 갈라집니다 - 판정 각을 그대로 나눠 쓰므로 선이 판정 밖으로
-		# 나가지 않습니다.
-		var t := 0.5 if RAY_LINES <= 1 else float(i) / float(RAY_LINES - 1)
-		ray.rotation.y = deg_to_rad(arc_deg) * (t - 0.5)
-		# 가장자리 선은 조금 짧습니다. 다 같은 길이면 끝이 일자로 잘려서
-		# 부채꼴이 아니라 빗살무늬가 됩니다.
-		var edge := 1.0 - absf(t - 0.5) * 0.7
-		var span := reach * edge
+		var line := ray.get_child(0) as MeshInstance3D
+		if line == null:
+			continue
+		var u: float = float(line.get_meta("u", 0.0))
+		var edge: float = float(line.get_meta("edge", 1.0))
+		var from: float = float(line.get_meta("from", 0.0)) * reach * edge
+		var span: float = float(line.get_meta("span", 1.0)) * reach * edge
 		# **입에서 바닥의 부채꼴 테두리로 내려갑니다.**
 		#
-		# 입 높이에서 수평으로 뻗었더니 화면에서 부채꼴 **밖으로** 나갔습니다.
-		# 내려다보는 카메라에서는 높이 뜬 선의 끝이 더 멀리 찍히기 때문입니다 -
-		# 판정은 바닥에 칠해 놓고 그림만 그 밖으로 나가면 거짓말이 됩니다.
-		# 끝이 바닥에 닿으면 선의 끝과 부채꼴의 테두리가 화면에서 겹칩니다.
-		# 부호를 눈으로 고르지 마세요. +X 로 돌리면 -Z 가 **위로** 올라갑니다
-		# (재서 확인: 한 번 위로 뻗어 부채꼴 밖으로 나갔습니다).
-		ray.rotation.x = -atan2(mouth, maxf(span, 0.01))
-		var run := sqrt(span * span + mouth * mouth)
-		var line := ray.get_child(0) as MeshInstance3D
-		if line != null:
-			# 상자를 늘여 선으로 씁니다. 굵기는 사거리를 안 따라갑니다 -
-			# 길어질수록 굵어지면 멀리 지를수록 시야를 더 가립니다.
-			line.scale = Vector3(1.0, 1.0, run)
-			line.position = Vector3(0, 0, -run * 0.5)
-			_ray_fade(line, fade * 0.9)
-		for b in RAY_BEADS:
-			var bead := ray.get_child(1 + b) as MeshInstance3D
-			if bead == null:
-				continue
-			# 구는 **입에서 끝까지 흘러갑니다.** 셋이 같은 간격으로 따라가고,
-			# 끝에 닿으면 처음으로 돌아옵니다.
-			var f := fposmod(phase + float(b) / float(RAY_BEADS), 1.0)
-			bead.position = Vector3(0, 0, -run * f)
-			# 나갈수록 커지고 옅어집니다 - 퍼지면서 흩어지는 그림입니다.
-			var size := 0.10 + 0.16 * f
-			bead.scale = Vector3.ONE * size
-			_ray_fade(bead, fade * (1.0 - f * 0.75))
+		# 입 높이에서 수평으로 뻗었더니 화면에서 부채꼴 **밖으로** 나갔습니다 -
+		# 내려다보는 카메라에서는 높이 뜬 선의 끝이 더 멀리 찍힙니다.
+		# (부호는 재서 골랐습니다: `+X` 로 돌리면 `-Z` 가 위로 올라갑니다.)
+		var far: float = reach * edge
+		# 마디가 방향을 잡고, 선분은 그 안에서 **앞으로만** 밀립니다.
+		ray.rotation = Vector3(-atan2(mouth, maxf(far, 0.01)),
+			deg_to_rad(arc_deg) * u, 0.0)
+		var run := sqrt(far * far + mouth * mouth)
+		var k: float = run / maxf(far, 0.01)
+		var wide: float = float(line.get_meta("wide", 0.04))
+		line.scale = Vector3(wide, 1.0, span * k)
+		line.position = Vector3(0, 0, -(from + span * 0.5) * k)
+		var mat := line.material_override as StandardMaterial3D
+		if mat != null:
+			mat.albedo_color.a = clampf(fade, 0.0, 1.0)
 
 
-static func _ray_fade(mi: MeshInstance3D, a: float) -> void:
-	var mat := mi.material_override as StandardMaterial3D
-	if mat == null:
-		return
-	mat.albedo_color.a = clampf(a, 0.0, 1.0)
+static func all_shout_lines(root: Node) -> Array:
+	## 선분 전부(패턴 셋 모두). 스러지게 할 때 씁니다.
+	var out: Array = []
+	for n in _all(root):
+		if n is MeshInstance3D:
+			out.append(n)
+	return out
 
 
 static func shout_fan(parent: Node3D, at: Vector3, dir: Vector3,

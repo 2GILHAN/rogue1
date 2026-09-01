@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.29"
+const VERSION := "v0.30"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -225,6 +225,9 @@ var _spam_count := {}
 var _probe_arg := ""
 ## --pose=reach 에서 적을 먼 쪽(2.4m)에 세울까.
 var _probe_far := false
+## --pose=wedge 에서 세운 책장과 처음 자리.
+var _wedge_prop: Prop = null
+var _wedge_from := Vector3.ZERO
 var _probe_foe: Enemy = null
 var _probe_hp := 0.0
 ## --push-lv=N 으로 밀기 계통을 미리 올려 둡니다(비교용).
@@ -1876,6 +1879,67 @@ func _drive_pose() -> void:
 					rad_to_deg(absf(_probe_foe._charge_dir.signed_angle_to(
 						to.normalized(), Vector3.UP))) if to.length_squared() > 0.001 else 0.0,
 					to.length()])
+		"shelfpause":
+			# **스킬 고르기 창이 뜰 때 게임이 멈추는가.**
+			#
+			# 적을 한 마리 세워 두고 창을 연 뒤, 그 적이 움직이는지 봅니다 -
+			# 멈춘 것을 "phase 가 BOON 이다" 로만 확인하면 실제로 멈췄는지는
+			# 모릅니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.global_position = player.global_position + Vector3(5.0, 0, 0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+				_alive += 1
+			if _frames == 34 and is_instance_valid(player):
+				# **읽는 동안 안 맞는지** 먼저 봅니다. 창이 뜨기 전 이 동작이
+				# 무방비였습니다.
+				player.begin_read(Color(1, 1, 1), Vector3(0, 0, 1))
+				var before: float = state.hp
+				player.take_damage(30.0)
+				print("[멈춤] 읽는 중 맞음: 체력 %.0f -> %.0f (안 깎여야 맞음)" % [
+					before, state.hp])
+			if _frames == 40 and is_instance_valid(_probe_foe):
+				_wedge_from = _probe_foe.global_position
+				print("[멈춤] 창 열기 전 단계=%d 멈춤=%s" % [phase, str(get_tree().paused)])
+				_on_read_done()
+				print("[멈춤] 창 연 직후 단계=%d 멈춤=%s (3? 2=BOON)" % [
+					phase, str(get_tree().paused)])
+			# 멈추면 이 아래는 안 돕니다(`_process` 가 안 불립니다).
+			# 그래서 **다음 프레임이 오는지 자체**가 답입니다.
+			if _frames == 41 and is_instance_valid(_probe_foe):
+				print("[멈춤] 다음 프레임이 왔습니다 - **안 멈췄습니다.** 적이 %.3fm 움직임" % [
+					_probe_foe.global_position.distance_to(_wedge_from)])
+			if _frames == 90 and is_instance_valid(_probe_foe):
+				print("[멈춤] f=90 까지 왔습니다 - 적이 %.2fm 움직임" % [
+					_probe_foe.global_position.distance_to(_wedge_from)])
+		"wedge":
+			# **끼었을 때 빠져나오는지** 잽니다.
+			#
+			# 책장 둘을 사람 몸보다 좁은 틈으로 마주 세우고 그 사이에 몸을
+			# 넣습니다. 미끄러질 면이 없으므로 `move_and_slide` 는 아무 데도
+			# 못 갑니다 - 방에서 실제로 벌어지는 일과 같은 모양입니다.
+			if _frames == 14 and is_instance_valid(player):
+				player.bot_active = false
+				var at: Vector3 = dungeon.room_center(0)
+				for side in [-1.0, 1.0]:
+					var shelf := Prop.new()
+					world.add_child(shelf)
+					shelf.setup("bookshelf")
+					shelf.global_position = at + Vector3(side * 0.62, 0, 0)
+				player.global_position = at
+				_wedge_from = at
+			if _frames > 22 and is_instance_valid(player):
+				# 앞으로 계속 밉니다. 틈이 좁아 앞으로는 못 갑니다.
+				player.bot_active = true
+				player.bot_move = Vector2(0, -1)
+			if _frames in [40, 60, 90, 140] and is_instance_valid(player):
+				print("[끼임] f=%d 처음 자리에서 %.2fm (끼임시계 %.2f)" % [
+					_frames, player.global_position.distance_to(_wedge_from),
+					player._stuck_time])
 		"sizes":
 			# **적들의 실제 키**를 주인공과 나란히 잽니다.
 			#

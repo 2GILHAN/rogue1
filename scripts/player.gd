@@ -651,6 +651,7 @@ func _physics_process(delta: float) -> void:
 			_resolve_grab()
 
 	move_and_slide()
+	_unstick(delta)
 	_push_what_we_hit()
 	if _held != null:
 		if not is_instance_valid(_held):
@@ -735,6 +736,7 @@ func _ground_move(delta: float) -> void:
 	var wish := Vector3(input.x, 0.0, input.y)
 	if wish.length() > 1.0:
 		wish = wish.normalized()
+	_wish_dir = wish
 
 	var speed := state.move_speed
 	# 구르고 나온 직후의 질주(「이속」 Lv2).
@@ -766,6 +768,85 @@ func _ground_move(delta: float) -> void:
 	flat = flat.move_toward(target, rate * delta)
 	velocity.x = flat.x
 	velocity.z = flat.z
+
+
+## 끼었다고 보기까지 기다리는 시간(초)과, 빼내는 속도(m/s).
+##
+## 0.30초는 **벽에 잠깐 붙는 것과 끼는 것을 가르는 값**입니다. 모퉁이를 스치며
+## 도는 동안에도 한두 프레임은 못 나아가는데, 그때마다 몸이 옆으로 밀리면
+## 걷는 것이 미끄럽게 느껴집니다.
+##
+## 빼내는 속도는 걷는 속도(3.1)보다 느립니다. 빠르면 끼었다 풀리는 순간
+## 튕겨 나가서, 무슨 일이 일어났는지 모르게 됩니다.
+const STUCK_TIME := 0.30
+const STUCK_PUSH := 1.8
+## 끼었을 때 둘러보는 거리(m). 이 안의 소품에서 멀어지는 쪽으로 뺍니다.
+const STUCK_LOOK := 2.2
+
+var _stuck_time := 0.0
+var _stuck_from := Vector3.ZERO
+## 이번 프레임에 **가려던 쪽**(수평, 길이 0~1). 끼임 판단이 이것을 봅니다.
+var _wish_dir := Vector3.ZERO
+
+
+func _unstick(delta: float) -> void:
+	## **가려는데 못 가고 있으면 빼냅니다.**
+	##
+	## 책장·옷장 같은 붙박이는 네모난 충돌체이고 벽에 붙여 놓습니다. 벽과
+	## 소품 사이에 좁은 쐐기가 생기면 캡슐이 그 안에 물려서, 어느 쪽으로 밀어도
+	## 못 나옵니다 - `move_and_slide` 는 미끄러질 면이 없으면 아무 데도 안
+	## 갑니다.
+	##
+	## **속도가 아니라 실제로 움직인 거리**로 봅니다. 끼었을 때도 가려는
+	## 마음은 그대로라, 거리로 봐야 "못 가고 있다" 가 잡힙니다.
+	##
+	## 가려는 뜻은 **누른 방향**(`_wish_dir`)에서 읽습니다. `velocity` 로 보면
+	## 안 됩니다 - `move_and_slide` 가 막힌 방향의 속도를 지우고 돌아오므로,
+	## 정작 완전히 막혔을 때 0 이 되어 "가려는 중이 아니다" 로 읽힙니다.
+	var moved := global_position.distance_to(_stuck_from)
+	_stuck_from = global_position
+	var trying := _bound_time <= 0.0 and _joy_time <= 0.0 and not _dead 		and _wish_dir.length_squared() > 0.25
+	if not trying or moved > 0.012:
+		_stuck_time = 0.0
+		return
+	_stuck_time += delta
+	if _stuck_time < STUCK_TIME:
+		return
+	var away := _unstick_dir()
+	if away.length_squared() < 0.0001:
+		return
+	# `move_and_collide` 로 뺍니다. 자리를 직접 옮기면 벽을 뚫고 나갑니다 -
+	# 끼는 자리는 대개 벽 옆이라 그쪽으로 밀어낼 일이 반드시 생깁니다.
+	move_and_collide(away * STUCK_PUSH * delta)
+
+
+func _unstick_dir() -> Vector3:
+	## 빠져나갈 쪽. **가장 가까운 소품에서 멀어지되, 가려던 쪽도 섞습니다.**
+	##
+	## 멀어지기만 하면 뒤로 밀려나기만 하고 제자리로 돌아옵니다. 가려던 쪽을
+	## 섞어야 소품을 돌아 나가는 모양이 됩니다.
+	var wish := _wish_dir
+	if wish.length_squared() > 0.0001:
+		wish = wish.normalized()
+	var best: Node3D = null
+	var closest := STUCK_LOOK
+	for node in get_tree().get_nodes_in_group("props"):
+		var prop := node as Node3D
+		if not is_instance_valid(prop):
+			continue
+		var d := prop.global_position.distance_to(global_position)
+		if d < closest:
+			closest = d
+			best = prop
+	if best == null:
+		# 소품이 없으면 **가려던 쪽의 옆으로** 빠집니다. 벽 모퉁이에 물린
+		# 경우라 옆으로 한 뼘만 나가면 미끄러질 면이 생깁니다.
+		return Vector3(-wish.z, 0.0, wish.x)
+	var away: Vector3 = global_position - best.global_position
+	away.y = 0.0
+	if away.length_squared() < 0.0001:
+		return Vector3(-wish.z, 0.0, wish.x)
+	return (away.normalized() * 0.75 + wish * 0.55).normalized()
 
 
 func _push_what_we_hit() -> void:
@@ -1976,7 +2057,12 @@ func _drive_throw(delta: float) -> void:
 		(thrown as Node3D).global_position = _hand_point()
 	# **놓는 순간**입니다. 예비동작이 시작될 때 내면 아직 손에 있는데
 	# 날아가는 소리가 먼저 납니다.
-	Sfx.play(Sfx.THROW, -4.0, 0.10)
+	#
+	# **미는 소리**입니다(`THROW` 의 휙 소리가 아니라). 던지기는 밀기의
+	# 연장이고 - 이펙트도 밀기 계통에서 뽑습니다 - 휙 소리는 0.34초짜리
+	# 바람이라 몸이 돌아가는 큰 동작 끝에서 아무 일도 안 일어난 것처럼
+	# 들렸습니다. 같은 손이 하는 일이면 같은 소리가 나야 합니다.
+	Sfx.play(Sfx.PUSH, -1.0, 0.06)
 	if thrown is Prop:
 		thrown.throw(_throw_dir, state.damage * THROW_MULT)
 	elif thrown is Enemy:
@@ -2358,6 +2444,16 @@ func begin_read(cover: Color, face: Vector3 = Vector3.ZERO) -> void:
 	# 책이 빠져나올 자리. 몸 앞 책장의 책 높이입니다.
 	_read_shelf_at = global_position + _read_from_face * 0.55 + Vector3(0, 0.62, 0)
 	_read_time = READ_TIME
+	# **읽는 동안은 안 맞습니다.**
+	#
+	# 다 읽으면 스킬 고르기 창이 열리고 그때는 게임이 멈춥니다(실측: 창이 뜬
+	# 다음 프레임이 아예 안 옵니다). 그런데 **창이 뜨기 전 이 동작**은 그대로
+	# 돌아서, 책을 꺼내 돌아서서 펴는 사이에 얻어맞았습니다 - 손에는 "고르는
+	# 중에 맞았다" 로 느껴집니다.
+	#
+	# 여기서 멈출 수는 없습니다. 멈추면 이 동작 자체가 안 돌아 책을 영영 못
+	# 펴고, 창도 안 열립니다. 그래서 **동작이 도는 동안 안전하게** 둡니다.
+	_invuln = maxf(_invuln, READ_TIME)
 	_book = _make_book(cover)
 	get_parent().add_child(_book)
 	_book.global_position = _read_shelf_at
@@ -2890,20 +2986,22 @@ func _shout_preview() -> void:
 	_shout_prev.global_position = global_position + Vector3(0, 0.05, 0)
 	_shout_prev.rotation.y = atan2(-aim.x, -aim.z)
 
-	# **소리가 퍼져 나가는 선도 같이 자랍니다.**
+	# **고함 효과선.** 입에서 앞으로 뻗는 **흰 선분 다발**입니다.
+	#
+	# 선분은 규칙적이지 않습니다 - 길이·굵기·간격이 제각각이고 중간에서
+	# 시작하는 것도 섞입니다. 자를 대고 그은 것처럼 균일하면 효과가 죽습니다.
+	# 패턴 셋을 미리 만들어 두고 **통째로 갈아 끼워** 지글거리게 합니다(보일링).
 	#
 	# 소용돌이(원뿔 + 나선 셰이더)를 걷어낸 자리입니다. 모양은 그럴듯했지만
 	# **덩어리**라 그 뒤의 적이 가려졌습니다 - 굴러 피할 자리를 보려고 켜 둔
-	# 그림이 그 자리를 덮는 셈이었습니다. 선 다섯과 그 위를 흐르는 구는
-	# **사이가 비어 있어서 뒤가 그대로 보입니다.**
+	# 그림이 그 자리를 덮는 셈이었습니다.
 	#
 	# **판정과 같은 값**을 넘깁니다(`shout_reach`, `shout_arc`). 부채꼴이
-	# 자라면 선도 정확히 그만큼 길고 넓어집니다.
+	# 자라면 선분도 정확히 그만큼 길고 넓어집니다.
 	if _shout_vortex == null or not is_instance_valid(_shout_vortex):
 		_shout_vortex = Fx.make_shout_rays(get_parent())
 		_shout_flow = 0.0
-	_shout_flow = fposmod(_shout_flow + get_physics_process_delta_time()
-		/ Fx.RAY_FLOW, 1.0)
+	_shout_flow += get_physics_process_delta_time()
 	Fx.drive_shout_rays(_shout_vortex,
 		global_position + Vector3(0, MOUTH_HEIGHT, 0),
 		aim, shout_reach(charge) + 0.4, MOUTH_HEIGHT, shout_arc(charge),
@@ -2934,10 +3032,10 @@ func _clear_shout_preview() -> void:
 		var gone := _shout_vortex
 		var tw := gone.create_tween()
 		tw.tween_method(func(f: float) -> void:
-			for mi in Fx.all_meshes(gone):
+			for mi in Fx.all_shout_lines(gone):
 				var m := mi.material_override as StandardMaterial3D
 				if m != null:
-					m.albedo_color.a = m.albedo_color.a * f,
+					m.albedo_color.a = f,
 			1.0, 0.0, VORTEX_FADE)
 		tw.tween_callback(gone.queue_free)
 	_shout_vortex = null
