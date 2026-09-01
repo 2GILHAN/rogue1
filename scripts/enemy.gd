@@ -479,7 +479,7 @@ func _build_bar(y: float) -> void:
 	var back_mesh := QuadMesh.new()
 	back_mesh.size = Vector2(width + 0.06, 0.16)
 	back.mesh = back_mesh
-	back.material_override = _bar_material(Color(0.06, 0.05, 0.05, 0.85))
+	back.material_override = _bar_material(Color(0.06, 0.05, 0.05, 0.85), 2)
 	_bar_root.add_child(back)
 
 	var fill_mesh := QuadMesh.new()
@@ -487,14 +487,15 @@ func _build_bar(y: float) -> void:
 	fill_mesh.center_offset = Vector3(width * 0.5, 0, 0.01)
 	_bar_fill = MeshInstance3D.new()
 	_bar_fill.mesh = fill_mesh
-	_bar_mat = _bar_material(Color(0.90, 0.30, 0.26, 0.95))
+	# **뒷판보다 나중에 그립니다**(3 > 2). 아래 주석을 보세요.
+	_bar_mat = _bar_material(Color(0.90, 0.30, 0.26, 0.95), 3)
 	_bar_fill.material_override = _bar_mat
 	_bar_fill.position = Vector3(-width * 0.5, 0, 0.01)
 	_bar_root.add_child(_bar_fill)
 	_bar_root.visible = false
 
 
-func _bar_material(color: Color) -> StandardMaterial3D:
+func _bar_material(color: Color, priority: int) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -508,7 +509,15 @@ func _bar_material(color: Color) -> StandardMaterial3D:
 	# 있는데 줄지 않으니 무엇을 보라는 표시인지 알 수 없습니다.
 	mat.billboard_keep_scale = true
 	mat.no_depth_test = true
-	mat.render_priority = 2
+	# **뒷판과 채움에 같은 값을 주면 안 됩니다.**
+	#
+	# `no_depth_test` 라 깊이가 순서를 안 정해 줍니다. 그러면 남는 기준은
+	# 이 값뿐인데, 둘이 같으면 카메라가 도는 대로 순서가 뒤집혀서 **검은
+	# 뒷판이 채움을 덮습니다** - 화면에는 색이 사라진 검은 토막이 떴다가
+	# 다시 돌아오는 것으로 보입니다(박치기 아기에서 처음 봤습니다).
+	#
+	# 채움이 뒷판보다 커야 합니다(뒷판 2, 채움 3).
+	mat.render_priority = priority
 	return mat
 
 

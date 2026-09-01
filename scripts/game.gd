@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.46"
+const VERSION := "v0.47"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1474,9 +1474,16 @@ func _on_shop_bought(index: int) -> void:
 	var item: Dictionary = _shop_items[index]
 	if item.get("sold", false):
 		return
+	# **사기 전의 값**을 먼저 챙깁니다. `buy()` 가 돌고 나면 막대를 어디서부터
+	# 채워야 하는지가 없어집니다.
+	var before := {
+		"hp": state.hp, "breath": state.breath,
+		"desc": String(item.get("desc", "")),
+	}
 	if state.buy(item):
 		ui.mark_sold(index)
 		ui.refresh_shop(state.gold)
+		ui.celebrate_buy(String(item["id"]), before, state)
 	else:
 		ui.toast("사탕가 모자랍니다", UiTheme.BAD)
 
@@ -1910,8 +1917,19 @@ func _drive_pose() -> void:
 					if i == 0:
 						_probe_foe = e
 			# 명령: 구르기 → 밀기 → 고함
+			#
+			# **첫 글자는 구르기가 실제로 나가야 합니다.** 삼키면 사람 눈에
+			# 구르기가 고장 난 것으로 보입니다 - 관문 앞 체력 6 에서 이걸
+			# 만났습니다. 눌러 놓고 다음 프레임에 정말 굴렀는지 봅니다.
+			if _frames == 29:
+				_wedge_from = player.global_position
 			if _frames == 30:
 				player._try_dash()
+			if _frames == 32:
+				print("[필살] 첫 글자 뒤: 구르는 중=%s  움직임=%.2fm  명령=%d글자" % [
+					str(player._dash_time > 0.0),
+					player.global_position.distance_to(_wedge_from),
+					player.ultimate.step_index()])
 			if _frames == 34:
 				player.grab_press()
 			if _frames == 38:
@@ -2404,6 +2422,23 @@ func _drive_pose() -> void:
 				_open_shop()
 				print("[상점] 열었습니다. 단계=%d 멈춤=%s" % [
 					phase, str(get_tree().paused)])
+		"buyfx":
+			# **바꾼 것이 화면에 보이는가.**
+			#
+			# 물물교환 창은 78% 어두운 판을 깔고 뜹니다. 그 뒤에서 막대가
+			# 차 봐야 아무도 못 봅니다 - 그래서 두 가지를 봅니다: 막대
+			# 값이 **한 프레임에 튀지 않고 차는지**, 그리고 그동안 판이
+			# **덮개 위로 올라와 있는지**(z_index).
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				state.hp = state.max_hp * 0.35
+				state.gold = 999
+				_open_shop()
+				var names: Array = []
+				for it in _shop_items:
+					names.append(it["id"])
+				print("[교환효과] 열림 재고=%s 체력=%.0f/%.0f" % [
+					names, state.hp, state.max_hp])
 		"propfade":
 			# **가리는 가구가 비치는지** 잽니다.
 			#
@@ -2461,8 +2496,16 @@ func _drive_pose() -> void:
 				var ab: AABB = mi.global_transform * mi.get_aabb()
 				var l := camera.unproject_position(ab.position)
 				var r := camera.unproject_position(ab.position + Vector3(ab.size.x, 0, 0))
-				print("[체력바] 남은 %3.0f%%  scale.x=%.2f  화면 폭 %.1f px" % [
-					want, mi.scale.x, absf(r.x - l.x)])
+				# **뒷판과 채움의 그리는 순서**도 같이 찍습니다. 둘은
+				# `no_depth_test` 라 깊이가 순서를 안 정해 주고, 이 값마저
+				# 같으면 카메라가 도는 대로 뒤집혀 **검은 뒷판이 채움을
+				# 덮습니다**. 채움이 커야 합니다.
+				var back_mat := (_probe_foe._bar_root.get_child(0) as MeshInstance3D) 					.material_override as StandardMaterial3D
+				var fill_mat := mi.material_override as StandardMaterial3D
+				print("[체력바] 남은 %3.0f%%  scale.x=%.2f  화면 폭 %.1f px  순서 뒷판=%d 채움=%d %s" % [
+					want, mi.scale.x, absf(r.x - l.x),
+					back_mat.render_priority, fill_mat.render_priority,
+					"OK" if fill_mat.render_priority > back_mat.render_priority else "뒤집힘"])
 		"cardir":
 			# **자동차가 가는 쪽을 보고 있나.** 앞뒤가 뒤집혔는지 재는 자리입니다.
 			#
@@ -4322,6 +4365,16 @@ func _process(delta: float) -> void:
 
 	# **단계와 상관없이** 도는 확인. 창이 떠 있는 동안(PLAYING 이 아님)을
 	# 보려면 아래 `_drive_pose` 안에 둘 수 없습니다.
+	# **창이 열린 뒤는 `_drive_pose` 가 안 돕니다**(그쪽은 PLAYING 에서만
+	# 돕니다). 사는 것도 보는 것도 여기서 합니다.
+	if _pose == "buyfx" and _frames == 40:
+		for i in _shop_items.size():
+			if String(_shop_items[i]["id"]) == "heal":
+				_on_shop_bought(i)
+				break
+	if _pose == "buyfx" and _frames >= 39 and _frames <= 100 and _frames % 6 == 0:
+		print("[교환효과] f=%d  막대=%.1f  글=%s  올림=%d" % [
+			_frames, ui.probe_hp_bar(), ui.probe_hp_text(), ui.probe_lift()])
 	if _pose == "shoppause" and _frames in [70, 130, 200] 			and is_instance_valid(_probe_foe):
 		print("[상점] f=%d  적이 %.3fm 움직임  시계 %+.2f초  단계=%d 멈춤=%s" % [
 			_frames, _probe_foe.global_position.distance_to(_wedge_from),

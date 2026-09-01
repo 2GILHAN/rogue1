@@ -158,7 +158,8 @@ func feed(key: String) -> String:
 	## 누름 하나를 넣습니다. 돌려주는 값이 곧 **부르는 쪽이 할 일**입니다.
 	##
 	##   ""          평소대로 하세요(이 누름은 필살기와 무관합니다)
-	##   "armed"     명령이 한 글자 맞았습니다. 평소 동작은 하지 마세요
+	##   "opened"    명령의 **첫 글자**가 맞았습니다. 평소 동작도 **하세요**
+	##   "armed"     명령이 이어지는 중입니다. 평소 동작은 하지 마세요
 	##   "fire"      필살 모드가 켜졌습니다
 	##   "roll"/...  필살 동작 이름. 그 동작을 하세요
 	##   "empty"     용기가 모자랍니다. 모드가 풀립니다
@@ -176,9 +177,20 @@ func feed(key: String) -> String:
 		# 누르게 하면, 빠르게 훑는 손에서는 영영 안 맞습니다.
 		_step = 1 if key == COMMAND[0] else 0
 		_step_left = COMMAND_WINDOW if _step > 0 else 0.0
-		return "armed" if _step > 0 else ""
+		return "opened" if _step > 0 else ""
 	_step += 1
 	_step_left = COMMAND_WINDOW
+	if _step == 1:
+		# **첫 글자는 안 삼킵니다.**
+		#
+		# 용기가 차 있는 동안 구르기 첫 누름을 삼키면, 사람 눈에는 **구르기가
+		# 고장 난 것**으로 보입니다 - 게이지가 찼다는 것과 구르기가 안 나가는
+		# 것을 잇지 못합니다. 실제로 관문 앞 체력 6 에서 이걸 만났습니다.
+		#
+		# 구르기로 명령을 시작한 이유가 원래 "무적이라 아무 때나 눌러도
+		# 손해가 아니다" 였는데, 삼키고 있었으니 그 말이 거짓이었습니다.
+		# 구르면서 명령이 걸립니다 - 잃는 누름이 없습니다.
+		return "opened"
 	if _step < COMMAND.size():
 		return "armed"
 	_step = 0

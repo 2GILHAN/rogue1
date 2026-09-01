@@ -94,6 +94,17 @@ var _start_pos := Vector3.ZERO
 var _minimap_dungeon: Dungeon
 var _exit_pos := Vector3.ZERO
 
+## 물물교환에서 무엇이 올랐는지 보여 줄 때 **덮개 위로 올릴** 조각들입니다.
+## 창이 떠 있는 동안 아래 막대는 78% 어두운 판 뒤에 있어서, 그냥 채우면
+## 무엇이 변했는지 안 보입니다.
+var _vitals_panel: Control
+var _hp_row: HBoxContainer
+var _dash_row: HBoxContainer
+var _stats_panel: Control
+## 막대를 부드럽게 채우는 동안 `update_hud` 가 값을 덮어쓰면 안 됩니다.
+var _hold_hp := false
+var _hold_breath := false
+
 var _overlay: Control
 var _overlay_box: VBoxContainer
 var _shop_buttons: Array[Button] = []
@@ -224,6 +235,7 @@ func _build_hud() -> void:
 	panel.custom_minimum_size = Vector2(310, 0)
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hud.add_child(panel)
+	_stats_panel = panel
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 6)
@@ -376,6 +388,7 @@ func _build_vitals() -> void:
 	panel.offset_bottom = -46
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hud.add_child(panel)
+	_vitals_panel = panel
 
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 4)
@@ -384,6 +397,7 @@ func _build_vitals() -> void:
 	var hp_row := HBoxContainer.new()
 	hp_row.add_theme_constant_override("separation", 8)
 	col.add_child(hp_row)
+	_hp_row = hp_row
 	# 두 이름의 너비를 맞춰야 아래위 막대의 시작점이 같아집니다.
 	var hp_name := _outlined(UiTheme.label("투지", 16, UiTheme.TEXT))
 	hp_name.custom_minimum_size = Vector2(38, 0)
@@ -408,6 +422,7 @@ func _build_vitals() -> void:
 	var dash_row := HBoxContainer.new()
 	dash_row.add_theme_constant_override("separation", 8)
 	col.add_child(dash_row)
+	_dash_row = dash_row
 	var br_name := _outlined(UiTheme.label("호흡", 16, UiTheme.TEXT))
 	br_name.custom_minimum_size = Vector2(38, 0)
 	dash_row.add_child(br_name)
@@ -1174,13 +1189,15 @@ func update_hud(state: RunState, enemies_left: int, _unused: float) -> void:
 	# 됩니다.
 	_gold.text = "사탕 %d" % state.gold
 	_hp_bar.max_value = state.max_hp
-	_hp_bar.value = state.hp
-	_hp_text.text = "%d / %d" % [int(ceil(state.hp)), int(state.max_hp)]
+	if not _hold_hp:
+		_hp_bar.value = state.hp
+		_hp_text.text = "%d / %d" % [int(ceil(state.hp)), int(state.max_hp)]
 	_enemies.text = ("남은 적 %d" % enemies_left) if enemies_left > 0 else "정리 완료 - 파란 문으로"
 	# 숨. 기술을 쓸 밑천이라 체력 바로 아래에 둡니다.
 	_dash_bar.max_value = state.max_breath
-	_dash_bar.value = state.breath
-	_breath_text.text = "%d / %d" % [int(ceil(state.breath)), int(state.max_breath)]
+	if not _hold_breath:
+		_dash_bar.value = state.breath
+		_breath_text.text = "%d / %d" % [int(ceil(state.breath)), int(state.max_breath)]
 	# 고함(80) 을 지를 수 없는 동안에는 색을 죽입니다. 숫자를 읽지 않아도
 	# "지금은 못 지른다" 가 보여야 합니다.
 	# 고함을 지를 수 없는 동안에는 색을 죽입니다. 값을 여기 적어 두면 기술
@@ -1445,6 +1462,134 @@ func refresh_shop(gold: int) -> void:
 		if i < _shop_buttons.size():
 			var sold: bool = _shop_items[i].get("sold", false)
 			_shop_buttons[i].disabled = sold or gold < int(_shop_items[i]["price"])
+
+
+## 물물교환에서 바꾼 것이 **어디에 붙었는지** 보여 줍니다.
+##
+## 사탕만 줄고 화면은 그대로면 무엇을 얻었는지 알 수 없습니다 - 특히 회복은
+## 창을 닫고 나서야 체력이 차 있는 것을 봅니다. 그래서 **고른 그 자리에서**
+## 해당 막대를 덮개 위로 올려 채워 보입니다.
+##
+## `before` 는 사기 **전**의 값입니다(`RunState` 를 그대로 넘기면 이미 바뀐
+## 뒤라 채울 시작점이 없습니다).
+func celebrate_buy(id: String, before: Dictionary, state: RunState) -> void:
+	Sfx.play(Sfx.COIN, -4.0, 0.0)
+	match id:
+		"heal", "vigor":
+			# 체력이 실제로 오릅니다 - 막대를 채워 보입니다.
+			_fill_bar(_hp_bar, _hp_text, _hp_row,
+				float(before["hp"]), state.hp, state.max_hp,
+				Color(0.95, 0.42, 0.38))
+		"breath":
+			# **숨은 안 찹니다.** 오르는 것은 초당 회복량이라 채울 것이
+			# 없습니다. 채워 보이면 거짓말이 되므로 **막대를 밝혔다 되돌리는
+			# 것까지만** 합니다.
+			_flash_bar(_dash_bar, _dash_row, Color(0.55, 0.82, 1.0))
+		_:
+			# 공격·속도·치명은 막대가 아니라 **왼쪽 위 한 줄**입니다.
+			_pop(_stats_panel, 1.2)
+	# 무엇이 붙었는지는 글로도 남깁니다. 막대만 밝히면 "얼마나" 가 없습니다.
+	_lift(_toast)
+	toast(String(before.get("desc", "")), UiTheme.GOOD)
+	var tw := create_tween()
+	tw.tween_interval(2.2)
+	tw.tween_callback(func() -> void: _drop(_toast))
+
+
+## 막대 하나를 덮개 위로 올려 `from` 에서 `to` 까지 채웁니다.
+func _fill_bar(bar: ProgressBar, text: Label, row: Control,
+		from: float, to: float, maximum: float, glow: Color) -> void:
+	var hold_hp := bar == _hp_bar
+	if hold_hp:
+		_hold_hp = true
+	else:
+		_hold_breath = true
+	bar.max_value = maximum
+	bar.value = from
+	var box := bar.get_theme_stylebox("fill") as StyleBoxFlat
+	var base: Color = box.bg_color if box != null else glow
+	_lift(_vitals_panel)
+	var tw := create_tween()
+	tw.set_parallel(true)
+	# **차오르는 것을 보여 주는 것이 요점**이라 0.55 초를 씁니다. 더 짧으면
+	# 숫자만 바뀐 것처럼 보이고, 더 길면 창을 닫으려는 손을 붙잡습니다.
+	tw.tween_method(func(v: float) -> void:
+			bar.value = v
+			text.text = "%d / %d" % [int(ceil(v)), int(maximum)],
+		from, to, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	if box != null:
+		tw.tween_method(func(c: Color) -> void: box.bg_color = c,
+			glow.lightened(0.35), base, 0.9)
+	tw.chain().tween_interval(0.35)
+	tw.chain().tween_callback(func() -> void:
+		if hold_hp:
+			_hold_hp = false
+		else:
+			_hold_breath = false
+		_drop(_vitals_panel))
+	_pop(row, 1.0)
+
+
+## --pose=buyfx 가 밖에서 볼 수 있게 열어 둡니다. 막대와 z 값은 UI 안에만
+## 있어서, 이것 없이는 "차는 것이 보이는가" 를 잴 방법이 없습니다.
+func probe_hp_bar() -> float:
+	return _hp_bar.value
+
+
+func probe_hp_text() -> String:
+	return _hp_text.text
+
+
+func probe_lift() -> int:
+	return _vitals_panel.z_index if _vitals_panel != null else -1
+
+
+## 막대를 채우지 않고 **밝혔다 되돌리기만** 합니다.
+func _flash_bar(bar: ProgressBar, row: Control, glow: Color) -> void:
+	var box := bar.get_theme_stylebox("fill") as StyleBoxFlat
+	_lift(_vitals_panel)
+	if box != null:
+		var base := box.bg_color
+		var tw := create_tween()
+		tw.tween_method(func(c: Color) -> void: box.bg_color = c,
+			glow.lightened(0.45), base, 0.9)
+		tw.tween_interval(0.35)
+		tw.tween_callback(func() -> void: _drop(_vitals_panel))
+	else:
+		_drop(_vitals_panel)
+	_pop(row, 1.0)
+
+
+## 조각 하나를 잠깐 크게 했다가 되돌립니다.
+func _pop(node: Control, hold: float) -> void:
+	if node == null:
+		return
+	_lift(node)
+	node.pivot_offset = node.size * 0.5
+	var tw := create_tween()
+	tw.tween_property(node, "scale", Vector2(1.10, 1.10), 0.12) 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(node, "scale", Vector2.ONE, 0.22) 		.set_trans(Tween.TRANS_CUBIC)
+	tw.tween_interval(hold)
+	tw.tween_callback(func() -> void: _drop(node))
+
+
+## **덮개(z 0) 위로 올립니다.** 물물교환 창이 떠 있는 동안 HUD 는 78% 어두운
+## 판 뒤에 있어서, 올리지 않으면 채워도 안 보입니다. 겹쳐 부를 수 있으니
+## 횟수를 세어 두고 마지막 하나가 끝날 때 내립니다.
+func _lift(node: Control) -> void:
+	if node == null:
+		return
+	node.set_meta("lift", int(node.get_meta("lift", 0)) + 1)
+	node.z_index = 60
+
+
+func _drop(node: Control) -> void:
+	if node == null:
+		return
+	var n := int(node.get_meta("lift", 1)) - 1
+	node.set_meta("lift", maxi(n, 0))
+	if n <= 0:
+		node.z_index = 0
 
 
 func mark_sold(index: int) -> void:
