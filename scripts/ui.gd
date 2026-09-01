@@ -12,6 +12,8 @@ signal start_requested
 signal toon_toggled
 signal grade_toggled
 signal lock_toggled
+## **3D 를 그리는 해상도**를 한 단계 낮추거나 되돌립니다.
+signal scale3d_cycled
 ## 게임을 그만둡니다. 무엇을 할지는 game.gd 가 정합니다
 ## (데스크톱은 앱 종료, 웹은 제목 화면).
 signal quit_pressed
@@ -623,6 +625,7 @@ func _build_test_panel() -> void:
 
 var _perf_button: Button
 var _lock_button: Button
+var _scale3d_button: Button
 var _perf_label: Label
 var _perf_wait := 0.0
 ## 프레임 시간의 **가장 나쁜 값**도 같이 보여 줍니다. 평균만 보면 0.5초마다
@@ -752,6 +755,22 @@ func _build_options() -> void:
 	_lock_button = _small_button("켬", func() -> void: lock_toggled.emit())
 	_lock_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lock_row.add_child(_lock_button)
+
+	# **3D 해상도.** 폰에서 가장 큰 값은 **그리는 픽셀 수**입니다.
+	#
+	# 글자와 버튼은 그대로 두고 3D 만 작게 그린 뒤 늘려 붙입니다 - 이 그림체는
+	# 넓은 단색 면이라 조금 흐려져도 티가 덜 나고, 픽셀 수는 제곱으로 줍니다
+	# (0.7 이면 절반입니다).
+	var s3d_row := HBoxContainer.new()
+	s3d_row.add_theme_constant_override("separation", 6)
+	col.add_child(s3d_row)
+	var s3d_name := UiTheme.label("해상도", 15, UiTheme.DIM)
+	s3d_name.custom_minimum_size = Vector2(64, 34)
+	s3d_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	s3d_row.add_child(s3d_name)
+	_scale3d_button = _small_button("100%", func() -> void: scale3d_cycled.emit())
+	_scale3d_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s3d_row.add_child(_scale3d_button)
 
 	# **성능 표시.** 폰에서만 나타나는 느려짐을 재려고 답니다 - 데스크톱에서
 	# 11분을 돌려도 아무것도 쌓이지 않아서, 폰에서 직접 읽는 수밖에 없습니다.
@@ -883,6 +902,11 @@ func toggle_options() -> void:
 	# 동안은 조작하지 않는 때이므로 통째로 감추는 편이 어긋날 일이 없습니다.
 	if touch != null:
 		touch.visible = not _options_panel.visible
+
+
+func set_scale3d(v: float) -> void:
+	if _scale3d_button != null:
+		_scale3d_button.text = "%d%%" % roundi(v * 100.0)
 
 
 func set_cam_pitch(degrees: float) -> void:

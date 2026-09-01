@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.36"
+const VERSION := "v0.37"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -227,6 +227,12 @@ var _fog_was := false
 ## 그대로 뜹니다.
 var _ult_note := ""
 var _force_lean := false
+## **3D 를 그리는 해상도 배율.** 1.0 이 화면 그대로입니다.
+##
+## 폰·웹에서는 0.75 로 시작합니다(픽셀 56%). 옵션 판에서 돌려 가며 고를 수
+## 있습니다 - 폰마다 여유가 달라서 하나로 못 박을 수 없습니다.
+var _scale3d := 1.0
+const SCALE3D_STEPS := [1.0, 0.85, 0.75, 0.6, 0.5]
 var _leak_proc := 0.0
 var _leak_phys := 0.0
 var _leak_n := 0
@@ -335,6 +341,9 @@ func _ready() -> void:
 	ui.test_reset_requested.connect(start_test)
 	ui.test_tiger_toggled.connect(_on_test_tiger)
 	ui.quit_pressed.connect(_on_quit)
+	ui.scale3d_cycled.connect(_cycle_scale3d)
+	# 옵션 판이 생겼으니 지금 값을 표시에 맞춥니다.
+	ui.set_scale3d(_scale3d)
 	ui.devmenu_requested.connect(_open_devmenu)
 	ui.title_requested.connect(_back_to_title)
 	ui.riglab_requested.connect(open_riglab)
@@ -394,6 +403,8 @@ func _read_args() -> void:
 			_grade_on = false
 		elif a.begins_with("--push-lv="):
 			_push_lv = int(a.substr(10))
+		elif a.begins_with("--scale3d="):
+			_scale3d = clampf(float(a.substr(10)), 0.3, 1.0)
 		elif a == "--lean":
 			# 폰과 같은 설정(글로우·그림자 없음)을 데스크톱에서 재려고 씁니다.
 			_force_lean = true
@@ -531,6 +542,23 @@ func _setup_environment() -> void:
 	# 이 게임은 60장이면 충분합니다(물리도 60Hz 입니다).
 	if lean:
 		Engine.max_fps = 60
+		# **3D 를 작게 그리고 늘려 붙입니다.**
+		#
+		# 폰에서 가장 큰 값은 그리는 **픽셀 수**입니다. 브라우저는 화면의
+		# 물리 해상도(2400×1080 같은)로 캔버스를 잡으므로, 아무것도 안 하면
+		# 매 프레임 260만 픽셀을 벽 셰이더로 칠합니다 - 벽은 통째로 반투명이라
+		# 겹쳐 칠하는 몫까지 붙습니다. 그 값이 그대로 열이 됩니다.
+		#
+		# 0.75 면 픽셀이 **56%** 로 줍니다(제곱으로 줄어듭니다). 글자와 버튼은
+		# 원래 해상도로 그대로라 흐려지지 않습니다 - 3D 만 줄입니다.
+		#
+		# 이 그림체는 넓은 단색 면이라 조금 흐려져도 티가 덜 납니다. 그래도
+		# 눈에 거슬리면 옵션 판의 「해상도」에서 100% 로 되돌릴 수 있습니다.
+		_scale3d = 0.75
+		# MSAA 도 끕니다. 가장자리를 매끄럽게 하려고 화면을 여러 번 재는
+		# 작업이라, 대역폭이 좁은 폰에서 값이 큽니다.
+		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
+	_apply_scale3d()
 	env.glow_enabled = not lean
 	env.glow_intensity = 0.5
 	env.glow_bloom = 0.15
@@ -3485,6 +3513,23 @@ func _back_to_title() -> void:
 	ui.show_title()
 
 
+func _apply_scale3d() -> void:
+	get_viewport().scaling_3d_scale = _scale3d
+	# **UI 보다 먼저 불립니다.** 환경을 세우는 자리에서 한 번 부르는데,
+	# 그때는 옵션 판이 아직 없습니다 - 값은 지금 걸고 표시는 UI 가 생긴 뒤에
+	# 다시 맞춥니다(`_ready` 끝).
+	if ui != null:
+		ui.set_scale3d(_scale3d)
+
+
+func _cycle_scale3d() -> void:
+	## 옵션 판에서 한 단계씩 낮추고, 끝에서 100% 로 돌아옵니다.
+	var i := SCALE3D_STEPS.find(_scale3d)
+	_scale3d = float(SCALE3D_STEPS[(i + 1) % SCALE3D_STEPS.size()]) if i >= 0 else 1.0
+	_apply_scale3d()
+	ui.toast("3D 해상도 %d%%" % roundi(_scale3d * 100.0), UiTheme.DIM)
+
+
 func _on_quit() -> void:
 	## 게임을 그만둡니다.
 	##
@@ -3826,6 +3871,12 @@ func _drive_skill_hud() -> void:
 func _process(delta: float) -> void:
 	_frames += 1
 	if _leak_probe and _frames % 600 == 0:
+		var vp := get_viewport()
+		var win: Vector2i = vp.get_visible_rect().size
+		print("  [해상도] 창 %dx%d  3D 배율 %.2f -> %dx%d (%.0f만 픽셀)" % [
+			win.x, win.y, vp.scaling_3d_scale,
+			int(win.x * vp.scaling_3d_scale), int(win.y * vp.scaling_3d_scale),
+			win.x * vp.scaling_3d_scale * win.y * vp.scaling_3d_scale / 10000.0])
 		print("[쌓임] f=%d 노드=%d 고아=%d 자원=%d 그리기=%d 프레임=%.1fms 메모리=%.0fMB 텍스처=%.0fMB 비디오=%.0fMB" % [
 			_frames,
 			get_tree().get_node_count(),
