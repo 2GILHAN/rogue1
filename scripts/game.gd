@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.27"
+const VERSION := "v0.28"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -124,13 +124,16 @@ const FOE_ROOM_TILES := 26
 ## 방이 22칸(33m)이라 9m 면 한가운데에서 넉넉히 벗어나면서도 벽에 안 붙습니다 -
 ## 풀장 반지름이 1.85m 이고 물물교환하는 아이가 그 옆 2.9m 에 섭니다.
 const TEST_SHOP_AT := 9.0
-## **록온(자동 조준). 기본은 켬** - 옵션 판에서 끕니다.
+## **록온(자동 조준). 기본은 끔** - 옵션 판에서 켭니다.
 ##
-## 한동안 기본을 끔으로 뒀습니다. 겨누는 일이 사라지면 어디를 보고 있느냐로
-## 갈리는 것들(등 뒤 잡기, 베개 아기의 앞뒤, 굴러 피하기)이 무의미해진다는
-## 것이 이유였는데, **범위를 밀기 사거리에 매면서 그 걱정이 줄었습니다** -
-## 3.8m 안에 붙었을 때만 걸리므로 멀리서 겨누는 일은 그대로 손에 남습니다.
-var lock_on := true
+## 겨누는 일이 사라지면 **어디를 보고 있느냐로 갈리는 것들**이 통째로
+## 무의미해집니다 - 등 뒤로 돌아가 잡기, 베개 아기의 앞뒤, 굴러 피하기가
+## 전부 그렇습니다. 몸이 알아서 돌아가면 그 선택을 손이 안 합니다.
+##
+## 끈 채로도 밀기가 닿게 하는 것은 **넓힌 각**이 맡습니다
+## (`Player.GRAB_ARC_FREE` 150도) - 그쪽은 누르는 순간에만 고르므로,
+## 걷는 방향과 보는 방향이 계속 어긋나는 문제가 없습니다.
+var lock_on := false
 var ui: Ui
 
 var world_env: Environment
@@ -2186,6 +2189,11 @@ func _drive_pose() -> void:
 					var stack: Array = [n]
 					while not stack.is_empty():
 						var cur: Node = stack.pop_back()
+						# **팻말은 빼고 잽니다.** 「물물교환」 Label3D 가 머리
+						# 위 2.1m 에 떠 있어서, 같이 세면 키가 2.48m 로 나옵니다 -
+						# 그 값을 믿고 모델을 반으로 줄일 뻔했습니다.
+						if cur is Label3D:
+							continue
 						if cur is VisualInstance3D:
 							var ab: AABB = (cur as VisualInstance3D).global_transform * (cur as VisualInstance3D).get_aabb()
 							lo = lo.min(ab.position); hi = hi.max(ab.position + ab.size)
@@ -2207,6 +2215,20 @@ func _drive_pose() -> void:
 				print("[풀장] 테두리 높이 %.2f  지름 %.2f x %.2f  바닥 %.2f" % [
 					hi.y - _waterpark.global_position.y, hi.x - lo.x, hi.z - lo.z,
 					lo.y - _waterpark.global_position.y])
+			if _frames == 32 and shop != null and is_instance_valid(shop):
+				# **같은 뼈로 견줍니다.** AABB 는 자세를 탑니다 - 물장난은
+				# 팔을 머리 위로 들므로, 그대로 재면 아이만 커 보입니다.
+				for pair in [["교환아이", shop], ["주인공", player]]:
+					var sk2: Skeleton3D = Models.find_skeleton(pair[1])
+					if sk2 == null:
+						continue
+					var hb := sk2.find_bone("Head")
+					var fb := sk2.find_bone("LeftFoot")
+					if hb < 0 or fb < 0:
+						continue
+					var h2: float = (sk2.global_transform * sk2.get_bone_global_pose(hb)).origin.y
+					var f2: float = (sk2.global_transform * sk2.get_bone_global_pose(fb)).origin.y
+					print("[키] %s 발에서 머리뼈까지 %.3f m" % [pair[0], h2 - f2])
 			if _frames == 34 and shop != null and is_instance_valid(shop):
 				var sk: Skeleton3D = Models.find_skeleton(shop)
 				var head := sk.find_bone("Head") if sk != null else -1
