@@ -1269,22 +1269,16 @@ func ultimate_press(key: String) -> bool:
 		"":
 			return false
 		"opened":
-			# **첫 글자는 안 삼킵니다.** 소리만 내고 평소 동작(구르기)을
-			# 그대로 하게 false 를 돌려줍니다 - 용기가 찼다는 이유로 구르기가
-			# 안 나가면, 그건 사람 눈에 고장입니다(ultimate.gd 참고).
-			Sfx.play_at(Sfx.PICK, ULT_NOTES[mini(ultimate.step_index(),
-				ULT_NOTES.size() - 1)], -4.0)
-			return false
-		"armed":
-			# 두 글자째부터는 삼킵니다 - 안 삼키면 명령을 넣는 동안
-			# 밀치고 고함치느라 몸이 딴 데 가 있습니다.
+			# **안 삼킵니다.** 소리만 내고 평소 동작을 그대로 하게 false 를
+			# 돌려줍니다 - 용기가 찼다는 이유로 구르기나 밀기가 안 나가면,
+			# 그건 규칙이 아니라 사람 눈에 고장입니다(ultimate.gd 참고).
 			#
 			# **한 글자 맞을 때마다 음이 올라갑니다.** 폰에서는 버튼을 훑는
 			# 동안 손가락이 화면을 가리므로, 어디까지 갔는지 눈으로는 잘
 			# 안 보입니다 - 귀로 알 수 있어야 끝까지 훑습니다.
 			Sfx.play_at(Sfx.PICK, ULT_NOTES[mini(ultimate.step_index(),
 				ULT_NOTES.size() - 1)], -4.0)
-			return true
+			return false
 		"fire":
 			_begin_ultimate()
 			return true

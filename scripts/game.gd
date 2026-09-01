@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.47"
+const VERSION := "v0.48"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1918,50 +1918,74 @@ func _drive_pose() -> void:
 						_probe_foe = e
 			# 명령: 구르기 → 밀기 → 고함
 			#
-			# **첫 글자는 구르기가 실제로 나가야 합니다.** 삼키면 사람 눈에
-			# 구르기가 고장 난 것으로 보입니다 - 관문 앞 체력 6 에서 이걸
-			# 만났습니다. 눌러 놓고 다음 프레임에 정말 굴렀는지 봅니다.
+			# **명령 세 글자가 각각 어떻게 되어야 하는가.**
+			#
+			#   구르기(첫째)  구르면서 명령이 걸린다
+			#   0.55초 넘김   명령이 0 글자로 취소된다
+			#   밀기(둘째)    밀면서 명령이 이어진다
+			#   고함(셋째)    고함 대신 필살기가 나간다
+			#
+			# 잃는 누름은 마지막 하나뿐이고, 그것도 더 센 것으로 바뀝니다.
 			if _frames == 29:
 				_wedge_from = player.global_position
 			if _frames == 30:
 				player._try_dash()
 			if _frames == 32:
-				print("[필살] 첫 글자 뒤: 구르는 중=%s  움직임=%.2fm  명령=%d글자" % [
+				print("[필살] 첫째(구르기): 구르는 중=%s 움직임=%.2fm 명령=%d글자" % [
 					str(player._dash_time > 0.0),
 					player.global_position.distance_to(_wedge_from),
 					player.ultimate.step_index()])
-			if _frames == 34:
+			# 0.55초(COMMAND_WINDOW)를 넘겨 둡니다 - 취소되어야 합니다.
+			if _frames == 70:
+				print("[필살] 구르기 뒤 %.2f초 두면: 명령=%d글자" % [
+					float(_frames - 30) / 60.0, player.ultimate.step_index()])
+			# 다시 처음부터. 이번에는 끝까지 넣습니다.
+			if _frames == 72:
+				player._try_dash()
+			# 구르기가 끝난 뒤(0.50초) 곧바로 밀기. 명령 창(0.55초) 안입니다.
+			#
+			# **숨을 채워 둡니다.** 앞의 구르기 두 번이 80 을 썼는데, 이제
+			# 명령의 앞 두 글자가 평소 동작으로 나가므로 값을 실제로 치릅니다 -
+			# 안 채우면 숨이 모자라 밀기가 안 나가고, 그걸 코드 문제로
+			# 볼 뻔했습니다.
+			if _frames == 100:
+				state.breath = state.max_breath
+			if _frames == 104:
 				player.grab_press()
-			if _frames == 38:
+			if _frames == 106:
+				print("[필살] 둘째(밀기): 미는 중=%s 명령=%d글자" % [
+					str(player._push_time > 0.0 or player._lunge_time > 0.0),
+					player.ultimate.step_index()])
+			if _frames == 109:
 				player.attack()
-			if _frames == 40:
-				print("[필살] 발동=%s 세상멈춤=%s 게이지=%.2f" % [
+			if _frames == 111:
+				print("[필살] 셋째(고함): 발동=%s 세상멈춤=%s 게이지=%.2f" % [
 					str(player.ultimate.active), str(world_frozen),
 					player.ultimate.ratio()])
 			# 동작 셋
-			if _frames == 46:
+			if _frames == 118:
 				player._try_dash()          # 달려들기
-			if _frames == 49:
+			if _frames == 121:
 				# 연달아 누르면 **다음 적**으로 가야 합니다.
 				var b1 := player._ult_visited[0] as Node3D if player._ult_visited.size() > 0 else null
 				player._try_dash()
 				var b2 := player._ult_visited[player._ult_visited.size() - 1] as Node3D 					if player._ult_visited.size() > 0 else null
 				print("[필살] 두 번째 달려들기: 같은 적인가=%s (들른 수=%d)" % [
 					str(b1 == b2), player._ult_visited.size()])
-			if _frames == 52:
+			if _frames == 124:
 				print("[필살] 달려든 뒤 게이지=%.2f 가장가까운적까지=%.2f" % [
 					player.ultimate.ratio(),
 					(player._nearest_enemy(20.0).global_position - player.global_position).length()
 						if player._nearest_enemy(20.0) != null else -1.0])
 				player.grab_press()         # 밀어붙이기
-			if _frames == 58:
+			if _frames == 130:
 				var alive_hp := 0.0
 				for n in get_tree().get_nodes_in_group("enemies"):
 					alive_hp += float((n as Enemy).hp)
 				print("[필살] 밀친 뒤 게이지=%.2f 적 체력합=%.0f" % [
 					player.ultimate.ratio(), alive_hp])
 				player.attack()             # 포효
-			if _frames == 64:
+			if _frames == 136:
 				var hp2 := 0.0
 				var n2 := 0
 				for n in get_tree().get_nodes_in_group("enemies"):
@@ -1970,7 +1994,7 @@ func _drive_pose() -> void:
 				print("[필살] 포효 뒤 게이지=%.2f 적 %d마리 체력합=%.0f" % [
 					player.ultimate.ratio(), n2, hp2])
 			# 아무것도 안 누르고 두면 풀려야 합니다(IDLE_LIMIT 1.6초).
-			if _frames == 175:
+			if _frames == 250:
 				print("[필살] 손 놓고 1.85초 뒤: 발동=%s 세상멈춤=%s" % [
 					str(player.ultimate.active), str(world_frozen)])
 		"zombie":
