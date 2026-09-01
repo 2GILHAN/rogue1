@@ -922,28 +922,64 @@ static func ring(parent: Node3D, at: Vector3, color: Color, radius: float = 2.0,
 
 static func burst(parent: Node3D, at: Vector3, color: Color, count: int = 12,
 		speed: float = 4.0) -> void:
-	## 조각이 튀는 효과. 파티클 시스템을 쓰지 않는 이유는 한 번 쓰고 버리는
-	## 소량이라 노드 몇 개가 더 싸고 제어가 쉽기 때문입니다.
+	## 조각이 튀는 효과. **한 노드에 MultiMesh 로 담습니다.**
+	##
+	## 예전에는 조각마다 `MeshInstance3D` 를 하나씩 만들었습니다. 열여섯 개면
+	## 노드 열여섯에 트윈 열여섯이고, 무엇보다 **그리기 호출이 열여섯 번**
+	## 늘어납니다 - 적이 죽는 순간 재 보니 그리기가 111 -> 127 -> 141 로
+	## 뛰었습니다. 여럿이 한꺼번에 죽으면(밀림 연쇄·자동차·고함) 그만큼
+	## 곱해지고, 폰에서는 그 자리가 그대로 끊김이 됩니다.
+	##
+	## MultiMesh 는 **한 번의 그리기로 전부** 그립니다. 노드도 트윈도 하나이고,
+	## 조각의 자리는 매 프레임 인스턴스 변환만 고쳐 씁니다.
 	if not is_instance_valid(parent):
 		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = _shard_mesh()
+	mm.instance_count = count
+
+	# 조각마다 날아갈 쪽과 거리를 **미리** 뽑아 둡니다. 매 프레임 다시 뽑으면
+	# 조각이 나아가지 않고 제자리에서 떨기만 합니다.
+	var dirs: Array[Vector3] = []
+	var far: Array[float] = []
+	dirs.resize(count)
+	far.resize(count)
+	for i in count:
+		dirs[i] = Vector3(randf_range(-1, 1), randf_range(0.2, 1.0),
+			randf_range(-1, 1)).normalized()
+		far[i] = speed * randf_range(0.3, 0.7)
+		mm.set_instance_transform(i, Transform3D(Basis(), Vector3.ZERO))
+
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	var mesh := _shard_mesh()
-	for i in count:
-		var mi := MeshInstance3D.new()
-		mi.mesh = mesh
-		mi.material_override = mat
-		mi.position = at
-		parent.add_child(mi)
-		var dir := Vector3(randf_range(-1, 1), randf_range(0.2, 1.0), randf_range(-1, 1)).normalized()
-		var target := at + dir * speed * randf_range(0.3, 0.7)
-		target.y = maxf(0.15, target.y)
-		var tween := mi.create_tween()
-		tween.set_parallel(true)
-		tween.tween_property(mi, "position", target, 0.45) \
-			.set_trans(Tween.TRANS_QUINT).set_ease(Tween.EASE_OUT)
-		tween.tween_property(mi, "scale", Vector3.ZERO, 0.45)
-		tween.chain().tween_callback(mi.queue_free)
+
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	mi.material_override = mat
+	mi.position = at
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# 카툰 외곽선이 조각마다 검은 테두리를 두르면 알갱이가 아니라 벽돌이 됩니다.
+	mi.set_meta("flat", true)
+	parent.add_child(mi)
+
+	var floor_y := 0.15 - at.y
+	var tween := mi.create_tween()
+	tween.tween_method(func(t: float) -> void:
+		if not is_instance_valid(mi):
+			return
+		# 빠르게 나갔다 잦아듭니다(옛 QUINT_OUT 과 같은 느낌).
+		var e := 1.0 - pow(1.0 - t, 5.0)
+		var k := maxf(1.0 - t, 0.001)
+		for j in count:
+			var pos: Vector3 = dirs[j] * far[j] * e
+			# 바닥을 안 뚫습니다. 예전에는 목표 높이를 눌러 뒀는데, 같은 뜻을
+			# 매 프레임으로 옮긴 것입니다.
+			pos.y = maxf(pos.y, floor_y)
+			mm.set_instance_transform(j,
+				Transform3D(Basis().scaled(Vector3.ONE * k), pos)),
+		0.0, 1.0, 0.45)
+	tween.tween_callback(mi.queue_free)

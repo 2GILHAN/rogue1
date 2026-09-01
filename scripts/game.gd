@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.40"
+const VERSION := "v0.41"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -247,6 +247,8 @@ var _wedge_prop: Prop = null
 var _wedge_from := Vector3.ZERO
 ## --pose=shoppause 에서 창을 열 때의 시계.
 var _probe_t0 := 0.0
+## --pose=death 에서 마지막으로 죽인 프레임.
+var _death_at := 0
 var _probe_foe: Enemy = null
 var _probe_hp := 0.0
 ## --push-lv=N 으로 밀기 계통을 미리 올려 둡니다(비교용).
@@ -2092,6 +2094,50 @@ func _drive_pose() -> void:
 					_frames, state.family_level("push"),
 					str(player._lunge_time > 0.0), world.get_child_count(),
 					int(_wedge_from.x)])
+		"burstcost":
+			# **터지는 조각만 따로** 잽니다. 적도 줍기도 없는 빈 방에서
+			# 조각만 네 번 터뜨리고 그리기와 노드가 얼마나 느는지 봅니다.
+			if _frames == 40:
+				print("[조각] 터뜨리기 전  그리기 %d  노드 %d" % [
+					Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+					get_tree().get_node_count()])
+				for i in 4:
+					Fx.burst(world, player.global_position + Vector3(float(i) - 1.5, 0.6, 0),
+						Color(1.0, 0.55, 0.35), 16, 5.0)
+			if _frames in [42, 50]:
+				print("[조각] f=%d          그리기 %d  노드 %d" % [
+					_frames,
+					Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+					get_tree().get_node_count()])
+		"death":
+			# **적이 죽을 때 무엇이 얼마나 드는가.** 죽는 순간을 마디마디 잽니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+			if _frames >= 30 and _frames <= 210 and _frames % 30 == 0:
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", state.floor_num, dungeon, player)
+				foe.speed = 0.0
+				foe.set_physics_process(false)
+				foe.global_position = player.global_position + Vector3(2.0, 0, 0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+			if _frames >= 34 and _frames <= 214 and _frames % 30 == 4 					and is_instance_valid(_probe_foe):
+				var n0 := get_tree().get_node_count()
+				var t0 := Time.get_ticks_usec()
+				_probe_foe.take_damage(99999.0, false, Vector3.ZERO)
+				var t1 := Time.get_ticks_usec()
+				print("[죽음] _die %.2fms  노드 %d -> %d" % [
+					(t1 - t0) / 1000.0, n0, get_tree().get_node_count()])
+				_death_at = _frames
+			# **죽은 뒤 몇 프레임이 무거운가.** 조각과 고리가 도는 동안입니다.
+			if _death_at > 0 and _frames - _death_at <= 30:
+				var k := _frames - _death_at
+				if k in [1, 3, 6, 12, 24, 30]:
+					print("  +%2d프레임  프레임 %.1fms  그리기 %d  노드 %d" % [
+						k, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+						Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+						get_tree().get_node_count()])
 		"shoppause":
 			# **물물교환 창이 떠 있는 동안 판이 멈추는가.**
 			#
