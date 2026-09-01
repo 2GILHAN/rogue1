@@ -35,8 +35,10 @@ const WARN := "res://assets/audio/warn.wav"           ## 적의 공격 예고
 const PAGE := "res://assets/audio/page.wav"           ## 책장 넘김
 const STAIRS := "res://assets/audio/stairs.wav"       ## 다음 층
 const PICK := "res://assets/audio/pick.wav"           ## 고르기
-## 배경음. vtos 의 `bgm1` 클립(3.2초 스테레오 루프)입니다.
 ## 배경음. `bgm1` 에서 `bgm2` 로 갈았습니다.
+##
+## `bgm1.ogg` 는 파일은 남기되 **빌드에서 뺐습니다**(`exclude_filter`). 아무도
+## 안 읽는데 실려 나가고 있었습니다 - 되돌리려면 여기 경로만 바꿉니다.
 const BGM := "res://assets/audio/bgm2.ogg"
 
 ## 배경음 크기. 효과음보다 확실히 낮아야 합니다 - 같은 크기로 깔면 고함이

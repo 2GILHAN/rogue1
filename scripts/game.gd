@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.42"
+const VERSION := "v0.43"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -344,6 +344,8 @@ func _ready() -> void:
 	ui.test_tiger_toggled.connect(_on_test_tiger)
 	ui.quit_pressed.connect(_on_quit)
 	ui.scale3d_cycled.connect(_cycle_scale3d)
+	ui.trace_toggled.connect(_toggle_trace)
+	ui.trace_shared.connect(_share_trace)
 	# 옵션 판이 생겼으니 지금 값을 표시에 맞춥니다.
 	ui.set_scale3d(_scale3d)
 	ui.devmenu_requested.connect(_open_devmenu)
@@ -679,6 +681,7 @@ func start_run() -> void:
 			state.apply_boon(String(RunState.BOONS[rng.randi_range(0, RunState.BOONS.size() - 1)]["id"]))
 	_close_overlay()
 	build_floor()
+	Trace.mark("층시작")
 	ui.toast(RunState.floor_name(state.floor_num), UiTheme.ACCENT)
 
 
@@ -1261,6 +1264,7 @@ func _place_boss(exit_room: int) -> void:
 
 
 func _on_enemy_died(enemy: Enemy) -> void:
+	Trace.mark("적죽음")
 	_alive = maxi(0, _alive - 1)
 	state.kills += 1
 	var p := Pickup.new()
@@ -1366,6 +1370,7 @@ func _on_player_died() -> void:
 # ------------------------------------------------------------ 물물교환
 
 func _open_shop() -> void:
+	Trace.mark("교환창")
 	_shop_items = state.shop_stock(rng)
 	if _bot:
 		var names: Array = []
@@ -2094,6 +2099,85 @@ func _drive_pose() -> void:
 					_frames, state.family_level("push"),
 					str(player._lunge_time > 0.0), world.get_child_count(),
 					int(_wedge_from.x)])
+		"optiontap":
+			# **옵션 판이 떠 있을 때 스킬이 눌리나.**
+			#
+			# 판을 열고 화면 여기저기를 눌러 본 뒤, 숨과 대기가 움직였는지
+			# 봅니다 - 스킬이 나갔으면 둘 중 하나는 변합니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				state.breath = state.max_breath
+			if _frames == 30:
+				# `--side=open` 이면 판을 열고, 아니면 닫은 채로 누릅니다
+				# (누르는 길 자체가 도는지 가리는 대조군입니다).
+				if _probe_arg != "closed":
+					ui.toggle_options()
+				_probe_t0 = state.breath
+				print("[옵션] 판 열림=%s  터치판 보임=%s  숨 %.0f" % [
+					str(ui.options_open()), str(ui.touch != null and ui.touch.visible),
+					state.breath])
+			if _frames in [40, 50, 60, 70]:
+				# **버튼 한가운데를 정확히** 누릅니다. 자리를 눈대중으로 찍으면
+				# 스냅 반경 밖이라 아무 일도 안 일어나고, 그것을 "안 눌린다" 로
+				# 잘못 읽습니다.
+				var spots: Array = []
+				for b in ui.touch._buttons:
+					spots.append((b["node"] as Control).get_global_rect().get_center())
+				if _frames == 40:
+					print("[옵션] 버튼 %d개  자리 %s" % [spots.size(), str(spots)])
+				for at in spots:
+					# **핸들러를 직접 부릅니다.** `Input.parse_input_event` 로
+					# 넣은 터치는 이 짜임에서 `_input` 까지 안 옵니다 - 그것을
+					# "안 눌린다" 로 읽으면 고친 것을 확인한 게 아닙니다.
+					var t := InputEventScreenTouch.new()
+					t.index = 3
+					t.position = at
+					t.pressed = true
+					ui.touch._input(t)
+					var u := InputEventScreenTouch.new()
+					u.index = 3
+					u.position = at
+					u.pressed = false
+					ui.touch._input(u)
+			if _frames == 80:
+				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
+					_probe_t0, state.breath, player._attack_cd])
+		"tracetest":
+			# **프레임 기록이 쓸모 있는 글을 내는지** 봅니다.
+			if _frames == 20:
+				Trace.start()
+			if _frames == 1500:
+				print(Trace.report())
+		"bgm":
+			# **배경음이 몇 개 돌고 있나.** 겹쳐 들린다면 재생기가 둘입니다.
+			#
+			# 층을 넘고 제목으로 돌아갔다 다시 시작해 봅니다 - 그때마다
+			# `Sfx.play_music()` 이 불리므로, 새로 겁 때마다 하나가 늘면
+			# 여기서 잡힙니다.
+			if _frames in [30, 90, 150, 210, 270]:
+				var players: Array = []
+				var stack: Array = [get_tree().root]
+				while not stack.is_empty():
+					var n: Node = stack.pop_back()
+					if n is AudioStreamPlayer and (n as AudioStreamPlayer).playing:
+						var st: AudioStream = (n as AudioStreamPlayer).stream
+						var path := st.resource_path if st != null else "(없음)"
+						if path.ends_with(".ogg"):
+							players.append("%s@%s" % [path.get_file(), n.get_path()])
+					stack.append_array(n.get_children())
+				print("[배경음] f=%d 도는 것 %d개  %s" % [
+					_frames, players.size(), str(players)])
+			if _frames == 60:
+				# 층을 넘깁니다(그때 다시 겁니다).
+				state.floor_num += 1
+				build_floor()
+			if _frames == 120:
+				Sfx.play_music()
+			if _frames == 180:
+				# 제목으로 갔다가 다시 시작합니다.
+				phase = Phase.TITLE
+				_dev_menu = false
+				start_run()
 		"grabthrow":
 			# **잡고 나서 던지기까지 얼마나 기다리나.**
 			#
@@ -3584,6 +3668,44 @@ func close_riglab() -> void:
 	ui.show_title()
 
 
+func _toggle_trace() -> void:
+	if Trace.running():
+		Trace.stop()
+	else:
+		Trace.start()
+	ui.set_trace(Trace.running())
+	ui.toast("프레임 기록 " + ("켬 - 한 판 하고 「내보내기」" if Trace.running()
+		else "끔"), UiTheme.DIM)
+
+
+func _share_trace() -> void:
+	## 담은 것을 **파일로** 내놓습니다.
+	##
+	## 깃허브 페이지는 정적이라 서버로 못 보냅니다. 브라우저에서 내려받게
+	## 하면 폰에서도 그대로 공유창에 올릴 수 있습니다.
+	var text := Trace.report()
+	print(text)
+	if OS.has_feature("web"):
+		# `Blob` 으로 만들어 내려받습니다. 누른 그 순간에 해야 브라우저가
+		# 막지 않습니다 - 버튼에서 곧바로 이어지는 자리입니다.
+		var js := """(function(t){
+			var b=new Blob([t],{type:'text/plain'});
+			var a=document.createElement('a');
+			a.href=URL.createObjectURL(b);
+			a.download='toto-frames.txt';
+			document.body.appendChild(a); a.click();
+			setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1000);
+		})(%s)""" % JSON.stringify(text)
+		JavaScriptBridge.eval(js, true)
+		ui.toast("기록을 내려받았습니다", UiTheme.ACCENT)
+	else:
+		var f := FileAccess.open("res://out/frames.txt", FileAccess.WRITE)
+		if f != null:
+			f.store_string(text)
+			f.close()
+			ui.toast("out/frames.txt 에 적었습니다", UiTheme.ACCENT)
+
+
 func _open_devmenu() -> void:
 	_dev_menu = true
 	ui.show_devmenu()
@@ -3951,6 +4073,13 @@ func _drive_skill_hud() -> void:
 
 func _process(delta: float) -> void:
 	_frames += 1
+	# **프레임을 담습니다.** 폰에서만 나는 끊김을 찾는 자리입니다(trace.gd).
+	if Trace.running():
+		Trace.sample(delta,
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			get_tree().get_node_count(),
+			get_tree().get_nodes_in_group("enemies").size(),
+			state.floor_num if state != null else 0)
 	if _leak_probe and _frames % 600 == 0:
 		var vp := get_viewport()
 		var win: Vector2i = vp.get_visible_rect().size

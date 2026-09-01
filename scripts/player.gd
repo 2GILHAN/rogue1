@@ -2712,6 +2712,7 @@ func _land_lunge(enemy: Node3D) -> void:
 	## 등 뒤면 잡고, 앞이면 밉니다. 규칙은 예전과 같지만 판정하는 자리가
 	## 다릅니다 - 누르는 순간이 아니라 **닿는 순간**이라, 달려가는 사이에
 	## 적이 돌면 결과도 바뀝니다. 눈에 보이는 것과 일어나는 일이 같아집니다.
+	Trace.mark("밀기")
 	_lunge_at = null
 	_lunge_time = 0.0
 	_push_hit = true
@@ -2927,6 +2928,7 @@ func _begin_shout() -> bool:
 	_shout_fired = 1.0
 	_shout_voice = Sfx.play_loose(Sfx.SHOUT, 0.0)
 	# 범위를 **그 자리에 그렸다가** 스러지게 합니다.
+	Trace.mark("고함")
 	_shout_show = SHOUT_SHOW
 	_shout_preview()
 	_try_attack()
@@ -3163,6 +3165,7 @@ func begin_joyride(car: Prop) -> bool:
 		if _held is Prop:
 			(_held as Prop).drop()
 		_held = null
+	Trace.mark("자동차")
 	_joy_car = car
 	_joy_time = JOY_TIME
 	_joy_hit.clear()
@@ -3302,6 +3305,7 @@ func _try_dash() -> void:
 	# 입력이 없으면 보고 있는 쪽으로 구릅니다. 제자리 구르기는 쓸모가 없습니다.
 	_dash_dir = dir.normalized() if dir.length_squared() > 0.01 else aim
 	_dash_time = DASH_TIME
+	Trace.mark("구르기")
 	_roll_time = ROLL_TIME
 	_pierced.clear()
 	# **대기는 거의 없습니다.** 연달아 구르는 것을 막는 것은 숨이지 시계가

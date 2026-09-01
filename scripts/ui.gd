@@ -14,6 +14,9 @@ signal grade_toggled
 signal lock_toggled
 ## **3D 를 그리는 해상도**를 한 단계 낮추거나 되돌립니다.
 signal scale3d_cycled
+## 프레임 기록을 켜고 끕니다 / 담긴 것을 파일로 내보냅니다.
+signal trace_toggled
+signal trace_shared
 ## 게임을 그만둡니다. 무엇을 할지는 game.gd 가 정합니다
 ## (데스크톱은 앱 종료, 웹은 제목 화면).
 signal quit_pressed
@@ -626,6 +629,8 @@ func _build_test_panel() -> void:
 var _perf_button: Button
 var _lock_button: Button
 var _scale3d_button: Button
+var _trace_button: Button
+var _trace_share: Button
 var _perf_label: Label
 var _perf_wait := 0.0
 ## 프레임 시간의 **가장 나쁜 값**도 같이 보여 줍니다. 평균만 보면 0.5초마다
@@ -772,6 +777,21 @@ func _build_options() -> void:
 	_scale3d_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s3d_row.add_child(_scale3d_button)
 
+	# **프레임 기록.** 「성능」이 지금을 보여 준다면 이쪽은 **지나간 것**을
+	# 담아 둡니다 - 끊긴 순간에 화면을 볼 수는 없으니까요.
+	var tr_row := HBoxContainer.new()
+	tr_row.add_theme_constant_override("separation", 6)
+	col.add_child(tr_row)
+	var tr_name := UiTheme.label("기록", 15, UiTheme.DIM)
+	tr_name.custom_minimum_size = Vector2(64, 34)
+	tr_name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tr_row.add_child(tr_name)
+	_trace_button = _small_button("끔", func() -> void: trace_toggled.emit())
+	_trace_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tr_row.add_child(_trace_button)
+	_trace_share = _small_button("내보내기", func() -> void: trace_shared.emit())
+	tr_row.add_child(_trace_share)
+
 	# **성능 표시.** 폰에서만 나타나는 느려짐을 재려고 답니다 - 데스크톱에서
 	# 11분을 돌려도 아무것도 쌓이지 않아서, 폰에서 직접 읽는 수밖에 없습니다.
 	var perf_row := HBoxContainer.new()
@@ -887,6 +907,10 @@ func set_cam_mode(shoulder: bool) -> void:
 		_cam_label.modulate = Color(1, 1, 1, 0.35 if shoulder else 1.0)
 
 
+func options_open() -> bool:
+	return _options_panel != null and _options_panel.visible
+
+
 func toggle_options() -> void:
 	if _options_panel == null:
 		return
@@ -902,6 +926,13 @@ func toggle_options() -> void:
 	# 동안은 조작하지 않는 때이므로 통째로 감추는 편이 어긋날 일이 없습니다.
 	if touch != null:
 		touch.visible = not _options_panel.visible
+
+
+func set_trace(on: bool) -> void:
+	if _trace_button != null:
+		_trace_button.text = "켬" if on else "끔"
+		_trace_button.add_theme_color_override("font_color",
+			UiTheme.ACCENT if on else UiTheme.DIM)
 
 
 func set_scale3d(v: float) -> void:

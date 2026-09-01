@@ -226,6 +226,16 @@ func _set_hot(i: int, on: bool) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	## **감춰져 있으면 아무것도 안 받습니다.**
+	##
+	## `_input` 은 화면에 안 보여도 그대로 돕니다 - `visible` 은 그리기만
+	## 끕니다. 옵션 판이 열리면 이 버튼들을 감추는데(`Ui.toggle_options`),
+	## 감춘 채로 판정은 살아 있어서 **옵션 줄을 누르면 스킬이 같이 나갔습니다.**
+	##
+	## 게다가 여기는 **가장 가까운 버튼**으로 보냅니다(정확히 눌러야 먹으면
+	## 폰에서 못 씁니다). 그래서 판 어디를 눌러도 스킬 하나가 걸렸습니다.
+	if not visible:
+		return
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
@@ -260,6 +270,19 @@ func _input(event: InputEvent) -> void:
 			_update_stick()
 		elif _touch_button.has(drag.index):
 			_slide_to(drag.position, drag.index)
+
+
+func _notification(what: int) -> void:
+	## **감춰지는 순간 잡고 있던 것을 놓습니다.**
+	##
+	## 누른 채로 판이 열리면 뗌 신호가 영영 안 옵니다 - 그 버튼은 눌린 채로
+	## 남고, 잡기 같은 것은 손에 든 채로 굳습니다.
+	if what == NOTIFICATION_VISIBILITY_CHANGED and not visible:
+		for index in _touch_button.keys():
+			_release_touch(index)
+		_stick_touch = -1
+		move = Vector2.ZERO
+		_show_stick(false)
 
 
 func _show_stick(on: bool) -> void:
