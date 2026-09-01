@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.41"
+const VERSION := "v0.42"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2094,6 +2094,43 @@ func _drive_pose() -> void:
 					_frames, state.family_level("push"),
 					str(player._lunge_time > 0.0), world.get_child_count(),
 					int(_wedge_from.x)])
+		"grabthrow":
+			# **잡고 나서 던지기까지 얼마나 기다리나.**
+			#
+			# 적을 앞에 세우고 잡은 뒤, 매 프레임 던지기를 눌러 봅니다.
+			# 처음으로 먹히는 순간까지의 시간이 곧 손이 기다리는 시간입니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.speed = 0.0
+				foe.set_physics_process(false)
+				foe.global_position = player.global_position + Vector3(1.2, 0, 0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+				debug_aim = Vector3(1, 0, 0)
+			if _frames == 30:
+				player.grab_press()
+				_death_at = 0
+			if _frames > 30 and _frames < 160:
+				if player._held != null and _death_at == 0:
+					_death_at = _frames
+					print("[잡기] 손에 붙은 때 f=%d (누른 뒤 %.2f초)" % [
+						_frames, (_frames - 30) / 60.0])
+				if _death_at > 0 and player._held != null:
+					# 매 프레임 던지기를 눌러 봅니다. **예비동작이 시작되는
+					# 순간**이 곧 「눌린 때」입니다 - 손에서 떠나는 것은 그
+					# 0.22초 뒤라, 그것으로 재면 동작 길이까지 섞입니다.
+					var was := player._throw_time
+					player.grab_press()
+					if was <= 0.0 and player._throw_time > 0.0:
+						print("[잡기] 던지기가 먹은 때 f=%d  손에 든 뒤 %.2f초  누른 뒤 %.2f초" % [
+							_frames, (_frames - _death_at) / 60.0,
+							(_frames - 30) / 60.0])
+						print("        HOLD_MIN=%.2f  예비동작=%.2f -> 손 떠남까지 %.2f초" % [
+							Player.HOLD_MIN, Player.THROW_WINDUP,
+							(_frames - _death_at) / 60.0 + Player.THROW_WINDUP])
 		"burstcost":
 			# **터지는 조각만 따로** 잽니다. 적도 줍기도 없는 빈 방에서
 			# 조각만 네 번 터뜨리고 그리기와 노드가 얼마나 느는지 봅니다.
