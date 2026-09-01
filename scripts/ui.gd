@@ -271,7 +271,7 @@ func _build_hud() -> void:
 	# 폰에서는 키 안내가 거짓말입니다. 조작 방법이 화면에 이미 그려져 있으니
 	# 대신 자동 조준을 알려 줍니다 - 안 알려 주면 "왜 조준이 안 되지" 가 됩니다.
 	var hint := UiTheme.label(
-		"왼쪽을 끌어 이동   고함은 **누르는 만큼** 넓어집니다   물놀이터·책장 앞에서는 밀기로 말을 겁니다" if TouchControls.wanted()
+		"왼쪽을 끌어 이동   고함으로 앞을 쓸고   풀장·책장 앞에서는 밀기로 말을 겁니다" if TouchControls.wanted()
 		else "이동 WASD   고함 좌클릭   밀기(잡기) F   구르기 Space   도움말 F1",
 		14, UiTheme.DIM)
 	hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)

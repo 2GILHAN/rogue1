@@ -453,7 +453,6 @@ var _joy_turn := 0.0
 ## 매 프레임 쳐서 즉사시킵니다.
 var _joy_hit: Dictionary = {}
 ## 고함을 모은 정도(0~1). **-1 이면 모으는 중이 아닙니다.**
-var _shout_charge := -1.0
 ## 이번에 지른 고함이 얼마나 모은 것인가. 판정과 그림이 같이 씁니다.
 var _shout_fired := 1.0
 ## 모으는 동안 도는 목소리. 손을 떼면 끊습니다.
@@ -748,9 +747,7 @@ func _ground_move(delta: float) -> void:
 	# 위험을 감수할지가 선택이 되려면 값이 있어야 합니다.
 	if _moving_back:
 		target *= BACK_SPEED
-	# **모으는 동안에도** 느려집니다. 이 조건이 `_swing_time` 하나였을 때는
-	# 모으기가 통째로 빠져 있었습니다 - 그 값은 지른 뒤에만 도는 시계입니다.
-	if _swing_time > 0.0 or _shout_charge >= 0.0:
+	if _swing_time > 0.0:
 		target *= _swing_move_scale()
 	if _throw_time > 0.0:
 		# 도는 중에는 거의 제자리입니다. 돌면서 걸어가면 힘이 실리지 않습니다.
@@ -912,8 +909,6 @@ func _swing_move_scale() -> float:
 	## 완전히 묶지 않고 0.2배를 남긴 이유: 0 이면 모으는 내내 못 움직여서,
 	## 예고를 보고 굴러 피하는 것과 겨룰 수가 없습니다. 느리게라도 자리를
 	## 옮길 수 있어야 "모으면서 물러난다" 가 가능합니다.
-	if _shout_charge >= 0.0:
-		return SHOUT_MOVE_SCALE
 	## 눌리는 구간은 판정 시간(0.30초)까지입니다. 자세를 붙잡는 0.62초나
 	## 목소리까지 끌면 재사용 대기(0.34초)보다 길어져, 연타하면 발이 계속
 	## 묶입니다 - 예전에 조작이 끊긴다고 하신 그 상태로 돌아갑니다.
@@ -1450,6 +1445,10 @@ func _out_of_breath() -> void:
 		return
 	_breath_warn = 0.7
 	breath_empty.emit()
+	# **머리 위에 띄웁니다.** 화면 위 알림은 손이 보고 있는 자리가 아닙니다 -
+	# 급해서 누르는 순간이라 눈은 몸에 붙어 있습니다.
+	Fx.popup_text(get_parent(), global_position + Vector3(0, 1.5, 0),
+		"숨 차", Color(0.95, 0.55, 0.45))
 
 
 func _drive_breath(delta: float) -> void:
@@ -1566,7 +1565,7 @@ func _drive_pose_layer(delta: float) -> void:
 		want = 1.0
 	elif _lunge_time > 0.0 and _lunge_at != null:
 		pass          # 위에서 이미 정했습니다
-	elif _shout_hold > 0.0 or _shout_charge >= 0.0:
+	elif _shout_hold > 0.0:
 		# **모으기 시작하는 순간부터** 팔이 뒤로 갑니다.
 		#
 		# 예전에는 `_shout_hold` 하나만 봤는데, 그 값은 **떼는 순간**에
@@ -1574,9 +1573,7 @@ func _drive_pose_layer(delta: float) -> void:
 		# 있다가 다 끝나고 나서야 팔이 뒤로 갔습니다 - 모으는 그림이 통째로
 		# 빠져서, 화면에서는 소리와 부채꼴만 자라고 몸은 가만히 있었습니다.
 		#
-		# 모으는 중(`_shout_charge >= 0.0`)과 지른 뒤(`_shout_hold > 0.0`)를
-		# 한 갈래로 둡니다. 둘이 이어져 있어야 팔이 도중에 한 번 돌아왔다
-		# 다시 가지 않습니다.
+		# 지른 뒤 팔이 뒤에 남습니다(`_shout_hold`).
 		#
 		# 고함이 잡기보다 먼저입니다. 몹을 끌고 있으면 애초에 고함을 못 지르고
 		# (_begin_shout), 소품을 들고 있을 때는 두 팔이 어디로 갈지 하나로
@@ -1677,7 +1674,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("attack"):
 		_begin_shout()
 	elif event.is_action_released("attack"):
-		_release_shout()
+		shout_release()
 	elif event.is_action_pressed("dash"):
 		_try_dash()
 	elif event.is_action_pressed("grab"):
@@ -1687,12 +1684,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func attack() -> void:
-	## 한 번에 지릅니다. **확인용 배치와 봇이 씁니다** - 사람 손으로는
-	## 누르고 떼는 두 걸음입니다(`_begin_shout` / `_release_shout`).
-	if not _begin_shout():
-		return
-	_shout_charge = SHOUT_CHARGE_MIN
-	_release_shout()
+	## 한 번 지릅니다. 누르는 것과 **같습니다** - 모으기가 없어져서 누르기와
+	## 떼기가 갈릴 일이 없습니다.
+	_begin_shout()
 
 
 func shout_press() -> void:
@@ -1700,7 +1694,9 @@ func shout_press() -> void:
 
 
 func shout_release() -> void:
-	_release_shout()
+	## 뗄 때는 아무 일도 없습니다. 신호는 그대로 두는데, 터치 버튼과 확인용
+	## 배치가 여전히 짝으로 부르기 때문입니다.
+	pass
 
 
 ## 고함을 모으는 것에 대하여.
@@ -2180,17 +2176,9 @@ func _throw_direction(wish: Vector3) -> Vector3:
 ##
 ## 28 / 20 / 8 이었습니다. 밀기가 너무 싸서 **밀기만 계속 누르는 것**이 늘
 ## 답이었고, 셋 중 무엇을 쓸지가 선택이 안 됐습니다.
-const BREATH_SHOUT := 40.0
+const BREATH_SHOUT := 10.0
 const BREATH_ROLL := 40.0
 const BREATH_GRAB := 30.0
-## **다 지른 고함은 덜 지른 것보다 쌉니다**(40 -> 30).
-##
-## 거꾸로였습니다 - 모은 만큼 값을 매기면 살짝 지르는 것이 늘 이득이라,
-## 0.5초를 서서 모을 이유가 없습니다. 그러면 모으기를 넣은 이유가 사라집니다.
-##
-## 지금은 **끝까지 모으는 쪽이 싸고 세고**(Lv3 피해·호랑이), 살짝 지르는 것은
-## 급할 때 값을 더 치르고 쓰는 수가 됩니다.
-const BREATH_SHOUT_FULL := 30.0
 ## 잡고 있는 동안 새는 양(초당). 0.1초에 0.5 씩 = 초당 5.
 const BREATH_CARRY_DRAIN := 5.0
 ## 무거운 가구를 들고 있을 때. 세 배로 닳습니다 - 6.7초면 숨이 바닥납니다.
@@ -2933,13 +2921,19 @@ func _nearest_prop() -> Prop:
 
 
 func _begin_shout() -> bool:
-	## 누르는 순간. **모으기 시작만 하고 아직 안 지릅니다.**
+	## 누르는 순간 **그대로 지릅니다.** 늘 최대 범위입니다.
+	##
+	## 한동안 **누르는 만큼 커지는** 기술이었습니다(0.5초 모으기). 값을 여럿
+	## 매달아 놨었는데 - 모은 만큼 범위, 모은 만큼 숨, Lv3 은 끝까지 모아야
+	## 피해 - 손에는 결국 "매번 0.5초를 서 있어야 한다" 로만 남았습니다.
+	## 그동안 발이 0.2배로 묶이므로 급할 때 못 쓰는 기술이 되고, 그러면 판을
+	## 정리하는 기술이라는 자리와도 어긋납니다.
+	##
+	## 지금은 **누르면 나갑니다.** 값은 숨 10 하나입니다.
 	if _mash():
 		return false
 	if ultimate_press("shout"):
 		return false
-	if _shout_charge >= 0.0:
-		return false        # 이미 모으는 중
 	if _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 			or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return false
 	# **숨은 여기서 확인만** 하고 뺏지 않습니다. 모으다 그만두는 일이 값을
@@ -2951,80 +2945,50 @@ func _begin_shout() -> bool:
 	if not _has_breath(breath_cost("shout", BREATH_SHOUT)):
 		_out_of_breath()
 		return false
-	_shout_charge = 0.0
+	# **늘 최대**입니다. 그림과 판정이 같은 값을 쓰므로 여기 한 줄이 둘 다
+	# 정합니다(`shout_reach` / `shout_arc`).
+	_shout_fired = 1.0
 	_shout_voice = Sfx.play_loose(Sfx.SHOUT, 0.0)
+	# 범위를 **그 자리에 그렸다가** 스러지게 합니다.
+	_shout_show = SHOUT_SHOW
+	_shout_preview()
+	_try_attack()
 	return true
 
 
+## 지른 범위가 화면에 남아 있는 시간(초). 그 뒤 0.30초에 걸쳐 스러집니다.
+##
+## 짧게 둡니다 - 길면 이미 끝난 판정이 계속 떠 있어서, 그 안에 서 있으면
+## 아직 아픈 것으로 읽힙니다.
+const SHOUT_SHOW := 0.12
+var _shout_show := 0.0
+
+
 func _drive_shout_charge(delta: float) -> void:
-	## 모으는 동안. 부채꼴이 자라는 것은 `_shout_preview` 가 그립니다.
-	if _shout_charge < 0.0:
+	## 지른 뒤 범위가 잠깐 남습니다. 선분이 지글거리도록 매 프레임 다시
+	## 그립니다(보일링) - 한 장으로 세워 두면 붙여 놓은 그림이 됩니다.
+	if _shout_show <= 0.0:
 		return
-	_shout_charge = minf(1.0, _shout_charge + delta / SHOUT_CHARGE_TIME)
-	# **다 모이면 손을 떼지 않아도 나갑니다.**
-	#
-	# 소리가 끝나는 순간이 최대이므로, 그 뒤로는 눌러 봐야 아무것도 안
-	# 늘어납니다. 그런데 부채꼴은 계속 떠 있었습니다 - 손가락을 붙이고 있는
-	# 동안 "아직 모으는 중" 이라는 거짓말을 하는 셈이고, 소리는 이미 끝나
-	# 귀와도 어긋납니다.
-	#
-	# 뗄 때 오는 신호는 그냥 흘러갑니다(`_release_shout` 가 모으는 중이
-	# 아니면 아무것도 안 합니다).
-	if _shout_charge >= 1.0:
-		_release_shout()
-		return
-	# 느려지는 것은 `_swing_move_scale` 이 맡습니다(평소의 0.2배).
-	_shout_preview()
-	_shout_charge_hits()
-
-
-## 모으는 동안 부채꼴 안의 적을 굳혀 두는 시간(초).
+	_shout_show -= delta
+	if _shout_show <= 0.0:
+		_clear_shout_preview()
+	else:
+		_shout_preview()
+	return
+## (안 씀) 모으던 시절, 부채꼴 안의 적을 매 프레임 굳히던 값. 지금은 지르는
+## 순간 `_resolve_swing` 이 `Enemy.SHOUT_STAGGER` 로 한 번 겁니다.
 ##
 ## 매 프레임 새로 걸므로 **머무는 동안 계속 굳어 있습니다.** 값이 짧아야
 ## 부채꼴 밖으로 나간 순간 곧바로 풀립니다 - 길게 걸면 스쳐 지나간 적이
 ## 한참 뒤까지 굳어 있어서, 굳힌 것이 내가 한 일로 안 읽힙니다.
 const SHOUT_CHARGE_STAGGER := 0.12
-
-
-func _shout_charge_hits() -> void:
-	## **소리는 지르기 시작할 때부터 적에게 닿습니다.**
-	##
-	## 예전에는 손을 뗄 때 한 번만 판정했습니다. 그러면 0.5초 동안 부채꼴을
-	## 얼굴에 대고 있어도 적은 아무 일 없이 때리다가, 마지막 한 프레임에
-	## 갑자기 굳었습니다 - **보이는 것과 일어나는 일이 어긋납니다.**
-	##
-	## 여기서 넣는 것은 **굳힘뿐**입니다. 피해와 밀어냄은 지를 때 한 번입니다 -
-	## 그것들은 상태가 아니라 한 방이라, 매 프레임 넣으면 0.5초 모으는 동안
-	## 예순 번 들어가 즉사시키고 적을 방 밖으로 날려 버립니다.
-	if state == null:
-		return
-	var charge := maxf(_shout_charge, SHOUT_CHARGE_MIN)
-	var half := cos(deg_to_rad(shout_arc(charge)) * 0.5)
-	for node in get_tree().get_nodes_in_group("enemies"):
-		var enemy := node as Node3D
-		if not is_instance_valid(enemy) or not enemy.has_method("stagger_for"):
-			continue
-		var to: Vector3 = enemy.global_position - global_position
-		to.y = 0.0
-		# 그림(`Fx.shout_fan`)·판정(`_resolve_swing`)과 **같은 함수**를 씁니다.
-		var reach: float = shout_reach(charge) 			+ float(enemy.get_meta("body_radius", 0.4))
-		if to.length() > reach:
-			continue
-		if to.length() > 0.05 and to.normalized().dot(aim) < half:
-			continue
-		# 막는 적(베개)은 소리에도 안 굳습니다. 피해가 0 인데 경직만 걸리면
-		# 막은 것이 아무 값도 안 하는 셈입니다(`_guarded` 참고).
-		if _guarded(enemy):
-			continue
-		enemy.call("stagger_for", SHOUT_CHARGE_STAGGER)
-
-
 func _shout_preview() -> void:
 	## 모으는 동안 **자라는 부채꼴**을 발밑에 그립니다.
 	##
 	## 지를 때 칠하는 것과 같은 함수로 만듭니다(`Fx.fan_mesh`) - 미리 보는
 	## 것과 실제로 닿는 것이 다르면 그림이 거짓말입니다.
-	var charge := maxf(_shout_charge, SHOUT_CHARGE_MIN)
+	# **늘 최대**입니다. 모으기가 없어졌으므로 그림도 한 크기뿐입니다.
+	var charge := 1.0
 	if _shout_prev == null:
 		_shout_prev_mat = Fx.fan_material()
 		_shout_prev = MeshInstance3D.new()
@@ -3107,30 +3071,6 @@ func _clear_shout_preview() -> void:
 			1.0, 0.0, VORTEX_FADE)
 		tw.tween_callback(gone.queue_free)
 	_shout_vortex = null
-
-
-func _release_shout() -> void:
-	## 손을 뗐습니다. **모은 만큼** 지릅니다.
-	if _shout_charge < 0.0:
-		return
-	var charge := maxf(_shout_charge, SHOUT_CHARGE_MIN)
-	_shout_charge = -1.0
-	_shout_fired = charge
-	# **덜 모았을 때만 소리가 끊깁니다.** 살짝 눌렀다 떼면 소리가 잘리는 것이
-	# 곧 "덜 모았다" 입니다.
-	#
-	# 다 모았으면 그대로 둡니다. 모으는 시간(0.60초)이 목소리(1.05초)보다
-	# 짧아서 남은 0.45초가 **지르고 난 여운**으로 이어집니다 - 여기서 끊으면
-	# 최대로 질렀는데 소리가 제일 짧아지는, 거꾸로 된 일이 생깁니다.
-	if _shout_voice != null and is_instance_valid(_shout_voice):
-		if charge < 0.999:
-			_shout_voice.stop()
-			_shout_voice.queue_free()
-	_shout_voice = null
-	_clear_shout_preview()
-	_try_attack()
-
-
 func _try_attack() -> void:
 	if _mash():
 		return
@@ -3142,8 +3082,7 @@ func _try_attack() -> void:
 		return
 	# **모은 만큼 냅니다.** 살짝 지른 것은 30%, 끝까지 모은 것은 100% 입니다.
 	# **모을수록 쌉니다**(BREATH_SHOUT 40 -> BREATH_SHOUT_FULL 30).
-	var shout_cost := breath_cost("shout",
-		lerpf(BREATH_SHOUT, BREATH_SHOUT_FULL, clampf(_shout_fired, 0.0, 1.0)))
+	var shout_cost := breath_cost("shout", BREATH_SHOUT)
 	if not _has_breath(shout_cost):
 		_out_of_breath()
 		return

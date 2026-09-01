@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.33"
+const VERSION := "v0.34"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2002,17 +2002,17 @@ func _drive_pose() -> void:
 				state.breath = state.max_breath
 				var b0: float = state.breath
 				player.attack()
-				print("[숨] 고함 **살짝**  %.0f -> %.0f  (%.0f 듦)" % [
-					b0, state.breath, b0 - state.breath])
-			if _frames == 60 and is_instance_valid(player):
-				# **다 모이면 손을 떼지 않아도 나갑니다**(0.5초 = 30프레임).
-				# 그 뒤에 재면 이미 낸 값을 못 봅니다 - 누르기 전 값과
-				# 견줘야 합니다.
-				state.breath = state.max_breath
-				player.shout_press()
+				print("[숨] 고함  %.0f -> %.0f  (%.0f 듦)  사거리 %.2fm 각 %.0f도" % [
+					b0, state.breath, b0 - state.breath,
+					player.shout_reach(player._shout_fired),
+					player.shout_arc(player._shout_fired)])
 			if _frames == 100 and is_instance_valid(player):
-				print("[숨] 고함 **끝까지**  %.0f -> %.0f  (%.0f 듦)" % [
-					state.max_breath, state.breath, state.max_breath - state.breath])
+				# **숨이 없을 때**: 못 쓰고 「숨 차」가 머리 위에 떠야 합니다.
+				state.breath = 3.0
+				var before: float = state.breath
+				player.attack()
+				print("[숨] 모자랄 때  %.0f -> %.0f (안 깎여야 맞음)  경고=%s" % [
+					before, state.breath, str(player._breath_warn > 0.0)])
 			if _frames == 140 and is_instance_valid(player):
 				state.breath = state.max_breath
 				var b2: float = state.breath
@@ -2287,16 +2287,16 @@ func _drive_pose() -> void:
 					vfrac = float((m0.material_override as ShaderMaterial)
 						.get_shader_parameter("arc_frac"))
 				print("[소용돌이] f=%d 판정 사거리 %.2f / 각 %.0f도  ->  판 %.2f / 각비 %.2f (= %.0f도)" % [
-					_frames, player.shout_reach(player._shout_charge) + 0.4,
-					player.shout_arc(player._shout_charge),
+					_frames, player.shout_reach(1.0) + 0.4,
+					player.shout_arc(1.0),
 					vs, vfrac, vfrac * 132.0])
 				print("[모으는중] f=%d 모은 %.2f 부채꼴=%s 소용돌이=%s 진하기=%.2f" % [
-					_frames, player._shout_charge,
+					_frames, 1.0,
 					str(player._shout_prev != null and is_instance_valid(player._shout_prev)),
 					str(player._shout_vortex != null and is_instance_valid(player._shout_vortex)),
 					player._shout_prev_mat.albedo_color.a if player._shout_prev_mat != null else -1.0])
 				print("[모으는중] f=%d 모은 %.2f 속도 %.2f (평소 %.2f) 팔뒤=%.2f" % [
-					_frames, player._shout_charge,
+					_frames, 1.0,
 					Vector2(player.velocity.x, player.velocity.z).length(),
 					state.move_speed, player._pose.weight])
 			if _probe_arg == "voice":
@@ -2308,12 +2308,12 @@ func _drive_pose() -> void:
 						if n is AudioStreamPlayer and (n as AudioStreamPlayer).playing:
 							live = true
 					print("[목소리] f=%d 모으는중=%s 소리남=%s" % [
-						_frames, str(player._shout_charge >= 0.0), str(live)])
+						_frames, str(player._shout_show > 0.0), str(live)])
 			elif _probe_arg == "keep":
 				# **계속 누르고 있습니다.** 떼지 않아도 나가야 맞습니다.
 				if _frames % 6 == 0 and _frames > 30 and _frames < 140:
 					print("[계속누름] f=%d 모으는중=%s 미리보기=%s" % [
-						_frames, str(player._shout_charge >= 0.0),
+						_frames, str(player._shout_show > 0.0),
 						str(player._shout_prev != null and is_instance_valid(player._shout_prev))])
 			elif _frames == 30 + (3 if _probe_arg == "tap" else (30 if _probe_arg == "sync" else 42)):
 				var before := state.breath
@@ -2521,9 +2521,9 @@ func _drive_pose() -> void:
 				player.shout_press()
 			if _frames == 432 and is_instance_valid(_probe_foe):
 				print("[균형] 모으는 중 모은=%.2f 굳음=%.2f 거리=%.2f 사거리=%.2f 조준%s" % [
-					player._shout_charge, _probe_foe._stagger,
+					1.0, _probe_foe._stagger,
 					_probe_foe.global_position.distance_to(player.global_position),
-					player.shout_reach(maxf(player._shout_charge, 0.0)),
+					player.shout_reach(1.0),
 					str(player.aim.round())])
 			if _frames == 440 and is_instance_valid(_probe_foe):
 				player.shout_release()
