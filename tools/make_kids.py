@@ -277,6 +277,11 @@ def press_arms(motion, degrees: float, elbow: float) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--decimate", type=float, default=1.0,
+                    help="굽고 나서 삼각형을 이 비율로 줄입니다. **기본은 "
+                         "1.0(안 줄임)** 입니다 - 줄이면 Godot 이 LOD 를 못 "
+                         "만들어 주어 오히려 프레임이 나빠집니다(적 일곱에서 "
+                         "26천 -> 97천). tools/decimate.py 의 설명 참고.")
     ap.add_argument("--only", nargs="*", default=[])
     ap.add_argument("--arms", type=float, default=38.0,
                     help="어깨를 몸 쪽으로 접는 각도(도). 55 까지 가면 팔이 "
@@ -331,6 +336,14 @@ def main() -> int:
             bn, _ = graft(js, bn, sjs, sbn)
         target = MODELS / f"{GAME_NAME.get(name, name)}.glb"
         size = write(target, js, bn)
+        # **삼각형을 줄입니다.** 굽고 나면 늘 2만인데, 화면에서 60~150 픽셀인
+        # 캐릭터에는 과합니다(모바일 캐릭터는 보통 1.5천~8천). 여기서 안 하면
+        # 다시 구울 때마다 2만으로 돌아갑니다.
+        if args.decimate < 1.0:
+            import decimate as _dec
+            r = _dec.run(target, target, args.decimate)
+            size = target.stat().st_size // 1024
+            print(f"    삼각형 {r['before']} -> {r['after']}")
         # 골반을 올립니다. **여기서 부르지 않으면 다시 구울 때마다 원래의
         # 낮은 골반으로 되돌아갑니다** - 손으로 한 번 고치고 잊으면 다음
         # 사람이 이유도 모르고 다시 밟습니다.

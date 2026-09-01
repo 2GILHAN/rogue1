@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.44.1"
+const VERSION := "v0.45"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -232,6 +232,8 @@ var _force_lean := false
 ## 폰·웹에서는 0.75 로 시작합니다(픽셀 56%). 옵션 판에서 돌려 가며 고를 수
 ## 있습니다 - 폰마다 여유가 달라서 하나로 못 박을 수 없습니다.
 var _scale3d := 1.0
+## LOD 가 바뀌는 문턱(픽셀). 클수록 일찍 낮은 메시로 내려갑니다.
+var _lod_px := 1.0
 const SCALE3D_STEPS := [1.0, 0.85, 0.75, 0.6, 0.5]
 var _leak_proc := 0.0
 var _leak_phys := 0.0
@@ -249,6 +251,10 @@ var _wedge_from := Vector3.ZERO
 var _probe_t0 := 0.0
 ## --pose=death 에서 마지막으로 죽인 프레임.
 var _death_at := 0
+## --pose=foecost 에서 프레임을 모으는 자리.
+var _foe_sum := 0.0
+var _foe_draw := 0.0
+var _foe_n := 0
 ## 층을 만드는 시간을 마디마디 찍을까(--floortime).
 var _floor_time := false
 var _lap_names: PackedStringArray = PackedStringArray()
@@ -417,6 +423,9 @@ func _read_args() -> void:
 			_grade_on = false
 		elif a.begins_with("--push-lv="):
 			_push_lv = int(a.substr(10))
+		elif a.begins_with("--lodpx="):
+			_lod_px = maxf(0.0, float(a.substr(8)))
+			get_viewport().mesh_lod_threshold = _lod_px
 		elif a.begins_with("--scale3d="):
 			_scale3d = clampf(float(a.substr(10)), 0.3, 1.0)
 		elif a == "--lean":
@@ -574,6 +583,28 @@ func _setup_environment() -> void:
 		# 이 그림체는 넓은 단색 면이라 조금 흐려져도 티가 덜 납니다. 그래도
 		# 눈에 거슬리면 옵션 판의 「해상도」에서 100% 로 되돌릴 수 있습니다.
 		_scale3d = 0.60
+		# **LOD 를 더 일찍 내립니다.**
+		#
+		# 캐릭터는 화면에서 60~150 픽셀인데 메시는 2만 삼각형입니다. 게다가
+		# 카툰 외곽선이 그 메시를 **한 벌 더** 그리므로, 적 하나가 늘 때마다
+		# 붙는 삼각형이 두 배가 됩니다(일곱 마리에 167천).
+		#
+		# Godot 이 이미 LOD 를 구워 두었는데(`generate_lods`) 바뀌는 문턱이
+		# 1픽셀이라 웬만해서는 안 내려갑니다. 이 값이 곧 "몇 픽셀까지 틀려도
+		# 괜찮은가" 입니다 - 이 그림체는 넓은 단색 면이라 넉넉히 줄 수 있습니다.
+		#
+		# 실측(적 일곱, 폰 해상도):
+		#
+		#     문턱  1px   삼각형 167천
+		#     문턱  4px           44천   화면 차이 0.80%
+		#     문턱  8px           25천   화면 차이 1.40%   <- 여기서 평평해집니다
+		#     문턱 16px           26천
+		#
+		# 8 에서 더 올려도 안 줄어듭니다(구워 둔 LOD 가 거기까지입니다).
+		# **카툰은 그대로 둡니다** - 외곽선이 삼각형을 두 배로 만드는 것이
+		# 맞지만 그건 이 게임의 얼굴이라, 줄이는 일은 메시 쪽에서 합니다.
+		_lod_px = 8.0
+		get_viewport().mesh_lod_threshold = _lod_px
 		# MSAA 도 끕니다. 가장자리를 매끄럽게 하려고 화면을 여러 번 재는
 		# 작업이라, 대역폭이 좁은 폰에서 값이 큽니다.
 		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
@@ -1401,6 +1432,12 @@ func _on_record_stopped(reason: String) -> void:
 
 func _on_player_died() -> void:
 	phase = Phase.DEAD
+	# **담은 것을 그 자리에서 적어 둡니다.**
+	#
+	# 죽으면 화면이 바뀌고, 끊기는 폰일수록 죽기 쉽습니다 - 그때가 담은 것이
+	# 가장 값진 때인데 「내보내기」를 누를 자리가 없어 통째로 잃었습니다.
+	if Trace.running():
+		Trace.save()
 	# 마지막 상태를 한 번 더 그립니다. 이걸 안 하면 체력이 가득 찬 채로
 	# 쓰러진 화면이 남습니다 - HUD 갱신이 PLAYING 일 때만 돌기 때문입니다.
 	ui.update_hud(state, _alive, 1.0)
@@ -2191,6 +2228,45 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"foecost":
+			# **적이 몇이면 얼마나 무거운가.** 하나씩 늘려 가며 잽니다.
+			#
+			# 방을 비우고 적만 세웁니다 - 소품·물놀이터가 섞이면 무엇이
+			# 무거운지 안 갈립니다. 적은 못 움직이게 두되 **그리기와 자세는
+			# 그대로** 돌게 둡니다(그게 값을 치르는 자리입니다).
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				for n in get_tree().get_nodes_in_group("enemies"):
+					(n as Node3D).queue_free()
+				for n in get_tree().get_nodes_in_group("props"):
+					(n as Node3D).queue_free()
+				_alive = 0
+			# 60프레임마다 한 마리씩 늘리고, 그 사이의 평균을 냅니다.
+			if _frames >= 60 and _frames <= 560 and (_frames - 60) % 60 == 0:
+				var k := (_frames - 60) / 60
+				if k > 0:
+					print("[적값] %d마리  물리 %.2fms  그리기값 %.2fms  콜 %d  삼각형 %.0f천" % [
+						k,
+						_foe_sum / maxf(float(_foe_n), 1.0) * 1000.0,
+						_foe_draw / maxf(float(_foe_n), 1.0) * 1000.0,
+						Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+						Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0])
+				_foe_sum = 0.0
+				_foe_draw = 0.0
+				_foe_n = 0
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("grunt", state.floor_num, dungeon, player)
+				e.speed = 0.0
+				var ang := TAU * float(k) / 8.0
+				e.global_position = player.global_position 					+ Vector3(sin(ang), 0, cos(ang)) * 2.4
+				e.died.connect(_on_enemy_died)
+			if _frames > 62:
+				# **vsync 에 묶인 프레임 시간 대신 실제로 일한 시간**을 봅니다.
+				# 데스크톱은 남아돌아서 프레임은 늘 16.67ms 로 찍힙니다.
+				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
+				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
+				_foe_n += 1
 		"tracetest":
 			# **프레임 기록이 쓸모 있는 글을 내는지** 봅니다.
 			if _frames == 20:
@@ -3732,7 +3808,14 @@ func _share_trace() -> void:
 	##
 	## 깃허브 페이지는 정적이라 서버로 못 보냅니다. 브라우저에서 내려받게
 	## 하면 폰에서도 그대로 공유창에 올릴 수 있습니다.
+	# 지금 담긴 것이 없으면 **지난번에 적어 둔 것**을 냅니다. 죽고 나서
+	# 다시 시작한 뒤에도 그 판의 기록을 꺼낼 수 있어야 합니다.
 	var text := Trace.report()
+	if text.begins_with("담긴 것이 없습니다"):
+		var saved := Trace.load_saved()
+		if saved != "":
+			text = "(지난번에 적어 둔 것)
+" + saved
 	print(text)
 	if OS.has_feature("web"):
 		# `Blob` 으로 만들어 내려받습니다. 누른 그 순간에 해야 브라우저가

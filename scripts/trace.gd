@@ -109,6 +109,33 @@ static func sample(delta: float, draw_calls: int, nodes: int,
 		_bad += 1
 
 
+## 담은 것을 **브라우저에 적어 둡니다.**
+##
+## 죽으면 화면이 바뀌고, 그 판에서 「내보내기」를 못 누르면 담은 것이 통째로
+## 사라집니다 - 실제로 그랬습니다. 끊기는 폰일수록 죽기 쉬운데, 그때가 바로
+## 담은 것이 가장 값진 때입니다.
+##
+## 죽는 순간 적어 두면 다음에 열었을 때도 그대로 있습니다.
+const STORE_KEY := "toto_frames"
+
+
+static func save() -> void:
+	if not OS.has_feature("web"):
+		return
+	var text := report()
+	JavaScriptBridge.eval("try{localStorage.setItem('%s',%s);}catch(e){}"
+		% [STORE_KEY, JSON.stringify(text)], true)
+
+
+static func load_saved() -> String:
+	if not OS.has_feature("web"):
+		return ""
+	var got = JavaScriptBridge.eval(
+		"(function(){try{return localStorage.getItem('%s')||'';}catch(e){return '';}})()"
+		% STORE_KEY, true)
+	return String(got) if got != null else ""
+
+
 static func report() -> String:
 	## 담은 것을 사람이 읽을 글로 만듭니다.
 	##
