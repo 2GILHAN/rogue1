@@ -503,6 +503,9 @@ func _make_fadeable(root: Node) -> void:
 				tex = (src as BaseMaterial3D).albedo_texture
 				tint = (src as BaseMaterial3D).albedo_color
 			mat.set_shader_parameter("has_texture", tex != null)
+			# 소품은 **통째로** 비칩니다. 벽면 축 규칙은 긴 벽을 위한 것이라,
+			# 판마다 법선이 다른 가구에서는 판마다 다른 답이 나옵니다.
+			mat.set_shader_parameter("whole_object", true)
 			if tex != null:
 				mat.set_shader_parameter("albedo_tex", tex)
 			mat.set_shader_parameter("tint", Vector3(tint.r, tint.g, tint.b))
@@ -520,6 +523,15 @@ func set_fade_focus(camera_position: Vector3, player_position: Vector3,
 		mat.set_shader_parameter("cam_pos", camera_position)
 		mat.set_shader_parameter("player_pos", player_position)
 		mat.set_shader_parameter("fade_radius", radius)
+		# **물건 하나로 판정합니다.** 자리는 매 프레임 넘깁니다 - 굴러다니는
+		# 소품도 있어서 한 번 넣어 두면 어긋납니다.
+		mat.set_shader_parameter("object_pos", global_position)
+
+
+func is_fadeable() -> bool:
+	## 걷어내는 셰이더를 받았나. `_make_fadeable` 이 재질을 갈아 끼운 것만
+	## 값을 받아야 합니다.
+	return not _fade_mats.is_empty()
 
 
 func wants_wall() -> bool:

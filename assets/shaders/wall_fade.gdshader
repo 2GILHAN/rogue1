@@ -68,6 +68,17 @@ uniform float cell_size = 1.5;
 //
 // 벽을 따라 이만큼 떨어지면 도로 불투명해집니다. 앞뒤로 이 거리씩이므로
 // 한 번에 비치는 것은 그 두 배 길이의 **벽 한 판**입니다.
+/// **물건 하나를 통째로** 볼까(소품), 아니면 벽면 축을 따라 볼까(벽).
+///
+/// 벽면 축 규칙은 **긴 벽**을 위한 것입니다 - 이 면이 보는 쪽으로 벽이 놓인
+/// 축을 알아내고 그 축을 따라 판정합니다. 가구에는 그런 축이 없습니다.
+/// 앞판·옆판·뒷판의 법선이 제각각이라 판마다 다른 답이 나오고, 그래서 벽은
+/// 비쳤는데 책장만 남아 뒷모습이 그대로 보였습니다.
+///
+/// 켜면 **물건의 자리 하나**로만 판정합니다. 판이 여럿이어도 답이 하나라
+/// 물건이 통째로 비칩니다.
+uniform bool whole_object = false;
+uniform vec3 object_pos = vec3(0.0);
 uniform float run_span = 3.4;
 uniform float run_fade = 2.0;
 
@@ -114,10 +125,16 @@ void fragment() {
 	// 벽이 있었다는 것 자체가 안 보입니다.
 	// 두 축의 후보. 하나는 X 축을 따라 뻗은 벽(=Z 를 보는 면)에 맞춘 자리이고,
 	// 다른 하나는 그 반대입니다.
-	vec3 probe_x = vec3(player_pos.x, world_pos.y, world_pos.z);
-	vec3 probe_z = vec3(world_pos.x, world_pos.y, player_pos.z);
+	// **소품은 자기 자리 하나로** 봅니다(위 `whole_object`).
+	vec3 test_pos = whole_object ? vec3(object_pos.x, world_pos.y, object_pos.z)
+		: world_pos;
+	vec3 probe_x = vec3(player_pos.x, test_pos.y, test_pos.z);
+	vec3 probe_z = vec3(test_pos.x, test_pos.y, player_pos.z);
 	vec3 probe;
-	if (abs(world_normal.y) > 0.7) {
+	if (whole_object) {
+		// 축을 안 봅니다. 물건의 자리 그대로가 곧 판정할 점입니다.
+		probe = test_pos;
+	} else if (abs(world_normal.y) > 0.7) {
 		// **윗면에는 축이 없습니다.** 아래 벽이 어느 쪽으로 뻗었는지 알 수
 		// 없으므로, 두 후보 중 **더 가까운 쪽**을 씁니다 - 그러면 이 윗면을
 		// 이고 있는 벽면과 같은 답이 나와서 둘이 같이 비칩니다. 칸으로
@@ -153,7 +170,11 @@ void fragment() {
 	// **벽을 따라 얼마나 떨어졌나.** 축을 맞추면서 잃어버린 값입니다 -
 	// probe 는 주인공에게 맞춘 자리라 이 거리가 거기서는 언제나 0 입니다.
 	float along;
-	if (abs(world_normal.y) > 0.7) {
+	if (whole_object) {
+		// 물건은 벽처럼 길게 뻗지 않습니다. 「따라 멀어지면 닫힌다」 는
+		// 긴 벽을 자르려던 규칙이라, 여기서는 늘 0 입니다.
+		along = 0.0;
+	} else if (abs(world_normal.y) > 0.7) {
 		along = min(abs(world_pos.x - player_pos.x), abs(world_pos.z - player_pos.z));
 	} else if (abs(world_normal.z) > abs(world_normal.x)) {
 		along = abs(world_pos.x - player_pos.x);

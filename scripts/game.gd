@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.34"
+const VERSION := "v0.36"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -239,6 +239,8 @@ var _probe_far := false
 ## --pose=wedge 에서 세운 책장과 처음 자리.
 var _wedge_prop: Prop = null
 var _wedge_from := Vector3.ZERO
+## --pose=shoppause 에서 창을 열 때의 시계.
+var _probe_t0 := 0.0
 var _probe_foe: Enemy = null
 var _probe_hp := 0.0
 ## --push-lv=N 으로 밀기 계통을 미리 올려 둡니다(비교용).
@@ -342,6 +344,18 @@ func _ready() -> void:
 
 	world = Node3D.new()
 	world.name = "World"
+	# **판은 멈출 수 있어야 합니다.**
+	#
+	# `Game` 자신은 `PROCESS_MODE_ALWAYS` 입니다(멈춘 화면에서도 카메라와 HUD 를
+	# 그려야 하니까). 그런데 `process_mode` 의 기본값은 **물려받기**라, 그 밑에
+	# 달린 판·주인공·적이 전부 같이 ALWAYS 가 됩니다 - `get_tree().paused` 를
+	# 켜도 아무것도 안 멈췄습니다.
+	#
+	# 안 멈춘 티가 잘 안 났던 것은 적이 **스스로** 단계를 보고 서 있었기
+	# 때문입니다(`Enemy._physics_process` 의 `phase != PLAYING`). 그 가드가
+	# 없는 것들은 그대로 돌았고, 그래서 물물교환 창을 띄워 놓고 고르는 동안
+	# **판 시간(`state.elapsed`)이 계속 갔습니다.**
+	world.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(world)
 
 	if _seed != 0:
@@ -2052,6 +2066,85 @@ func _drive_pose() -> void:
 					_frames, state.family_level("push"),
 					str(player._lunge_time > 0.0), world.get_child_count(),
 					int(_wedge_from.x)])
+		"shoppause":
+			# **물물교환 창이 떠 있는 동안 판이 멈추는가.**
+			#
+			# Game 은 멈춰도 도는 노드라(PROCESS_MODE_ALWAYS) 여기서 계속
+			# 지켜볼 수 있습니다 - 적이 움직이는지, 시계가 도는지를 봅니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.global_position = player.global_position + Vector3(6.0, 0, 0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+				_alive += 1
+			if _frames == 40 and is_instance_valid(_probe_foe):
+				_wedge_from = _probe_foe.global_position
+				_probe_t0 = state.elapsed
+				_open_shop()
+				print("[상점] 열었습니다. 단계=%d 멈춤=%s" % [
+					phase, str(get_tree().paused)])
+		"propfade":
+			# **가리는 가구가 비치는지** 잽니다.
+			#
+			# 카메라와 주인공 사이에 책장을 세우고, 그 자리에서 셰이더가 내는
+			# 알파를 다시 계산해 봅니다 - 셰이더 안의 값을 밖에서 볼 수는
+			# 없으므로 **같은 식**을 여기서 한 번 더 풉니다.
+			if _frames == 16 and is_instance_valid(player):
+				player.bot_active = false
+				var shelf := Prop.new()
+				world.add_child(shelf)
+				shelf.setup("bookshelf")
+				# 카메라는 주인공 +Z 쪽에 있습니다. 그 사이에 세웁니다.
+				shelf.global_position = player.global_position + Vector3(0, 0, 1.3)
+				_wedge_prop = shelf
+			if _frames in [40, 60] and is_instance_valid(_wedge_prop):
+				var cam := camera.global_position
+				var focus: Vector3 = player.global_position + Vector3(0, 0.7, 0)
+				var probe: Vector3 = _wedge_prop.global_position
+				probe.y = focus.y
+				var seg := focus - cam
+				var t: float = (probe - cam).dot(seg) / maxf(seg.dot(seg), 0.0001)
+				var d := probe.distance_to(cam + seg * clampf(t, 0.0, 1.0))
+				var r := 2.20
+				var vis := 1.0
+				if t > 0.02 and t < 0.98:
+					vis = lerpf(0.18, 1.0, smoothstep(r * 0.35, r, d))
+				print("[가구] 값받음=%s  t=%.2f 거리=%.2f  알파=%.2f (1=안 비침)" % [
+					str(_wedge_prop.is_fadeable()), t, d, vis])
+		"hpbar":
+			# **체력 바가 실제로 줄어드는지** 픽셀로 잽니다.
+			#
+			# 적을 세워 두고 체력만 바꿔 가며 찍습니다. `--side=` 로 남은
+			# 비율을 줍니다(예: `--side=30` 이면 30%).
+			if _frames == 16 and is_instance_valid(player):
+				player.bot_active = false
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.speed = 0.0
+				foe.set_physics_process(false)
+				# 카메라 쪽(+Z)에 세웁니다 - 뒤에 두면 화면 위 HUD 와 겹칩니다.
+				foe.global_position = player.global_position + Vector3(1.4, 0, 1.2)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+			if _frames == 24 and is_instance_valid(_probe_foe):
+				var want := 100.0 if _probe_arg == "" else float(_probe_arg)
+				# 한 대 때려 바를 띄운 뒤 남은 비율을 맞춥니다.
+				_probe_foe.take_damage(0.01, false, Vector3.ZERO)
+				_probe_foe.hp = _probe_foe.max_hp * want * 0.01
+				_probe_foe.take_damage(0.01, false, Vector3.ZERO)
+				# **화면에서 몇 px 인지** 잽니다. scale 만 보면 빌보드가
+				# 그 값을 버려도(keep_scale 이 꺼져 있으면 버립니다) 눈치채지
+				# 못합니다 - 실제로 그래서 색만 바뀌고 바는 그대로였습니다.
+				var mi: MeshInstance3D = _probe_foe._bar_fill
+				var ab: AABB = mi.global_transform * mi.get_aabb()
+				var l := camera.unproject_position(ab.position)
+				var r := camera.unproject_position(ab.position + Vector3(ab.size.x, 0, 0))
+				print("[체력바] 남은 %3.0f%%  scale.x=%.2f  화면 폭 %.1f px" % [
+					want, mi.scale.x, absf(r.x - l.x)])
 		"cardir":
 			# **자동차가 가는 쪽을 보고 있나.** 앞뒤가 뒤집혔는지 재는 자리입니다.
 			#
@@ -3829,6 +3922,12 @@ func _process(delta: float) -> void:
 			camera.h_offset = 0.0
 			camera.v_offset = 0.0
 
+	# **단계와 상관없이** 도는 확인. 창이 떠 있는 동안(PLAYING 이 아님)을
+	# 보려면 아래 `_drive_pose` 안에 둘 수 없습니다.
+	if _pose == "shoppause" and _frames in [70, 130, 200] 			and is_instance_valid(_probe_foe):
+		print("[상점] f=%d  적이 %.3fm 움직임  시계 %+.2f초  단계=%d 멈춤=%s" % [
+			_frames, _probe_foe.global_position.distance_to(_wedge_from),
+			state.elapsed - _probe_t0, phase, str(get_tree().paused)])
 	if _pose != "" and phase == Phase.PLAYING and is_instance_valid(player):
 		_drive_pose()
 
@@ -3845,7 +3944,10 @@ func _process(delta: float) -> void:
 		# 값을 여기서 한 번 만들어 둘에 나눠 주므로 어긋날 자리가 없습니다.
 		for node in get_tree().get_nodes_in_group("props"):
 			var prop := node as Prop
-			if is_instance_valid(prop) and prop.wants_wall():
+			# **비칠 수 있는 것 전부**에 넘깁니다. `wants_wall()` 만 보던
+			# 때는 벽에 안 붙는 큰 붙박이(미끄럼틀·풀장)가 셰이더만 받고
+			# 값을 못 받아서, 걷어내는 규칙이 걸린 채로 영영 안 걷혔습니다.
+			if is_instance_valid(prop) and prop.is_fadeable():
 				prop.set_fade_focus(camera.global_position, focus, radius)
 	if _leak_probe:
 		# 순간값은 흔들립니다. **평균**을 냅니다.

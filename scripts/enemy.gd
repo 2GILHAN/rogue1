@@ -500,6 +500,13 @@ func _bar_material(color: Color) -> StandardMaterial3D:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	# **빌보드가 `scale` 을 버립니다.**
+	#
+	# 빌보드는 모델 행렬의 회전을 카메라 것으로 바꿔치는데, `keep_scale` 이
+	# 꺼져 있으면 그때 **크기까지 같이 지웁니다.** 그래서 체력이 줄어도
+	# `_bar_fill.scale.x` 가 화면에 안 나타나고, 색만 바뀌었습니다 - 바가
+	# 있는데 줄지 않으니 무엇을 보라는 표시인지 알 수 없습니다.
+	mat.billboard_keep_scale = true
 	mat.no_depth_test = true
 	mat.render_priority = 2
 	return mat
