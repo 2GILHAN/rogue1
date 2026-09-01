@@ -28,8 +28,27 @@ from img2model import animate            # noqa: E402
 from glb import read, write              # noqa: E402
 from merge_anims import graft            # noqa: E402
 
-MODELS = ROOT / "assets" / "models"
-SRC = MODELS / "_src"
+# **게임에 들어가는 것과 재료를 가릅니다.**
+#
+# 폴더를 정리하면서(v0.33) `assets/models` 가 `assets/characters` 가 되고,
+# 조각 클립은 `art_src/src` 로 나갔습니다. 여기 경로가 그때 안 따라와서
+# 이 도구가 조용히 끊겨 있었습니다 - 없는 폴더를 보고 있었습니다.
+MODELS = ROOT / "assets" / "characters"
+SRC = ROOT / "art_src" / "src"
+
+# **파일 이름은 하는 일에서 옵니다.** 사람 이름(seojin)과 색 이름(black)을
+# 걷어내면서(v0.33) 게임 쪽 파일이 바뀌었습니다. 여기 왼쪽은 `test3` 가 내는
+# 이름(blend·클립)이고, 오른쪽이 게임이 읽는 이름입니다.
+GAME_NAME = {
+    "dowon_b": "hero",
+    "seojin": "foe_charger",
+    "black": "foe_thrower",
+    "baby": "foe_blocker",
+    "girl": "foe_shouter",
+    "boy": "foe_clinger",
+    "teacher": "boss_teacher",
+    "witch": "npc_trader",
+}
 
 # 키 1.25m 의 아이들입니다. 다리가 짧아 성인 기준(24도)으로 흔들면 종종거려
 # 보이므로 넓게 잡습니다.
@@ -310,7 +329,7 @@ def main() -> int:
         for extra in wanted[1:]:
             sjs, sbn = read(SRC / f"{name}_{extra}.glb")
             bn, _ = graft(js, bn, sjs, sbn)
-        target = MODELS / f"{name}.glb"
+        target = MODELS / f"{GAME_NAME.get(name, name)}.glb"
         size = write(target, js, bn)
         # 골반을 올립니다. **여기서 부르지 않으면 다시 구울 때마다 원래의
         # 낮은 골반으로 되돌아갑니다** - 손으로 한 번 고치고 잊으면 다음

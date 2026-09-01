@@ -20,6 +20,52 @@ test3 리깅(.blend)          사람 형태의 본 + 스킨. 본 이름은 믹�
         ▼
 굽기 직전 보정               fix_knees → scale_motion → press_arms  (순서 중요)
         │
+## 스컬핑·페인팅을 다듬으려면 — 어느 파일인가
+
+| 하려는 것 | 고치는 파일 | 그다음 |
+|---|---|---|
+| **모양(스컬핑)** | `C:\_project	est3\out\<원본이름>.blend` | `python tools/make_kids.py --only <원본이름> --force` |
+| **색(페인팅) — 빠르게** | `assets/characters/<게임이름>_texture.png` | 저장하면 끝. Godot 이 알아서 다시 들여옵니다 |
+| **색(페인팅) — 오래 가게** | blend 안의 텍스처 | 위와 같이 다시 굽기 |
+| **걷는 자세** | `tools/make_kids.py` 의 `KIDS` 표 | 다시 굽고 **보폭을 다시 재기**(아래 「재는 법」) |
+
+**이름이 두 벌입니다.** 왼쪽이 `test3` 가 내는 이름, 오른쪽이 게임이 읽는
+이름입니다(`make_kids.py` 의 `GAME_NAME`).
+
+| test3 | 게임 |
+|---|---|
+| `dowon_b` | `hero` |
+| `seojin` | `foe_charger` |
+| `black` | `foe_thrower` |
+| `baby` | `foe_blocker` |
+| `girl` | `foe_shouter` |
+| `boy` | `foe_clinger` |
+| `teacher` | `boss_teacher` |
+| `witch` | `npc_trader` |
+
+### 텍스처를 직접 칠할 때의 함정
+
+`assets/characters/*_texture.png` 는 **Godot 이 GLB 에서 뽑아낸 것**입니다
+(`gltf/embedded_image_handling=1`). 그림은 GLB 안에 들어 있고, 옆의 png 는
+그 사본입니다.
+
+- **칠하면 곧바로 게임에 반영됩니다.** 재질이 이 png 를 봅니다.
+- **다시 구우면 지워집니다.** GLB 를 새로 만들면 png 도 다시 뽑히기 때문입니다.
+
+그래서 빠르게 보고 고칠 때는 png 를 직접 칠하고, **남길 것은 blend 로
+돌려놓아야** 합니다.
+
+### 굽고 나면 규격을 확인합니다
+
+새로 구운 캐릭터의 텍스처가 폰 규격에서 빠지기 쉽습니다(실제로 물물교환 아이
+하나가 2048 무압축으로 남아 VRAM 을 16MB 먹고 있었습니다).
+
+```bash
+grep -h "size_limit\|compress/mode" assets/characters/*_texture.png.import | sort | uniq -c
+```
+
+같은 줄이 여덟 벌 나와야 맞습니다.
+
         ▼
 Blender 로 키프레임 굽기     walk_worker.py → art_src/src/<이름>_<동작>.glb
         │
