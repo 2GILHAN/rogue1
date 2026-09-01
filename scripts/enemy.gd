@@ -65,21 +65,32 @@ const KINDS := {
 		"attack": "charge", "charge_dist": 5.0, "charge_speed": 8.0,
 		"knock": 11.0,
 	},
-	# 큰 아이는 **소품을 집어 던집니다.**
+	# 큰 아이는 **쫓아오는 돌진**입니다.
 	#
-	# 예전에는 서진과 똑같은 박치기였습니다(크기와 수치만 달랐습니다). 종류가
-	# 넷인데 행동은 셋뿐이었던 셈입니다. 주인공이 쓰는 기술을 적도 쓰면
-	# 규칙이 하나로 읽히고, 방에 흩어 둔 소품이 **양쪽 모두의 자원**이 됩니다 -
-	# 내가 안 쓰면 저쪽이 씁니다.
+	# 소품을 집어 던지던 기술이었는데, 던질 소품을 배치에서 뺀 뒤로는 던질
+	# 것이 없어서 주우러 걸어 다니기만 했습니다 - 기술이 남아 있는데 아무
+	# 일도 안 일어나는 상태였습니다.
 	#
-	# 소품이 없으면 주우러 갑니다. 그 걸어가는 시간이 곧 예고입니다.
+	# 서진과 같은 돌진이지만 **길이 굳지 않습니다.** 서진은 예고에서 방향을
+	# 못 박고 그대로 달리므로 옆으로 반 발만 빠지면 지나갑니다. 큰 아이는
+	# **닿기 0.5초 전까지 길을 고쳐 가며** 따라옵니다 - 일찍 피하면 따라오고,
+	# 끝까지 붙어 있다가 마지막 0.5초에 빠져야 지나갑니다. 같은 돌진인데
+	# 피하는 **시점**이 달라서 둘이 서로 다른 문제가 됩니다.
+	#
+	# 느리고(6.4) 길게(9.0m = 1.41초) 달립니다. 빠르면 마지막 0.5초가 너무
+	# 짧아 반응이 아니라 운이 됩니다.
 	"brute": {
 		"model": Models.SEOJIN,
 		"heavy": true,
 		"hp": 120.0, "damage": 16.0, "speed": 1.30, "scale": 1.45,
 		"range": 7.5, "windup": 0.75, "cooldown": 2.8, "gold": 20,
 		"aggro": 15.0,
-		"attack": "toss", "fetch": 13.0,
+		"attack": "charge", "charge_dist": 9.0, "charge_speed": 6.4,
+		# 닿기 이만큼 전에 길이 굳습니다(초). 0 이면 서진처럼 처음부터 굳습니다.
+		"charge_track": 0.5,
+		# 길을 고치는 빠르기(도/초). 즉시 꺾이면 피할 방법이 없고, 너무
+		# 느리면 따라오는 것으로 안 읽힙니다.
+		"charge_turn": 150.0,
 	},
 	"spitter": {
 		# 원거리 적만 다른 메시를 씁니다. 크기와 색조로도 구분되지만, 가장
@@ -105,7 +116,14 @@ const KINDS := {
 	# 것이 이 적의 위협입니다.
 	"screamer": {
 		"model": Models.GIRL,
-		"hp": 34.0, "damage": 7.0, "speed": 1.60, "scale": 0.95,
+		# **주인공보다 약간 작습니다**(발~머리뼈 0.87 대 0.924, 6% 아래).
+		#
+		# 배율을 층에 안 맡깁니다(`base_scale` = `scale`). 다른 종류는 1층에
+		# 1.0 으로 서서 층이 깊어지며 제 크기가 드러나는데, 이 아이는 그러면
+		# **1층에서 주인공보다 큽니다** - GIRL 모델이 정규화 뒤에도 0.954 라
+		# 주인공(0.924)을 넘습니다.
+		"hp": 34.0, "damage": 7.0, "speed": 1.60,
+		"scale": 0.91, "base_scale": 0.91,
 		"range": 2.6, "windup": 0.55, "cooldown": 2.2, "gold": 10,
 		"aggro": 18.0,
 		"attack": "shout", "arc": 56.0, "knock": 9.0,
@@ -124,7 +142,10 @@ const KINDS := {
 	# 아무것도 못 하는 시간이 계속 이어집니다.
 	"clinger": {
 		"model": Models.BOY,
-		"hp": 40.0, "damage": 4.0, "speed": 2.05, "scale": 0.85,
+		# 고함 아기와 **같은 크기**입니다(주인공보다 6% 아래). 같은 이유로
+		# 층에 안 맡깁니다 - BOY 모델도 정규화 뒤 0.954 입니다.
+		"hp": 40.0, "damage": 4.0, "speed": 2.05,
+		"scale": 0.91, "base_scale": 0.91,
 		"range": 1.4, "windup": 0.32, "cooldown": 2.4, "gold": 11,
 		"aggro": 19.0,
 		"attack": "cling", "bind": 1.5, "knock": 3.0,
@@ -407,13 +428,20 @@ func _body_scale(floor_num: int) -> float:
 	## 것이고, 어른이라는 정체성이라 줄이지 않습니다.
 	var f := float(floor_num - 1)
 	var kind_scale := float(stats.get("scale", 1.0))
+	# **1층에서의 크기.** 적지 않으면 1.0(주인공과 같게)입니다.
+	#
+	# 두 아기(고함·붙잡기)만 여기에 값을 답니다. 1.0 으로 두면 1층에서
+	# **주인공보다 큽니다** - GIRL/BOY 모델이 1.25m 로 정규화된 뒤에도
+	# 발~머리뼈가 0.954 라 주인공(0.924)을 넘습니다. 정규화는 머리 장식까지
+	# 세는 겉보기 기준이라, 몸의 크기와 늘 같지는 않습니다.
+	var base := float(stats.get("base_scale", 1.0))
 	# 종류 차이는 6층에서 온전히 드러납니다.
 	#
 	# **층이 오른다고 커지지는 않습니다.** 예전에는 층당 3%씩(8층까지 최대
 	# 24%) 키웠는데, 깊이 들어갈수록 같은 종류가 조금씩 부풀어 "이 아이가
 	# 원래 이만한가" 를 알 수 없게 됐습니다. 어려워지는 것은 체력·피해·수가
 	# 맡고, 크기는 **종류를 알아보는 표시**로만 씁니다.
-	return lerpf(1.0, kind_scale, clampf(f / 5.0, 0.0, 1.0))
+	return lerpf(base, kind_scale, clampf(f / 5.0, 0.0, 1.0))
 
 
 func _build_bar(y: float) -> void:
@@ -748,6 +776,10 @@ func _physics_process(delta: float) -> void:
 		_tick_windup(delta, to_target, dist)
 	elif _charge > 0.0:
 		_charge -= delta
+		# **큰 아이는 달리면서도 길을 고칩니다**(닿기 0.5초 전까지).
+		# 고치는 동안에는 바닥의 띠도 같이 돌아야 그림이 거짓말을 안 합니다.
+		if _track_charge_dir(delta):
+			_aim_charge_lane()
 		# 달리는 동안에도 같은 방향을 봅니다. 부딪히거나 벽에 밀려 몸이
 		# 돌아가면, 가는 쪽과 보는 쪽이 다시 어긋납니다.
 		_face(_charge_dir, delta, TURN_SPEED * 3.0)
@@ -1097,6 +1129,12 @@ func _tick_windup(delta: float, to_target: Vector3, dist: float) -> void:
 		#
 		# 예고(0.62초) 안에 다 돌도록 평소보다 빠르게 돌립니다. 이건 거짓말이
 		# 아닙니다 - 돌아가는 쪽이 곧 달려올 쪽입니다.
+		#
+		# **큰 아이는 예고 중에도 길을 고칩니다**(`charge_track`). 예고에서만
+		# 굳히고 달릴 때 따라오면, 그려 놓은 띠가 곧바로 거짓말이 됩니다 -
+		# 고치는 동안에는 띠도 같이 돌아야 합니다.
+		if _track_charge_dir(delta):
+			_show_charge_lane()
 		_face(_charge_dir, delta, TURN_SPEED * 2.2)
 	_windup -= delta
 	if _windup > 0.0:
@@ -1181,6 +1219,50 @@ func charge_width() -> float:
 	return (mine + theirs + 0.12) * 2.0
 
 
+func _track_charge_dir(delta: float) -> bool:
+	## **닿기 `charge_track` 초 전까지 길을 고칩니다.** 고쳤으면 true.
+	##
+	## 서진(`charge_track` 없음)은 여기서 곧바로 false 라 예고에서 굳힌 방향
+	## 그대로 달립니다. 큰 아이만 따라옵니다.
+	##
+	## 왜 "남은 시간" 으로 끊는가: 거리로 끊으면 빠른 돌진일수록 굳는 순간이
+	## 이르게 와서, 같은 0.5초를 주려면 적마다 거리를 따로 적어야 합니다.
+	## 남은 시간으로 적으면 속도를 고쳐도 **피할 틈은 그대로**입니다.
+	var lead: float = float(stats.get("charge_track", 0.0))
+	if lead <= 0.0 or not is_instance_valid(target):
+		return false
+	var to: Vector3 = target.global_position - global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return false
+	# **다가가는 속도로 남은 시간을 셉니다.** 돌진 속도만 쓰면 주인공이
+	# 마주 달려올 때 실제로 닿는 시간이 더 짧아, 굳는 순간이 늦어집니다.
+	var rush: float = float(stats.get("charge_speed", 6.0))
+	if to.length() / maxf(rush, 0.01) <= lead:
+		return false
+	# 즉시 꺾지 않고 **돌리는 빠르기로** 따라갑니다. 순간이동하듯 꺾이면
+	# 피하는 일이 불가능해지고, 그림(길 띠)도 한 프레임에 홱 돌아갑니다.
+	var turn := deg_to_rad(float(stats.get("charge_turn", 150.0))) * delta
+	if _charge_dir.length_squared() < 0.0001:
+		_charge_dir = to.normalized()
+		return true
+	var want := to.normalized()
+	var ang := _charge_dir.signed_angle_to(want, Vector3.UP)
+	_charge_dir = _charge_dir.rotated(Vector3.UP, clampf(ang, -turn, turn)).normalized()
+	return true
+
+
+func _aim_charge_lane() -> void:
+	## 길 띠의 **방향만** 고칩니다.
+	##
+	## `_show_charge_lane` 을 다시 부르지 않는 이유: 그쪽은 번쩍임
+	## (`_lane_flash`)을 0 으로 되돌립니다. 달리는 중에 부르면 달리기 시작할
+	## 때의 새빨간 한 줄기가 첫 프레임에 지워집니다.
+	if _lane == null:
+		return
+	_lane.rotation.y = atan2(-_charge_dir.x, -_charge_dir.z)
+
+
 func _show_charge_lane() -> void:
 	## 돌진이 지나갈 길을 바닥에 칠합니다. **길이와 폭이 판정 그대로**입니다.
 	if _lane == null:
@@ -1206,9 +1288,19 @@ func _drive_charge_lane(delta: float) -> void:
 		return
 	if _lane_flash > 0.0:
 		_lane_flash -= delta
+	# **쫓아오는 돌진은 달리는 내내 길을 보여 줍니다.**
+	#
+	# 굳어 있는 돌진(서진)은 달리기 시작하는 순간 한 번 새빨개졌다 사라지면
+	# 됩니다 - 그 뒤로는 길이 안 바뀌니 몸이 곧 예고입니다. 큰 아이는 달리는
+	# 동안 길이 계속 돌아가므로, 띠를 끄면 **어디로 오는지 볼 방법이 사라집니다.**
+	if _charge > 0.0 and float(stats.get("charge_track", 0.0)) > 0.0 and not _dead:
+		_lane_mat.albedo_color = Color(1.0, 0.22, 0.14, 0.52)
+		_lane.visible = true
+		return
+	if _lane_flash > 0.0:
 		var k := clampf(_lane_flash / FAN_FLASH, 0.0, 1.0)
 		_lane_mat.albedo_color = Color(1.0, 0.14, 0.10, 0.58 * k)
-		_lane.visible = _lane_flash > 0.0
+		_lane.visible = true
 		return
 	if _windup >= 0.0 and stats.get("attack", "melee") == "charge" and not _dead:
 		var total := maxf(float(stats["windup"]), 0.001)

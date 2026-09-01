@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.28"
+const VERSION := "v0.29"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1843,6 +1843,89 @@ func _drive_pose() -> void:
 				print("[사거리] %.1fm %3d도 -> 걸림=%s" % [
 					2.4 if _probe_far else 1.4, int(float(idx2) * 20.0),
 					str(picked != null)])
+		"track":
+			# **큰 서진의 쫓아오는 돌진**을 잽니다.
+			#
+			# 적을 앞에 세우고 주인공을 옆으로 계속 걷게 합니다. 길(`_charge_dir`)이
+			# 주인공 쪽을 계속 따라오다가, **닿기 0.5초 전에 굳어야** 맞습니다.
+			# 굳은 뒤에는 주인공이 계속 옆으로 가므로 각이 벌어집니다.
+			if _frames == 12 and is_instance_valid(player):
+				player.bot_active = false
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("brute", 1, dungeon, player)
+				foe.global_position = player.global_position + Vector3(0, 0, -7.0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+				_alive += 1
+			# 옆으로 꾸준히 걷습니다. 가만히 서 있으면 따라오는지 안 오는지
+			# 구분이 안 됩니다.
+			if _frames > 20 and is_instance_valid(player):
+				player.bot_active = true
+				player.bot_move = Vector2(1, 0)
+			if _frames % 6 == 0 and _frames > 24 and is_instance_valid(_probe_foe):
+				var to: Vector3 = player.global_position - _probe_foe.global_position
+				to.y = 0.0
+				var rush: float = float(_probe_foe.stats.get("charge_speed", 6.0))
+				var lead := to.length() / maxf(rush, 0.01)
+				print("[따라옴] f=%d %s 남은 %.2f초 어긋난각 %.0f도 거리 %.1f" % [
+					_frames,
+					("예고" if _probe_foe._windup >= 0.0
+						else ("돌진" if _probe_foe._charge > 0.0 else "  ")),
+					lead,
+					rad_to_deg(absf(_probe_foe._charge_dir.signed_angle_to(
+						to.normalized(), Vector3.UP))) if to.length_squared() > 0.001 else 0.0,
+					to.length()])
+		"sizes":
+			# **적들의 실제 키**를 주인공과 나란히 잽니다.
+			#
+			# 적힌 배율(`Enemy.KINDS` 의 `scale`)과 화면에 그려지는 키는 다를 수
+			# 있습니다 - `Models.SIZE` 의 정규화 값이 GLB 접근자에서 온 것이면
+			# 노드 변환을 안 세기 때문입니다(교환 아이가 그래서 커 보였습니다).
+			#
+			# 겉보기(AABB)와 뼈(발~머리뼈)를 같이 찍습니다. AABB 는 모자·머리
+			# 장식까지 세고 자세를 타므로, 둘을 나란히 봐야 무엇이 큰지 압니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				var kinds := ["grunt", "brute", "screamer", "clinger", "spitter"]
+				for i in kinds.size():
+					var foe := Enemy.new()
+					world.add_child(foe)
+					# **지금 층으로** 세웁니다. 1 로 못 박아 두면 종류별
+					# 크기 차이(`_body_scale` 의 층 보간)가 영영 안 나옵니다 -
+					# 큰 아이가 안 커 보여서 한 번 속았습니다.
+					foe.setup(String(kinds[i]), state.floor_num, dungeon, player)
+					foe.speed = 0.0
+					foe.set_physics_process(false)
+					foe.global_position = player.global_position 						+ Vector3(2.0 + float(i) * 2.0, 0, 0)
+					foe.set_meta("probe_kind", String(kinds[i]))
+			if _frames == 40:
+				var rows: Array = [["주인공", player]]
+				for n in get_tree().get_nodes_in_group("enemies"):
+					if (n as Node).has_meta("probe_kind"):
+						rows.append([String((n as Node).get_meta("probe_kind")), n])
+				for row in rows:
+					var node := row[1] as Node3D
+					var lo := Vector3.INF
+					var hi := -Vector3.INF
+					var stack: Array = [node]
+					while not stack.is_empty():
+						var cur: Node = stack.pop_back()
+						if cur is Label3D:
+							continue
+						if cur is VisualInstance3D:
+							var ab: AABB = (cur as VisualInstance3D).global_transform 								* (cur as VisualInstance3D).get_aabb()
+							lo = lo.min(ab.position); hi = hi.max(ab.position + ab.size)
+						stack.append_array(cur.get_children())
+					var bone := -1.0
+					var sk: Skeleton3D = Models.find_skeleton(node)
+					if sk != null:
+						var hb := sk.find_bone("Head")
+						var fb := sk.find_bone("LeftFoot")
+						if hb >= 0 and fb >= 0:
+							bone = (sk.global_transform * sk.get_bone_global_pose(hb)).origin.y 								- (sk.global_transform * sk.get_bone_global_pose(fb)).origin.y
+					print("[크기] %-8s 겉보기 %.3f m   발~머리뼈 %.3f m" % [
+						row[0], hi.y - lo.y, bone])
 		"cleanup":
 			# **이번 정리가 실제로 도는지** 잽니다.
 			#
@@ -2001,122 +2084,6 @@ func _drive_pose() -> void:
 				player.shout_release()
 				print("[값] 두 번째로 지르는 데 %.2fms" % (
 					(Time.get_ticks_usec() - t2) / 1000.0))
-			if _frames == 130 and is_instance_valid(_probe_foe):
-				print("[모으기] 4.8m 앞의 적 체력 %.0f / %.0f  (맞음=%s)" % [
-					_probe_foe.hp, _probe_foe.max_hp,
-					str(_probe_foe.hp < _probe_foe.max_hp)])
-		"dodge":
-			# **굴러 피하기가 되는지** 잽니다.
-			#
-			# 적을 눈앞에 세워 두고 공격을 시켜, 예고 도중에 옆으로 비켜
-			# 섰을 때와 가만히 서 있을 때의 체력을 견줍니다. 예고 방향이
-			# 굳어 있으면 옆으로 반 발만 나가도 빗나가야 합니다.
-			if _frames == 10 and is_instance_valid(player):
-				var foe := Enemy.new()
-				world.add_child(foe)
-				foe.setup("grunt", 1, dungeon, player)
-				foe.global_position = player.global_position + Vector3(1.2, 0, 0)
-				_probe_foe = foe
-				debug_aim = Vector3(1, 0, 0)
-				state.hp = 500.0
-				state.max_hp = 500.0
-			if _frames > 20 and _frames % 2 == 0 and is_instance_valid(_probe_foe):
-				# 예고가 시작되면 **옆으로** 비켜섭니다(_side=dodge 일 때만).
-				if _probe_foe._windup > 0.0 and _probe_arg == "dodge" and not _dodged:
-					_dodged = true
-					_hp_at_windup = state.hp
-					player.global_position += Vector3(0, 0, 1.3)
-				elif _probe_foe._windup > 0.0 and _probe_arg != "dodge" and not _dodged:
-					_dodged = true
-					_hp_at_windup = state.hp
-			if _frames == 240:
-				print("[회피] %s  예고 때 %.0f -> 지금 %.0f  (맞음=%s)" % [
-					("옆으로 굴러 나감" if _probe_arg == "dodge" else "가만히 서 있음"),
-					_hp_at_windup, state.hp, str(state.hp < _hp_at_windup)])
-		"zombie":
-			# **밀어도 안 죽는 적**을 재현합니다.
-			#
-			# 체력을 1 로 깎아 두고 계속 밉니다. 규칙대로면 첫 밀기에서
-			# 밀려난 뒤 쓰러져야 합니다.
-			player.bot_active = true
-			player.bot_move = Vector2.ZERO
-			if _probe_foe == null and _frames > 12:
-				_probe_foe = Enemy.new()
-				world.add_child(_probe_foe)
-				_probe_foe.setup("grunt", 1, dungeon, player)
-				var fwd := -player.pivot.global_transform.basis.z
-				_probe_foe.global_position = player.global_position + fwd.normalized() * 1.3
-				_probe_foe.died.connect(_on_enemy_died)
-				Toon.refresh(_probe_foe)
-				_alive += 1
-			if is_instance_valid(_probe_foe):
-				var to: Vector3 = _probe_foe.global_position - player.global_position
-				to.y = 0.0
-				if to.length() > 0.05:
-					player.aim = to.normalized()
-				if _frames == 40:
-					_probe_foe.hp = 1.0
-				# 0.95초(대기)마다 한 번씩 밉니다.
-				if _frames >= 45 and (_frames - 45) % 58 == 0:
-					player.grab_press()
-				if _frames % 30 == 0 and _frames > 45:
-					print("[좀비] f=%d 체력=%.1f 죽음=%s 밀림=%.4f 휘청=%.2f 보류=%s" % [
-						_frames, _probe_foe.hp, str(_probe_foe._dead),
-						_probe_foe._knock, _probe_foe._stagger,
-						str(_probe_foe._die_when_landed)])
-			elif _frames % 30 == 0:
-				print("[좀비] f=%d 적이 죽어 사라졌습니다" % _frames)
-		"lane":
-			# **서진의 돌진 예고**를 보는 자리. 사거리 안에 세워 두면 알아서
-			# 겨누기 시작합니다.
-			if _frames == 10 and is_instance_valid(player):
-				player.bot_active = false
-				debug_aim = Vector3(0, 0, -1)
-				var foe := Enemy.new()
-				world.add_child(foe)
-				# **서진은 `grunt`** 입니다(brute 는 소품을 던지는 큰 아이).
-				foe.setup("grunt", 3, dungeon, player)
-				foe.global_position = player.global_position + Vector3(0, 0, -4.0)
-				foe.died.connect(_on_enemy_died)
-				_probe_foe = foe
-				_alive += 1
-			if _frames % 30 == 0 and _frames > 20 and is_instance_valid(_probe_foe):
-				print("[돌진선] f=%d 예고 %.2f 거리 %.1f 띠보임=%s 폭 %.2fm 길이 %.1fm" % [
-					_frames, _probe_foe._windup,
-					_probe_foe.global_position.distance_to(player.global_position),
-					str(_probe_foe._lane != null and _probe_foe._lane.visible),
-					_probe_foe.charge_width(),
-					float(_probe_foe.stats["charge_dist"])])
-		"charge":
-			# **고함을 모으는 것**을 잽니다. 살짝 눌렀다 뗀 것과 끝까지
-			# 누른 것의 부채꼴이 실제로 다른지 봅니다.
-			if _frames == 20 and is_instance_valid(player):
-				debug_aim = Vector3(1, 0, 0)
-				var foe := Enemy.new()
-				world.add_child(foe)
-				foe.setup("grunt", 1, dungeon, player)
-				# **최소 사거리 밖, 최대 사거리 안**에 세웁니다(3.7 < 4.8 < 5.7).
-				foe.global_position = player.global_position + Vector3(4.8, 0, 0)
-				_probe_foe = foe
-				state.skill_lv["shout"] = 3
-				state._recompute()
-			if _frames == 30:
-				player.shout_press()
-			if _frames in [34, 50, 70] and is_instance_valid(player):
-				player.bot_active = true
-				player.bot_move = Vector2(1, 0)
-			if _frames in [36, 52, 72]:
-				print("[모으는중] f=%d 모은 %.2f 속도 %.2f (평소 %.2f) 팔뒤=%.2f" % [
-					_frames, player._shout_charge,
-					Vector2(player.velocity.x, player.velocity.z).length(),
-					state.move_speed, player._pose.weight])
-			if _frames == 30 + (3 if _probe_arg == "tap" else (52 if _probe_arg == "sync" else 62)):
-				var before := state.breath
-				player.shout_release()
-				print("[모으기] %s  모은 %.2f  사거리 %.2f  각도 %.0f도  숨 %.0f -> %.0f" % [
-					("살짝 눌렀다 뗌" if _probe_arg == "tap" else "끝까지 누름"),
-					player._shout_fired, player.shout_reach(player._shout_fired),
-					player.shout_arc(player._shout_fired), before, state.breath])
 			if _frames == 130 and is_instance_valid(_probe_foe):
 				print("[모으기] 4.8m 앞의 적 체력 %.0f / %.0f  (맞음=%s)" % [
 					_probe_foe.hp, _probe_foe.max_hp,
@@ -2656,25 +2623,6 @@ func _drive_pose() -> void:
 					"앞" if _frames <= 200 else "뒤", state.hp,
 					_ram_foe.hp if is_instance_valid(_ram_foe) else -1.0,
 					str(player._held != null)])
-		"dodge":
-			# 구르기 통과 확인용. 적 AI 를 기다리지 않고 **탄을 직접** 쏩니다 -
-			# 바뀐 것은 탄이 사람을 만났을 때의 처리뿐이라, 누가 쐈는지는
-			# 상관이 없습니다.
-			player.bot_active = true
-			player.bot_move = Vector2.ZERO
-			# 앞 240프레임은 서서 맞고(명중), 그 뒤에는 계속 굴러 무적을
-			# 유지합니다(통과). 한 번에 두 경우를 다 봅니다.
-			if _frames > 240:
-				state.dash_cooldown = 0.05
-				player.dash()
-			if _frames % 40 == 20:
-				var shot := Projectile.new()
-				world.add_child(shot)
-				var from: Vector3 = player.global_position + Vector3(2.6, 0.8, 0)
-				shot.launch(from, Vector3(-1, 0, 0), 8.0, dungeon)
-			if _frames % 80 == 0:
-				print("[검사] f=%d 체력 %.0f 무적=%s" % [
-					_frames, state.hp, str(player.is_invulnerable())])
 		"shelfread":
 			# 책장 읽기 확인용. 읽고 **곧바로** 스킬을 골라서, 그 뒤에 층이
 			# 새로 지어지지 않는지 봅니다(일시정지 중에는 이 함수가 안 돌아서
