@@ -195,16 +195,64 @@ static func path_for(prop_kind: String) -> String:
 	return "res://assets/props/%s.glb" % prop_kind
 
 
+## 한 번 읽은 장면을 **붙잡아 둡니다.**
+##
+## 층을 넘길 때 소품을 전부 지웁니다(`build_floor`). 그러면 그 `PackedScene`
+## 을 아무도 안 들고 있게 되어 Godot 이 캐시에서 버리고, **다음 층에서 디스크를
+## 다시 읽습니다.** 재 보니 소품 값의 거의 전부가 그 읽기였습니다:
+##
+##     소품 18개  불러오기 28.4ms(첫 층) / 9.9~13.4ms(그 뒤)
+##                심기 0.2ms   비침재질 0.3ms
+##
+## 여기서 들고 있으면 읽기는 **판당 한 번**이 됩니다.
+static var _scenes: Dictionary = {}
+
+
+static func scene_for(prop_kind: String) -> PackedScene:
+	var got: PackedScene = _scenes.get(prop_kind)
+	if got != null:
+		return got
+	var loaded := load(path_for(prop_kind)) as PackedScene
+	if loaded != null:
+		_scenes[prop_kind] = loaded
+	return loaded
+
+
+static func warm_all() -> void:
+	## **미리 다 읽어 둡니다.** 제목 화면에서 부릅니다 - 첫 층을 만들 때
+	## 28ms 를 치르는 대신, 아무도 안 보는 사이에 치릅니다.
+	for k in KINDS.keys():
+		scene_for(String(k))
+
+
+## 소품 하나를 세우는 데 드는 시간을 마디마디 모읍니다(--floortime).
+static var time_setup := false
+static var t_load := 0
+static var t_inst := 0
+static var t_fade := 0
+static var t_rest := 0
+static var n_setup := 0
+
+
 func setup(prop_kind: String) -> void:
+	var _t0 := Time.get_ticks_usec()
+	if Prop.time_setup:
+		Prop.n_setup += 1
 	kind = prop_kind
 	stats = KINDS.get(kind, KINDS["daycare_toybox"])
 
-	var packed: PackedScene = load(path_for(kind))
+	var packed: PackedScene = scene_for(kind)
 	if packed == null:
 		push_error("소품을 불러오지 못했습니다: %s" % kind)
 		return
+	if Prop.time_setup:
+		Prop.t_load += Time.get_ticks_usec() - _t0
+		_t0 = Time.get_ticks_usec()
 	_mesh_root = packed.instantiate()
 	add_child(_mesh_root)
+	if Prop.time_setup:
+		Prop.t_inst += Time.get_ticks_usec() - _t0
+		_t0 = Time.get_ticks_usec()
 
 	# 납작한 소품은 눕힙니다.
 	#
@@ -241,6 +289,9 @@ func setup(prop_kind: String) -> void:
 	if wants_wall() or (is_fixed()
 			and _bounds().y * float(stats.get("scale", 1.0)) >= 1.0):
 		_make_fadeable(_mesh_root)
+	if Prop.time_setup:
+		Prop.t_fade += Time.get_ticks_usec() - _t0
+		_t0 = Time.get_ticks_usec()
 
 	var size_mult := float(stats.get("scale", 1.0))
 	if size_mult != 1.0:
@@ -320,7 +371,6 @@ var _puff_from := 0.12
 ## 조각이 하나 올라가는 간격과, "맛있는 냄새" 가 뜨는 간격(초).
 const PUFF_GAP := 0.34
 const SMELL_GAP := 5.0
-
 
 func _add_lure() -> void:
 	## 회복 아이템은 **찾아가는 것**이라 멀리서 보여야 합니다. 바닥에 굴러

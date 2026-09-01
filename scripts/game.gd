@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.43"
+const VERSION := "v0.44"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -249,6 +249,10 @@ var _wedge_from := Vector3.ZERO
 var _probe_t0 := 0.0
 ## --pose=death 에서 마지막으로 죽인 프레임.
 var _death_at := 0
+## 층을 만드는 시간을 마디마디 찍을까(--floortime).
+var _floor_time := false
+var _lap_names: PackedStringArray = PackedStringArray()
+var _lap_us: PackedInt64Array = PackedInt64Array()
 var _probe_foe: Enemy = null
 var _probe_hp := 0.0
 ## --push-lv=N 으로 밀기 계통을 미리 올려 둡니다(비교용).
@@ -375,6 +379,12 @@ func _ready() -> void:
 		rng.seed = _seed
 	else:
 		rng.randomize()
+	# **제목 화면에서 미리 다 읽어 둡니다.**
+	#
+	# 층을 만들 때 읽으면 그 프레임이 통째로 멈춥니다(첫 층 소품 28ms).
+	# 아무도 안 보는 사이에 치르는 편이 낫습니다.
+	Prop.warm_all()
+	Models.warm_all()
 	phase = Phase.TITLE
 	_dev_menu = false
 	get_tree().paused = true
@@ -412,6 +422,8 @@ func _read_args() -> void:
 		elif a == "--lean":
 			# 폰과 같은 설정(글로우·그림자 없음)을 데스크톱에서 재려고 씁니다.
 			_force_lean = true
+		elif a == "--floortime":
+			_floor_time = true
 		elif a == "--leak":
 			_leak_probe = true
 		elif a.begins_with("--side="):
@@ -783,12 +795,26 @@ func _drive_test_spawns(delta: float) -> void:
 
 
 func build_floor() -> void:
+	# **마디마디 잽니다.** `--floortime` 으로 켭니다 - 층을 만드는 한 프레임이
+	# 데스크톱에서도 86ms 였고, 그 안에서 무엇이 값을 치르는지 봐야 합니다.
+	#
+	# 시각을 **배열에 모았다가** 끝에서 차를 냅니다. 람다 안에서 바깥 변수를
+	# 고치려다 한 번 속았습니다 - GDScript 의 람다는 지역 변수를 **값으로**
+	# 잡아서, 안에서 시계를 되돌려도 바깥은 그대로입니다. 그래서 마디마다의
+	# 값이 아니라 **처음부터의 누적**이 찍혔습니다.
+	_lap_names.clear()
+	_lap_us.clear()
+	_lap_us.append(Time.get_ticks_usec())
+	var _lap := func(name: String) -> void:
+		_lap_names.append(name)
+		_lap_us.append(Time.get_ticks_usec())
 	for c in world.get_children():
 		world.remove_child(c)
 		c.queue_free()
 	portal = null
 	shop = null
 	_alive = 0
+	_lap.call("옛 것 비우기")
 
 	dungeon = Dungeon.new()
 	dungeon.name = "Dungeon"
@@ -797,6 +823,7 @@ func build_floor() -> void:
 		dungeon.generate_test_room(rng)
 	else:
 		dungeon.generate(state.floor_num, rng)
+	_lap.call("던전 만들기")
 
 	player = Player.new()
 	player.name = "Player"
@@ -817,6 +844,7 @@ func build_floor() -> void:
 	player.mouse_aim = not (ui.touch != null and DisplayServer.is_touchscreen_available())
 	player.global_position = dungeon.room_center(0)
 	player.died.connect(_on_player_died)
+	_lap.call("주인공")
 	player.read_done.connect(_on_read_done)
 
 	cam_rig.global_position = player.global_position
@@ -883,9 +911,23 @@ func build_floor() -> void:
 		world.add_child(shop)
 		shop.stand_in(_waterpark)
 
+	_lap.call("방·상점")
 	_spawn_enemies(exit_room, shop_room)
+	_lap.call("적")
 	_place_boss(exit_room)
+	_lap.call("관문")
+	Prop.time_setup = _floor_time
+	Prop.t_load = 0
+	Prop.t_inst = 0
+	Prop.t_fade = 0
+	Prop.t_rest = 0
+	Prop.n_setup = 0
 	_scatter_props()
+	_lap.call("소품")
+	if _floor_time:
+		print("       └ 소품 %d개: 불러오기 %.1f 심기 %.1f 비침재질 %.1f 나머지 %.1f ms" % [
+			Prop.n_setup, Prop.t_load / 1000.0, Prop.t_inst / 1000.0,
+			Prop.t_fade / 1000.0, Prop.t_rest / 1000.0])
 	# 방이 하나뿐인 층이 나오면 적을 놓을 곳이 없습니다. 그때 문이 잠긴 채로
 	# 남으면 나갈 방법이 사라지므로, 처음부터 비어 있으면 열어 둡니다.
 	if _alive == 0:
@@ -904,6 +946,13 @@ func build_floor() -> void:
 	ui.set_color_grade(_grade_on)
 	ui.set_grade_label(_grade_on)
 	Toon.refresh(world)   # 켜져 있을 때만 다시 겁니다(toon.gd)
+	_lap.call("카툰·마무리")
+	if _floor_time:
+		print("  [층] %s층 - 모두 %.1fms" % [state.floor_num,
+			(_lap_us[_lap_us.size() - 1] - _lap_us[0]) / 1000.0])
+		for i in _lap_names.size():
+			print("       %-12s %6.1fms" % [_lap_names[i],
+				(_lap_us[i + 1] - _lap_us[i]) / 1000.0])
 	Fx.warm_up(world)
 	ui.set_hud_visible(true)
 	phase = Phase.PLAYING

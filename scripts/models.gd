@@ -92,13 +92,35 @@ static func size_of(path: String) -> Dictionary:
 	return {"height": 1.5, "radius": 0.4}
 
 
+## 한 번 읽은 캐릭터 장면을 **붙잡아 둡니다.** 소품과 같은 사정입니다 -
+## 층을 넘기며 적을 다 지우면 캐시에서 빠지고, 다음 층에서 다시 읽습니다.
+static var _scenes: Dictionary = {}
+
+
+static func scene_for(path: String) -> PackedScene:
+	var got: PackedScene = _scenes.get(path)
+	if got != null:
+		return got
+	var loaded := load(path) as PackedScene
+	if loaded != null:
+		_scenes[path] = loaded
+	return loaded
+
+
+static func warm_all() -> void:
+	## 게임이 쓰는 캐릭터를 미리 다 읽어 둡니다.
+	for p in [HERO, FOE_CHARGER, FOE_THROWER, FOE_BLOCKER, FOE_SHOUTER,
+			FOE_CLINGER, BOSS_TEACHER, SHOPKEEPER]:
+		scene_for(String(p))
+
+
 static func spawn(path: String, scale_mult: float = 1.0) -> Node3D:
 	## SIZE 에 scale 이 적혀 있으면 함께 곱합니다. 원본 크기가 제각각인 모델을
 	## 게임 안에서 같은 키로 세우기 위한 것이고, 부르는 쪽은 몰라도 됩니다.
 	scale_mult *= float(size_of(path).get("scale", 1.0))
 	var holder := Node3D.new()
 	holder.name = "Model"
-	var packed: PackedScene = load(path)
+	var packed: PackedScene = scene_for(path)
 	if packed == null:
 		push_error("모델을 불러오지 못했습니다: %s" % path)
 		return holder
