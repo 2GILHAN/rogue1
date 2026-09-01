@@ -417,6 +417,31 @@ pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame)
 허용 범위: 발/몸 비율 **0.95 ~ 1.05**. 그 밖이면 상수가 틀렸거나 재는 기준
 좌표계가 틀린 것입니다(적은 `_pivot` 기준).
 
+### 화면이 정말 나빠졌는지 — 두 장을 빼서 봅니다
+
+메시나 텍스처를 줄일 때 "눈으로 보니 괜찮다"는 못 믿습니다. **씨앗을 고정하고
+같은 프레임을 찍어서 픽셀을 뺍니다.**
+
+```bash
+G=".../Godot_v4.7.1-stable_win64_console.exe"
+for n in before after; do
+  "$G" --path . --resolution 1080x1080 --rendering-method gl_compatibility --     --test --seed=7 --pose=sizes --shot=out/$n.png --shot-frame=45 --quit-after=60
+done   # (사이에 에셋을 바꾸고 --headless --import)
+```
+
+```python
+d = np.abs(np.asarray(A).astype(int) - np.asarray(B).astype(int)).max(axis=2)
+print((d > 8).sum() / d.size * 100)      # 다른 픽셀 %
+```
+
+**`--seed=` 를 빼먹으면 안 됩니다.** 던전이 매번 달라져서 바닥값이 59% 로
+나옵니다(실제로 한 번 그렇게 재고 76% 를 "차이"로 볼 뻔했습니다). 씨앗을 박으면
+**바닥값이 0.008%** 입니다 - 그보다 크면 진짜 차이입니다.
+
+숫자만 보지 말고 **잘라서 확대해 나란히** 놓습니다. 애니메이션 위상이 조금씩
+어긋나서 % 는 부풀 수 있지만, 눈으로 보면 실루엣이 뭉갰는지 텍스처가 흐려졌는지
+바로 압니다.
+
 ---
 
 ## 알려진 한계

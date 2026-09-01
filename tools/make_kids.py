@@ -277,11 +277,10 @@ def press_arms(motion, degrees: float, elbow: float) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--decimate", type=float, default=1.0,
-                    help="굽고 나서 삼각형을 이 비율로 줄입니다. **기본은 "
-                         "1.0(안 줄임)** 입니다 - 줄이면 Godot 이 LOD 를 못 "
-                         "만들어 주어 오히려 프레임이 나빠집니다(적 일곱에서 "
-                         "26천 -> 97천). tools/decimate.py 의 설명 참고.")
+    ap.add_argument("--decimate", type=float, default=0.10,
+                    help="굽고 나서 삼각형을 이 비율로 줄입니다(0.10 = 2만 -> "
+                         "2천). 1.0 이면 안 줄입니다. 0.10 과 0.30 사이는 "
+                         "오히려 나쁩니다 - 이유는 tools/decimate.py 머리말에.")
     ap.add_argument("--only", nargs="*", default=[])
     ap.add_argument("--arms", type=float, default=38.0,
                     help="어깨를 몸 쪽으로 접는 각도(도). 55 까지 가면 팔이 "
