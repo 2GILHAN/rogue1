@@ -5,7 +5,7 @@ config_version=5
 
 [application]
 
-config/name="Emberling"
+config/name="TOTO-FightClub"
 config/description="test3 카탈로그 에셋으로 만든 3D 액션 로그라이크"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")

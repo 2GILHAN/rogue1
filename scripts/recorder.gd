@@ -238,7 +238,7 @@ function doShare(){
   try { f = new File([st.blob], fileName(), {type: st.blob.type}); } catch (e) { f = null; }
   if (f && navigator.share && navigator.canShare && navigator.canShare({files:[f]})) {
     try {
-      navigator.share({files:[f], title:'Emberling'}).then(function(){}, function(){});
+      navigator.share({files:[f], title:'TOTO-FightClub'}).then(function(){}, function(){});
       return;
     } catch (e) {}
   }

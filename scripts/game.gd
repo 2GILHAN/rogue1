@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.30"
+const VERSION := "v0.31"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -101,6 +101,9 @@ static var instance: Game
 var state: RunState
 var rng := RandomNumberGenerator.new()
 var phase: Phase = Phase.TITLE
+## 제목 화면에서 **개발자 옵션**이 열려 있는가. 키가 거기서 갈립니다 -
+## 겉 화면에서는 Esc 가 종료이고, 안에서는 뒤로입니다.
+var _dev_menu := false
 
 var world: Node3D
 var dungeon: Dungeon
@@ -119,6 +122,8 @@ var _hp_at_windup := 0.0
 ## 물에 잠기지도, 따로 떨어져 보이지도 않는 자리입니다.
 ## 적 한 마리에 필요한 방 칸 수. 방이 줄면 적도 이 값으로 같이 줄어듭니다.
 const FOE_ROOM_TILES := 26
+## **방마다 최소 몇 마리.** 한 마리뿐인 방은 한 번 밀고 지나가는 통로입니다.
+const MIN_PER_ROOM := 2
 ## 테스트 방에서 풀장을 놓는 자리(방 한가운데에서 몇 m 떨어져서).
 ##
 ## 방이 22칸(33m)이라 9m 면 한가운데에서 넉넉히 벗어나면서도 벽에 안 붙습니다 -
@@ -322,6 +327,8 @@ func _ready() -> void:
 	ui.test_reset_requested.connect(start_test)
 	ui.test_tiger_toggled.connect(_on_test_tiger)
 	ui.quit_pressed.connect(_on_quit)
+	ui.devmenu_requested.connect(_open_devmenu)
+	ui.title_requested.connect(_back_to_title)
 	ui.riglab_requested.connect(open_riglab)
 	ui.cam_mode_toggled.connect(toggle_cam_mode)
 	ui.cam_pitch_nudged.connect(nudge_cam_pitch)
@@ -336,6 +343,7 @@ func _ready() -> void:
 	else:
 		rng.randomize()
 	phase = Phase.TITLE
+	_dev_menu = false
 	get_tree().paused = true
 	ui.show_title()
 	if _auto_start:
@@ -888,10 +896,19 @@ func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 		return
 
 	var pool := _kind_pool()
+	# **방마다 최소 두 마리.**
+	#
+	# 한 마리만 있는 방은 들어가서 한 번 밀고 나오는 통로가 됩니다 - 무엇을
+	# 쓸지 고를 일이 없어서, 스킬을 여섯으로 나눠 놓은 것이 그 방에서는
+	# 아무 뜻도 없습니다. 둘이면 **누구를 먼저 처리할지**가 생깁니다.
+	#
+	# 층 예산(`budget`)이 방 수에 못 미치면 예산 쪽을 올립니다. 방마다 두
+	# 마리를 보장하는 것이 먼저이고, 예산은 "그 위에 얼마나 더" 입니다.
+	budget = maxi(budget, MIN_PER_ROOM * rooms_available.size())
 	var per_room := maxi(1, int(ceil(float(budget) / float(rooms_available.size()))))
 	var placed := 0
 	for room in rooms_available:
-		var n := mini(per_room, budget - placed)
+		var n := maxi(MIN_PER_ROOM, mini(per_room, budget - placed))
 		# 출구 방은 마지막 관문이라 조금 더 둡니다.
 		if room == exit_room:
 			n += 1
@@ -902,7 +919,11 @@ func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 		# 예전 수가 그대로 들어가 서로 겹쳐 섭니다.
 		#
 		# 한 마리에 FOE_ROOM_TILES 칸. 지금 방(30~72칸)이면 1~3마리입니다.
-		n = mini(n, maxi(1, _room_tiles(room) / FOE_ROOM_TILES))
+		#
+		# **최소 두 마리는 이 상한보다 셉니다.** 상한은 "좁은 방에 예전 수가
+		# 그대로 들어가 겹쳐 서는 것" 을 막으려는 것인데, 둘은 가장 작은 방
+		# (30칸, 9×5m)에도 넉넉히 들어갑니다.
+		n = maxi(MIN_PER_ROOM, mini(n, maxi(1, _room_tiles(room) / FOE_ROOM_TILES)))
 		for _i in range(n):
 			var kind: String = pool[rng.randi_range(0, pool.size() - 1)]
 			var e := Enemy.new()
@@ -1336,9 +1357,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("toon"):
 		# 제목 화면에서는 **테스트 방**입니다. 아직 그릴 세계가 없어서
-		# 카툰을 켜고 끌 것도 없습니다.
+		# 카툰을 켜고 끌 것도 없습니다. 다만 **개발자 옵션 안에서만** -
+		# 첫 화면에서 눌러 실험실로 떨어지면 무슨 일이 난 것인지 모릅니다.
 		if phase == Phase.TITLE:
-			start_test()
+			if _dev_menu:
+				start_test()
 		else:
 			toggle_toon()
 		return
@@ -1357,9 +1380,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 			close_riglab()
 		return
-	if event is InputEventKey and event.pressed and event.keycode == KEY_R 			and phase == Phase.TITLE:
-		open_riglab()
-		return
+	if event is InputEventKey and event.pressed and phase == Phase.TITLE:
+		if event.keycode == KEY_R and _dev_menu:
+			open_riglab()
+			return
+		if event.keycode == KEY_D and not _dev_menu:
+			_open_devmenu()
+			return
+		if event.keycode == KEY_ESCAPE:
+			# 겉에서는 종료, 안에서는 뒤로. **한 키로 한 겹씩** 나가는 것이
+			# 어느 화면에서나 같은 뜻이라 배울 것이 없습니다.
+			if _dev_menu:
+				_back_to_title()
+			else:
+				_on_quit()
+			return
 	if event.is_action_pressed("confirm") and phase == Phase.TITLE:
 		start_run()
 		return
@@ -1940,6 +1975,31 @@ func _drive_pose() -> void:
 				print("[끼임] f=%d 처음 자리에서 %.2fm (끼임시계 %.2f)" % [
 					_frames, player.global_position.distance_to(_wedge_from),
 					player._stuck_time])
+		"foecount":
+			# **방마다 몇 마리가 섰나.** 최소 두 마리가 실제로 지켜지는지 봅니다.
+			if _frames == 30:
+				var per: Dictionary = {}
+				for n in get_tree().get_nodes_in_group("enemies"):
+					var e := n as Node3D
+					if not is_instance_valid(e):
+						continue
+					var c: Vector2i = dungeon.world_to_cell(e.global_position)
+					var which := -1
+					for r in dungeon.rooms.size():
+						if dungeon.rooms[r].has_point(c):
+							which = r
+							break
+					per[which] = int(per.get(which, 0)) + 1
+				var least := 999
+				var line := ""
+				for r in dungeon.rooms.size():
+					var k := int(per.get(r, 0))
+					line += "%d:%d " % [r, k]
+					# 0번 방(시작)과 물물교환 방에는 안 놓습니다.
+					if k > 0:
+						least = mini(least, k)
+				print("[적수] 지하 %d층  방별 %s | 통로 %d  가장 적은 방 %d마리" % [
+					state.floor_num, line, int(per.get(-1, 0)), least])
 		"sizes":
 			# **적들의 실제 키**를 주인공과 나란히 잽니다.
 			#
@@ -2355,6 +2415,12 @@ func _drive_pose() -> void:
 				# 그때 사거리가 ×0.14(0.80m)라 1.0m 앞의 적에게도 안 닿습니다 -
 				# 안 닿은 것을 "피해가 없다" 로 잘못 읽을 뻔했습니다.
 				player.shout_press()
+			if _frames == 494 and is_instance_valid(_probe_foe):
+				# **살짝 지른 것은 Lv3 이어도 안 아파야 합니다.**
+				var before2: float = _probe_foe.hp
+				player.attack()
+				print("[균형] 고함 Lv3 **살짝** 지름: 체력 %.0f -> %.0f (안 깎여야 맞음)" % [
+					before2, _probe_foe.hp])
 			if _frames == 504 and is_instance_valid(_probe_foe):
 				player.shout_release()
 			if _frames == 524 and is_instance_valid(_probe_foe):
@@ -3189,7 +3255,18 @@ func close_riglab() -> void:
 		camera.current = true
 	ui.show_hud()
 	phase = Phase.TITLE
+	_dev_menu = false
 	get_tree().paused = true
+	ui.show_title()
+
+
+func _open_devmenu() -> void:
+	_dev_menu = true
+	ui.show_devmenu()
+
+
+func _back_to_title() -> void:
+	_dev_menu = false
 	ui.show_title()
 
 
@@ -3205,6 +3282,7 @@ func _on_quit() -> void:
 	ui.stop_recording()
 	if OS.has_feature("web"):
 		phase = Phase.TITLE
+		_dev_menu = false
 		get_tree().paused = true
 		ui.show_title()
 		return
@@ -3701,11 +3779,21 @@ func _show_debug_ui() -> void:
 			ui.show_help("일시정지")
 		"options":
 			ui.toggle_options()
+		"devmenu":
+			_open_devmenu()
+		"title":
+			# `--shot=` 은 자동으로 판을 시작하므로, 제목 화면을 찍으려면
+			# 여기서 되돌려 놓아야 합니다.
+			phase = Phase.TITLE
+			_dev_menu = false
+			get_tree().paused = true
+			ui.show_title()
 		"riglab":
 			open_riglab()
 		"title":
 			ui.stop_recording()
 			phase = Phase.TITLE
+			_dev_menu = false
 			get_tree().paused = true
 			ui.show_title()
 

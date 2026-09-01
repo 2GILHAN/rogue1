@@ -17,6 +17,10 @@ signal lock_toggled
 signal quit_pressed
 ## 제목 화면에서 리그 실험실을 엽니다.
 signal riglab_requested
+## 제목 화면의 **개발자 옵션**을 열고 닫습니다. 화면은 UI 가 그리지만 지금
+## 어느 화면인지는 Game 이 들어야 합니다 - 키 조작(T·R·Esc)이 거기서 갈립니다.
+signal devmenu_requested
+signal title_requested
 signal test_requested
 signal test_kind_picked(kind: String)
 signal test_boons_requested
@@ -1239,16 +1243,17 @@ func _card(icon: String, name: String, desc: String, footer: String) -> Button:
 
 func show_title() -> void:
 	_clear_overlay()
-	_title("EMBERLING")
+	_title("TOTO-FightClub")
 	_sub("불꽃 깃털의 모험가가 지하로 내려갑니다. 층의 적을 모두 쓰러뜨리면 파란 문이 열립니다.\n"
 		+ "죽으면 처음부터입니다 - 대신 매번 다른 던전, 다른 축복을 만납니다.")
 	_sub("왼쪽 아래를 끌어 이동 · 밀기(잡기)는 앞이면 밀고 등 뒤면 잡습니다"
 		if TouchControls.wanted()
 		else "이동 WASD · 조준 마우스 · 고함 좌클릭 · 밀기(잡기) F · 구르기 Space(무적) · 일시정지 Esc",
 		UiTheme.TEXT)
-	_sub("캐릭터 세 종류는 test3 카탈로그가 원화 한 장씩에서 만든 것을 그대로 씁니다.
-"
-		+ "리그 실험실에서 뼈대를 만지고 걷기·달리기가 어떻게 달라지는지 바로 볼 수 있습니다.")
+	_sub("캐릭터 세 종류는 test3 카탈로그가 원화 한 장씩에서 만든 것을 그대로 씁니다.")
+	# **세로로 놓습니다.** 가로로 늘어놓으면 버튼이 늘어날 때마다 화면 밖으로
+	# 밀리고, 폰 세로 폭에서는 글자가 줄어듭니다. 세로는 몇 개가 되든 같은
+	# 크기로 쌓입니다.
 	# **세로로 놓습니다.** 가로로 늘어놓으면 버튼이 늘어날 때마다 화면 밖으로
 	# 밀리고, 폰 세로 폭에서는 글자가 줄어듭니다. 세로는 몇 개가 되든 같은
 	# 크기로 쌓입니다.
@@ -1256,49 +1261,59 @@ func show_title() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 10)
 	_overlay_box.add_child(row)
-	var b := Button.new()
-	b.text = "  내려가기  (Enter)  "
-	b.custom_minimum_size = Vector2(300, 52)
-	b.pressed.connect(func() -> void:
+	row.add_child(_menu_button("  시작하기  (Enter)  ", func() -> void:
 		Recorder.armed = false
-		start_requested.emit())
-	row.add_child(b)
-
-	# 녹화는 **스위치가 아니라 시작 버튼 하나 더**입니다. 켜고 끄는 스위치로
-	# 두면 시작하기 전에 지금 켜져 있는지를 확인해야 하는데, 버튼이 둘이면
-	# 누르는 순간 정해집니다. 한 판이 끝나면 다시 이 화면에서 고릅니다.
-	# 리그 실험실. 시작 버튼 옆에 둡니다 - 게임을 시작하기 **전에** 들르는
-	# 자리이고, 옵션 판에 숨기면 있는 줄도 모릅니다.
-	# 실험용 방. 업데이트가 제대로 됐는지 확인하는 자리라, 시작 버튼 바로
-	# 아래에 둡니다 - 옵션 판에 숨기면 있는 줄도 모릅니다.
-	var tb := Button.new()
-	tb.text = "  테스트 방  (T)  "
-	tb.custom_minimum_size = Vector2(300, 52)
-	tb.pressed.connect(func() -> void:
-		Recorder.armed = false
-		test_requested.emit())
-	row.add_child(tb)
-
-	var lb := Button.new()
-	lb.text = "  리그 실험실  (R)  "
-	lb.custom_minimum_size = Vector2(300, 52)
-	lb.pressed.connect(func() -> void: riglab_requested.emit())
-	row.add_child(lb)
+		start_requested.emit()))
+	# **만드는 사람만 쓰는 것은 한 겹 안으로 넣습니다.**
+	#
+	# 테스트 방과 리그 실험실을 첫 화면에 그대로 두면, 처음 열어 본 사람에게는
+	# 무엇을 눌러야 하는지가 넷 중 하나가 됩니다. 안쪽으로 넣으면 첫 화면이
+	# "시작한다 / 안 한다" 로 줄고, 만드는 사람은 한 번만 더 누르면 됩니다.
+	row.add_child(_menu_button("  개발자 옵션  (D)  ", func() -> void:
+		devmenu_requested.emit()))
+	row.add_child(_menu_button("  종료하기  (Esc)  ", func() -> void:
+		quit_pressed.emit()))
 
 	if Recorder.available():
-		var rb := Button.new()
-		rb.text = "  ● 녹화하며 내려가기  "
-		rb.custom_minimum_size = Vector2(300, 52)
-		rb.pressed.connect(func() -> void:
-			Recorder.armed = true
-			start_requested.emit())
-		row.add_child(rb)
-		_sub("녹화를 고르면 이 판을 소리까지 함께 최대 %d분 담습니다. 끝나면 화면 위에 뜨는 공유 버튼으로 그대로 보낼 수 있습니다."
+		_sub("녹화는 개발자 옵션 안에 있습니다. 판을 소리까지 함께 최대 %d분 담습니다."
 			% (Recorder.MAX_SEC / 60))
 	elif OS.has_feature("web"):
 		_sub("이 브라우저는 녹화를 지원하지 않습니다. 크롬이나 사파리에서 열면 판을 영상으로 남길 수 있습니다.")
-	else:
-		_sub("판을 영상으로 남기는 것은 브라우저(폰) 판에서만 됩니다.")
+	_overlay.visible = true
+
+
+func _menu_button(label: String, on_press: Callable) -> Button:
+	## 제목 화면의 버튼. 크기와 눌렀을 때가 늘 같아야 해서 한 곳에서 만듭니다.
+	var b := Button.new()
+	b.text = label
+	b.custom_minimum_size = Vector2(300, 52)
+	b.pressed.connect(on_press)
+	return b
+
+
+func show_devmenu() -> void:
+	## **개발자 옵션.** 확인용으로 만든 자리들만 모읍니다.
+	_clear_overlay()
+	_title("개발자 옵션")
+	_sub("만들면서 확인하는 자리입니다. 게임을 하려면 뒤로 돌아가세요.")
+	var row := VBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 10)
+	_overlay_box.add_child(row)
+	row.add_child(_menu_button("  테스트 방  (T)  ", func() -> void:
+		Recorder.armed = false
+		test_requested.emit()))
+	row.add_child(_menu_button("  리그 실험실  (R)  ", func() -> void:
+		riglab_requested.emit()))
+	if Recorder.available():
+		# 녹화는 **스위치가 아니라 시작 버튼 하나 더**입니다. 켜고 끄는
+		# 스위치로 두면 시작하기 전에 지금 켜져 있는지를 확인해야 하는데,
+		# 버튼이 둘이면 누르는 순간 정해집니다.
+		row.add_child(_menu_button("  ● 녹화하며 내려가기  ", func() -> void:
+			Recorder.armed = true
+			start_requested.emit()))
+	row.add_child(_menu_button("  뒤로  (Esc)  ", func() -> void:
+		title_requested.emit()))
 	_overlay.visible = true
 
 

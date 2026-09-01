@@ -36,7 +36,8 @@ const PAGE := "res://assets/audio/page.wav"           ## 책장 넘김
 const STAIRS := "res://assets/audio/stairs.wav"       ## 다음 층
 const PICK := "res://assets/audio/pick.wav"           ## 고르기
 ## 배경음. vtos 의 `bgm1` 클립(3.2초 스테레오 루프)입니다.
-const BGM := "res://assets/audio/bgm1.ogg"
+## 배경음. `bgm1` 에서 `bgm2` 로 갈았습니다.
+const BGM := "res://assets/audio/bgm2.ogg"
 
 ## 배경음 크기. 효과음보다 확실히 낮아야 합니다 - 같은 크기로 깔면 고함이
 ## 배경에 묻혀서, 무엇이 신호이고 무엇이 분위기인지 구분되지 않습니다.

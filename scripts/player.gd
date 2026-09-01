@@ -1733,6 +1733,9 @@ const SHOUT_CHARGE_TIME := 0.50
 const SHOUT_COST_MIN := 0.30
 ## 살짝 눌렀을 때의 몫. 0 이면 스쳐 누른 것이 헛손질이 되어, 눌렀는데 아무 일도
 ## 안 일어난 것처럼 보입니다.
+## **끝까지 모았다**고 보는 값. 모으는 정도는 0~1 인데, 마지막 프레임에
+## 0.9999 같은 값으로 끝나는 일이 있어서 1.0 으로 견주면 놓칩니다.
+const SHOUT_FULL := 0.995
 const SHOUT_CHARGE_MIN := 0.05
 ## 최소일 때와 최대일 때의 사거리 배수.
 ##
@@ -3022,12 +3025,28 @@ func _shout_preview() -> void:
 
 
 func _clear_shout_preview() -> void:
+	## **범위 표시와 효과선을 같은 시간에 지웁니다.**
+	##
+	## 둘 다 그 자리에 두고 0.30초에 걸쳐 스러집니다. 지르는 순간 한꺼번에
+	## 지우면 소리는 이어지는데 그림만 뚝 끊깁니다.
+	##
+	## 예전에는 **범위 표시만 곧바로 지우고** 효과선만 스러지게 했습니다.
+	## 그래서 부채꼴이 먼저 사라지고 흰 선만 0.30초 더 떠 있었습니다 - 어디까지
+	## 닿았는지는 이미 없는데 소리는 아직 나가는 중인 그림이 됩니다.
 	if _shout_prev != null and is_instance_valid(_shout_prev):
-		_shout_prev.queue_free()
+		var fan := _shout_prev
+		var fan_mat := _shout_prev_mat
+		if fan_mat != null:
+			var a0: float = fan_mat.albedo_color.a
+			var tw0 := fan.create_tween()
+			tw0.tween_method(func(f: float) -> void:
+				fan_mat.albedo_color.a = a0 * f,
+				1.0, 0.0, VORTEX_FADE)
+			tw0.tween_callback(fan.queue_free)
+		else:
+			fan.queue_free()
 	_shout_prev = null
 	_shout_prev_mat = null
-	# 선은 **그 자리에 두고 스러지게** 합니다. 같이 지우면 지르는 순간에
-	# 화면에서 사라져서, 소리는 이어지는데 그림만 끊깁니다.
 	if _shout_vortex != null and is_instance_valid(_shout_vortex):
 		var gone := _shout_vortex
 		var tw := gone.create_tween()
@@ -3097,7 +3116,7 @@ func _try_attack() -> void:
 	# 행위와 더 가깝고, 무엇보다 모은 만큼 커지는 것과 잘 붙습니다.
 	#
 	var slv := skill_lv("shout")
-	if slv >= 3:
+	if slv >= 3 and _shout_fired >= SHOUT_FULL:
 		# **Lv5 는 호랑이입니다.** 구슬은 "퍼졌다" 까지이고, 계통을 끝까지 판
 		# 자리에는 그만한 그림이 있어야 합니다.
 		Fx.tiger(get_parent(), global_position + Vector3(0, 0.35, 0), aim,
@@ -3343,7 +3362,15 @@ func _resolve_swing() -> void:
 		# 없어집니다 - 실제로 그렇게 굴러가고 있었습니다. 지금 이 기술이 파는
 		# 것은 **판을 정리하는 것**이고, 정리한 뒤 때리는 일은 밀기가 합니다.
 		var roll: Array = [0.0, false]
-		if state.has_shout_damage():
+		# **Lv3 의 피해는 끝까지 모았을 때만** 들어갑니다.
+		#
+		# 계통을 다 판 뒤에는 살짝 눌러도 아팠습니다. 그러면 고함이 "짧게
+		# 자주 지르는 것" 이 가장 좋은 기술이 되고, 모으는 일이 손해가 됩니다 -
+		# 모으기를 넣은 이유가 통째로 사라집니다.
+		#
+		# 끝까지 모아야만 아프면 **0.5초를 서 있을 값어치**가 생깁니다. 그 사이
+		# 발은 0.2배로 묶이므로, 언제 그 값을 치를지가 선택이 됩니다.
+		if state.has_shout_damage() and _shout_fired >= SHOUT_FULL:
 			roll = state.roll_damage(rng)
 		if state.shout_knock > 0.0:
 			# **「돌풍」을 찍었으면** 맞은 자리에서 한 번 더 터집니다.
