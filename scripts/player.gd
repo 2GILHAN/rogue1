@@ -178,13 +178,6 @@ func skill_lv(fam: String) -> int:
 ## 계통 Lv 로 세기까지 정하면 **이펙트가 거짓말을 합니다.** 밀기 계통에는
 ## (옛 이야기입니다. 그때는 밀기 계통에 「억센 손」·「밀치는 힘」·「긴 팔」
 ## 셋이 들어 있었고, 긴 팔만 세 번 찍으면 넉백은 그대로인 채 세게 밀리는 그림이
-## 떴습니다. 값에서 뽑으면 안 찍은 것은 안 보입니다.
-func _picks(value: float, per_pick: float) -> int:
-	## 그 스킬을 몇 번 찍었나. 값을 한 번의 증가폭으로 나눕니다 - 스킬 쪽
-	## 숫자가 바뀌어도 여기는 따라갑니다(나누는 값만 같이 고치면 됩니다).
-	return int(round(value / per_pick))
-
-
 func shout_range() -> float:
 	## 고함이 닿는 거리. 스킬로 늘어납니다 - 파문 크기도 이 값에서 나오므로
 	## (_show_shout), 늘리면 **보이는 것과 닿는 것이 같이** 커집니다.
@@ -1398,10 +1391,7 @@ func _ult_push() -> void:
 		foe.stagger_for(0.5)
 	foe.call("take_damage", float(roll[0]) * ULT_PUSH_MULT, bool(roll[1]),
 		Vector3.ZERO, 0.0, global_position)
-	if foe.has_method("start_ghost_trail"):
-		foe.start_ghost_trail(5, true)
 	_play_push()
-	Fx.shimmer(get_parent(), global_position, dir, 12, true)
 	Sfx.play(Sfx.PUSH, 0.0, 0.06)
 	Game.shake(0.26, 0.16)
 
@@ -2097,21 +2087,6 @@ func _drive_throw(delta: float) -> void:
 	if thrown is Prop:
 		thrown.throw(_throw_dir, state.damage * THROW_MULT)
 	elif thrown is Enemy:
-		# **밀기 계통 이펙트는 던지기에도 붙습니다.**
-		#
-		# 던지기는 밀기의 큰 형인데 이펙트만 안 붙어 있었습니다 - 계통을
-		# 파고 있다는 것이 한쪽 기술에서만 보이면, 그 스킬이 무엇을 키우는
-		# 것인지가 헷갈립니다.
-		var tlv := skill_lv("push")
-		if tlv >= 3:
-			# 밀기와 **같은 값에서 같은 방식으로** 뽑습니다. 던지기는 밀기의
-			# 연장이므로, 같은 스킬을 찍고 다른 그림이 나오면 안 됩니다.
-			var tknock := _picks(state.shove_knock, 0.7)
-			if thrown.has_method("start_ghost_trail"):
-				thrown.start_ghost_trail(clampi(2 + tknock, 2, 6),
-					state.shove_damage >= 0.8)
-			Fx.shimmer(get_parent(), global_position, _throw_dir,
-				clampi(6 + tknock * 2, 6, 14), tknock >= 2)
 		# **던지기는 밀기의 연장입니다.**
 		#
 		# 잡아서 앞으로 보내는 것이라 손이 하는 일이 밀기와 같습니다. 그래서
@@ -2801,25 +2776,18 @@ func _shove_one(enemy: Node3D) -> void:
 	#
 	# 세기는 레벨이 아니라 **실제로 오른 값**에서 뽑습니다 - 레벨로 세면
 	# 이펙트가 수치와 따로 놀아 거짓말을 합니다.
-	var plv := skill_lv("push")
-	if plv >= 3:
-		# **장수는 넉백, 진하기는 피해**입니다(위 _picks 참고).
-		var knock := _picks(state.shove_knock, 0.7)
-		var ghosts := clampi(2 + knock, 2, 6)
-		var strong := state.shove_damage >= 0.8
-		# **미는 쪽이 아니라 밀리는 쪽**에 자국을 남깁니다.
-		#
-		# 예전에는 아이 뒤로 파란 직선을 깔았습니다. 0.3초 만에 딱 끊겨서
-		# 툭툭 끊기는 것으로 보였고, 무엇보다 눈은 이미 **밀려나는 적**을
-		# 보고 있는데 표시는 아이 쪽에 있었습니다.
-		if enemy.has_method("start_ghost_trail"):
-			enemy.start_ghost_trail(ghosts, strong)
-		# 그리고 아이의 **다리 뒤**로 아지랑이가 피어오릅니다. 직선과 달리
-		# 스러지므로 끊기지 않습니다. 이쪽은 **아이가 낸 힘**이라 넉백을
-		# 따릅니다 - 잔상(밀린 몸)과 같은 값에서 나와야 둘이 한 동작으로
-		# 읽힙니다.
-		Fx.shimmer(get_parent(), global_position, dir,
-			clampi(6 + knock * 2, 6, 14), knock >= 2)
+	# **밀기 Lv3 의 표시는 잔상 하나뿐입니다.**
+	#
+	# 두 가지를 걷어냈습니다.
+	#
+	#   밀린 적의 보라 잔상   밀려나는 몸이 이미 크게 움직이는 그림이라,
+	#                        자국까지 겹치면 무엇이 몸이고 무엇이 자국인지
+	#                        흐려집니다. 색도 다른 데 안 쓰던 것이라 튀었습니다.
+	#   아이 뒤의 아지랑이     같은 순간에 셋(잔상·아지랑이·밀린 몸)이 겹쳐
+	#                        화면이 어수선했습니다.
+	#
+	# 남은 것은 **달려드는 동안의 파란 잔상**(`_lunge_afterimage`)입니다.
+	# 그건 기술이 나가기 **전**에 보이므로 밀리는 그림과 안 겹칩니다.
 	Sfx.play(Sfx.PUSH, -1.0, 0.06)
 	Game.shake(0.28, 0.18)
 	_shove_hold = SHOVE_HOLD

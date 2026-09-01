@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.38"
+const VERSION := "v0.39"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -549,12 +549,15 @@ func _setup_environment() -> void:
 		# 매 프레임 260만 픽셀을 벽 셰이더로 칠합니다 - 벽은 통째로 반투명이라
 		# 겹쳐 칠하는 몫까지 붙습니다. 그 값이 그대로 열이 됩니다.
 		#
-		# 0.75 면 픽셀이 **56%** 로 줍니다(제곱으로 줄어듭니다). 글자와 버튼은
+		# 0.60 이면 픽셀이 **36%** 로 줍니다(제곱으로 줄어듭니다). 글자와 버튼은
 		# 원래 해상도로 그대로라 흐려지지 않습니다 - 3D 만 줄입니다.
+		#
+		# 0.75 로 시작했다가 내렸습니다. 폰에서 3층쯤 발열이 성능을 끌어내리는
+		# 것이 여전해서, **덜 그리는 쪽**을 기본으로 잡았습니다.
 		#
 		# 이 그림체는 넓은 단색 면이라 조금 흐려져도 티가 덜 납니다. 그래도
 		# 눈에 거슬리면 옵션 판의 「해상도」에서 100% 로 되돌릴 수 있습니다.
-		_scale3d = 0.75
+		_scale3d = 0.60
 		# MSAA 도 끕니다. 가장자리를 매끄럽게 하려고 화면을 여러 번 재는
 		# 작업이라, 대역폭이 좁은 폰에서 값이 큽니다.
 		get_viewport().msaa_3d = Viewport.MSAA_DISABLED
@@ -1648,19 +1651,14 @@ func _drive_pose() -> void:
 			#
 			#   --pose=fxmap --boon=lunge_reach,lunge_reach,lunge_reach
 			#   --pose=fxmap --boon=shove_knock,shove_knock,shove_knock
-			#
-			# 앞쪽은 계통 Lv3 이지만 넉백을 안 찍었으니 잔상이 가장 적어야
-			# 하고, 뒤쪽은 같은 Lv3 에 잔상이 늘어야 합니다.
 			if _frames == 30:
 				var st: RunState = state
-				var knock: int = player._picks(st.shove_knock, 0.7)
 				print("[이펙트] 밀기Lv%d 고함Lv%d 구르기Lv%d" % [
 					st.family_level("push"), st.family_level("shout"),
 					st.family_level("roll")])
-				print("  밀기   넉백=%.1f 피해=%.2f -> 잔상 %d장(진하게=%s) 아지랑이 %d조각" % [
+				print("  밀기   넉백=%.1f 피해=%.2f -> 달려드는 잔상(Lv3 부터, 밝게=%s)" % [
 					st.shove_knock, st.shove_damage,
-					clampi(2 + knock, 2, 6), str(st.shove_damage >= 0.8),
-					clampi(6 + knock * 2, 6, 14)])
+					str(st.shove_damage >= 0.5)])
 				print("  고함   돌풍=%.0f -> 구슬(맞은자리 폭발=%s)" % [
 					st.shout_knock, str(st.shout_knock > 0.0)])
 				print("  구르기 뚫기=%.0f -> 밝은 잔상=%s" % [

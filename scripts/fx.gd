@@ -180,89 +180,16 @@ static func speed_lines(parent: Node3D, at: Vector3, dir: Vector3,
 		tw.chain().tween_callback(mi.queue_free)
 
 
-## 밀린 대상이 남기는 잔상 색. **어두운 보라**입니다 - 파랑(구르기·고함)과
-## 갈라 놓아야 "미는 힘" 이 따로 읽힙니다.
-const SHOVE_GHOST := Color(0.34, 0.16, 0.48)
-
-
-## 아지랑이가 돌려 쓰는 상자와 재질. **하나만 만들어 나눠 씁니다.**
-static var _shimmer_mesh: BoxMesh = null
-static var _shimmer_mat: StandardMaterial3D = null
-
-
 static func warm_up(parent: Node3D) -> void:
 	## 이펙트를 **미리 한 번 그려 둡니다.** 층을 만들 때 부릅니다.
 	##
-	## 아지랑이의 첫 호출이 5.9ms 였고 그 뒤로는 0.1ms 였습니다 - 상자와
-	## 재질을 나눠 쓰게 고친 뒤에도 **처음 그리는 한 번**은 그만큼 듭니다
-	## (셰이더 변형을 그때 만듭니다). 그 한 번이 싸우는 도중에 오면 화면이
-	## 끊기므로, 층이 만들어지는 동안 치릅니다.
+	## 처음 그리는 한 번이 비쌉니다 - 셰이더 변형을 그때 만듭니다. 그 한 번이
+	## 싸우는 도중에 오면 화면이 끊기므로, 층이 만들어지는 동안 치릅니다.
 	##
 	## 바닥 아래에서 그립니다 - 보이지 않지만 그리기는 합니다.
-	shimmer(parent, Vector3(0, -40, 0), Vector3.FORWARD, 1, false)
-	# 소용돌이도 같이 데웁니다. 셰이더가 하나 더 늘었고, 그 첫 번이 고함을
-	# 지르는 순간에 오면 딱 그때 화면이 끊깁니다.
 	var warm := make_shout_rays(parent)
 	drive_shout_rays(warm, Vector3(0, -40, 0), Vector3.FORWARD, 1.0, 1.0, 60.0, 1.0, 0.0)
 	warm.create_tween().tween_callback(warm.queue_free).set_delay(0.1)
-
-
-static func shimmer(parent: Node3D, at: Vector3, dir: Vector3,
-		count: int = 9, strong: bool = false) -> void:
-	## **아지랑이.** 작은 조각이 피어올랐다 사라집니다.
-	##
-	## 밀친 직후 아이의 다리 뒤에 깝니다. 선을 긋는 것보다 조용하고, 무엇보다
-	## **끊기지 않습니다** - 직선은 0.3초 만에 딱 끊기는데 피어오르는 것은
-	## 스러지므로 눈에 남는 인상이 부드럽습니다.
-	##
-	## 우유의 냄새 표시와 같은 방법입니다(prop.gd) - 이 게임에서 "무언가
-	## 피어오른다" 는 이미 이 모양으로 정해져 있습니다.
-	##
-	## 색은 **파랑**입니다(구르기 잔상·고함과 같은 색). 아이가 낸 힘이므로
-	## 다른 기술과 한 줄기로 읽혀야 합니다 - 어두운 보라는 **밀려나는 적**에게
-	## 붙는 표시이지 아이 쪽 표시가 아닙니다.
-	##
-	## # 상자와 재질을 돌려 씁니다
-	##
-	## 조각마다 새로 만들었더니 **한 번에 6.3ms** 였습니다 - 16.7ms 짜리
-	## 프레임의 3분의 1이 밀치는 순간에 통째로 날아가서, 이펙트가 아니라
-	## 화면이 끊겼습니다. 상자와 재질은 열두 조각이 다 같은 것을 쓰면 되고,
-	## 조각마다 다른 것은 **자리·크기·사라지는 때**뿐입니다.
-	##
-	## 옅어지는 것은 재질이 아니라 **`transparency`**(조각별 값)로 합니다.
-	## 재질을 나눠 쓰면서도 하나씩 따로 스러지게 하는 유일한 길입니다.
-	if _shimmer_mesh == null:
-		_shimmer_mesh = BoxMesh.new()
-		_shimmer_mesh.size = Vector3.ONE * 0.06
-		_shimmer_mat = StandardMaterial3D.new()
-		_shimmer_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_shimmer_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_shimmer_mat.albedo_color = Color(RUSH_COLOR.r, RUSH_COLOR.g,
-			RUSH_COLOR.b, 0.9)
-	var flat := Vector3(dir.x, 0.0, dir.z)
-	flat = flat.normalized() if flat.length_squared() > 0.0001 else Vector3.FORWARD
-	var side := Vector3(-flat.z, 0.0, flat.x)
-	for i in count:
-		var mi := MeshInstance3D.new()
-		mi.mesh = _shimmer_mesh
-		mi.material_override = _shimmer_mat
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.set_meta("flat", true)
-		parent.add_child(mi)
-		# **다리 뒤**입니다 - 미는 쪽의 반대, 발치 높이에서 시작합니다.
-		mi.global_position = at - flat * randf_range(0.15, 0.55) 			+ side * randf_range(-0.3, 0.3) + Vector3.UP * randf_range(0.0, 0.15)
-		mi.scale = Vector3.ONE * randf_range(0.75, 1.4) * (1.35 if strong else 1.0)
-		var life := randf_range(0.45, 0.8)
-		var tw := mi.create_tween()
-		tw.tween_interval(randf_range(0.0, 0.12))
-		tw.set_parallel(true)
-		tw.tween_property(mi, "global_position",
-			mi.global_position + Vector3.UP * randf_range(0.5, 0.95)
-			- flat * randf_range(0.1, 0.3), life)
-		tw.tween_property(mi, "rotation",
-			Vector3(randf_range(-2, 2), randf_range(-2, 2), randf_range(-2, 2)), life)
-		tw.tween_property(mi, "transparency", 1.0, life)
-		tw.chain().tween_callback(mi.queue_free)
 
 
 static func arm_streak(parent: Node3D, hands: Vector3, dir: Vector3,

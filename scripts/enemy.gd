@@ -835,7 +835,6 @@ func _physics_process(delta: float) -> void:
 		_charge_contact(dist)
 	_crash_check(pre)
 	_push_what_we_hit()
-	_drive_ghost_trail(delta)
 	_drive_attack_pose(delta)
 	_drive_shout_fan(delta)
 	_drive_melee_fan(delta)
@@ -1963,61 +1962,6 @@ const SHOUT_STAGGER := 1.0
 const FLINCH_TIME := 0.45
 
 
-func start_ghost_trail(count: int, strong: bool = false) -> void:
-	## 밀려나면서 **어두운 보라 잔상**을 떨굽니다.
-	##
-	## 미는 쪽이 아니라 **밀리는 쪽**에 붙는 표시입니다. 미는 사람 뒤에 선을
-	## 긋는 것보다, 밀려나는 몸이 자국을 남기는 편이 "얼마나 세게 밀렸나" 를
-	## 곧바로 말합니다 - 눈이 이미 그쪽을 보고 있습니다.
-	_ghost_left = count
-	_ghost_strong = strong
-	_ghost_t = 0.0
-
-
-func _drive_ghost_trail(delta: float) -> void:
-	if _ghost_left <= 0 or _pivot == null:
-		return
-	_ghost_t -= delta
-	if _ghost_t > 0.0:
-		return
-	# 사이를 넓혔습니다(0.055 -> 0.075). 한 장이 1.7~2.5ms 라, 촘촘하면
-	# 밀치는 0.3초 동안 그 값이 계속 얹힙니다.
-	_ghost_t = 0.075
-	_ghost_left -= 1
-	var model := _pivot.get_child(0) as Node3D if _pivot.get_child_count() > 0 else null
-	if model == null:
-		return
-	# 구르기 잔상과 같은 방법입니다(player.gd) - 뼈대까지 통째로 복제하고
-	# 애니메이션을 떼어 그 순간 자세로 굳힙니다. 재 보니 1.8ms 입니다.
-	var ghost := model.duplicate(DUPLICATE_USE_INSTANTIATION) as Node3D
-	if ghost == null:
-		return
-	var stack: Array = [ghost]
-	var mat := StandardMaterial3D.new()
-	# 진하기는 **밀기 피해**가 정합니다. 세게 때렸으면 자국도 진합니다.
-	mat.albedo_color = Color(Fx.SHOVE_GHOST.r, Fx.SHOVE_GHOST.g,
-		Fx.SHOVE_GHOST.b, 0.80 if _ghost_strong else 0.55)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	while not stack.is_empty():
-		var node: Node = stack.pop_back()
-		if node is AnimationPlayer or node is SkeletonModifier3D:
-			node.queue_free()
-		elif node is MeshInstance3D:
-			var mi := node as MeshInstance3D
-			mi.material_override = mat
-			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			mi.set_meta("flat", true)
-		for c in node.get_children():
-			stack.append(c)
-	get_parent().add_child(ghost)
-	ghost.global_transform = model.global_transform
-	var tw := ghost.create_tween()
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.32)
-	tw.tween_callback(ghost.queue_free)
-
-
 func knock_back(impulse: Vector3, chain: int = 0) -> void:
 	## 밖에서 밀어냅니다.
 	##
@@ -2061,13 +2005,6 @@ var _slip := 0.0
 var _knock := 0.0
 ## 밀린 동안 바라볼 쪽. **민 사람 쪽**입니다.
 var _knock_face := Vector3.ZERO
-## 밀리면서 떨굴 잔상이 몇 장 남았나, 다음 장까지 남은 시간.
-##
-## 장수와 진하기는 **미는 쪽이 정해서 넘겨 줍니다**(player.gd). 그쪽이
-## 넉백·피해가 실제로 얼마나 올랐는지를 아는 자리입니다.
-var _ghost_strong := false
-var _ghost_left := 0
-var _ghost_t := 0.0
 
 
 func slip_on(amount: float) -> void:
