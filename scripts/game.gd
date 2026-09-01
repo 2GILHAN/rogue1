@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.37"
+const VERSION := "v0.38"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -3877,6 +3877,11 @@ func _process(delta: float) -> void:
 			win.x, win.y, vp.scaling_3d_scale,
 			int(win.x * vp.scaling_3d_scale), int(win.y * vp.scaling_3d_scale),
 			win.x * vp.scaling_3d_scale * win.y * vp.scaling_3d_scale / 10000.0])
+		print("  [그리는 양] 삼각형 %.0f천/프레임  그리기 %d회  적 %d  소품 %d" % [
+			Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0,
+			Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+			get_tree().get_nodes_in_group("enemies").size(),
+			get_tree().get_nodes_in_group("props").size()])
 		print("[쌓임] f=%d 노드=%d 고아=%d 자원=%d 그리기=%d 프레임=%.1fms 메모리=%.0fMB 텍스처=%.0fMB 비디오=%.0fMB" % [
 			_frames,
 			get_tree().get_node_count(),

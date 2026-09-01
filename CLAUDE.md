@@ -65,6 +65,16 @@ GODOT="/c/Users/GilhanLee/Downloads/Godot_v4.7.1-stable_win64.exe/Godot_v4.7.1-s
 사람 이름을 파일에 쓰지 않습니다. 적은 하는 일로 부릅니다
 (`foe_charger` · `foe_shouter` …), 화면 이름은 `Enemy.LABEL` 한 곳에 있습니다.
 
+## 새 캐릭터를 넣으면 텍스처 규격을 맞춥니다
+
+`assets/characters/*_texture.png.import` 는 **여덟 벌이 같아야** 합니다
+(`size_limit=1024`, `compress/mode=2`). 나중에 넣은 모델 하나가 2048 무압축으로
+남아 VRAM 을 16MB 먹고 있던 적이 있습니다.
+
+```bash
+grep -h "size_limit\|compress/mode" assets/characters/*_texture.png.import | sort | uniq -c
+```
+
 ## 건드리지 말 것
 
 - **`C:\_project\test3`는 다른 프로젝트도 쓰는 공용 코드입니다.** 이 게임만의
