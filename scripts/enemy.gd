@@ -1249,6 +1249,23 @@ func _shout(to_target: Vector3, dist: float) -> void:
 ## 때린 뒤 빨간 판이 남는 시간.
 const FAN_FLASH := 0.26
 
+## 공격 예고의 색. **넷이 여기 하나를 봅니다** — 부채꼴(맨손)·부채꼴(호통)·
+## 띠(돌진)·원(내려치기).
+##
+## 색이 갈리면 **같은 뜻인데 다른 것으로 읽힙니다.** 베개 아이의 원만 파랬던
+## 적이 있는데, 다른 예고가 전부 노랑→빨강으로 차오르는 판에서 그 하나만
+## 파랗게 뜨니 "이건 공격이 아닌가" 로 보였습니다. 예고는 **어느 적이 하든
+## 같은 신호**여야 합니다.
+##
+## 규약: 옅은 노랑에서 시작해 예고가 도는 동안 붉어지고 진해집니다 — 다
+## 차오르면 맞습니다. 때리는 순간 새빨개졌다 사라집니다.
+const WARN_EARLY := Color(1.0, 0.84, 0.38, 0.13)   ## 예고가 시작될 때
+const WARN_LATE := Color(1.0, 0.32, 0.19, 0.43)    ## 예고가 다 찼을 때
+const WARN_HIT := Color(1.0, 0.14, 0.10, 0.58)     ## 때리는 순간
+## 따라오는 돌진은 달리는 내내 길을 보여 줍니다. 그동안은 「다 찬 예고」와
+## 「때리는 순간」 사이에 둡니다 - 이미 오고 있다는 뜻입니다.
+const WARN_TRACK := Color(1.0, 0.22, 0.14, 0.52)
+
 
 ## 맨손 공격이 닿는 각도. 호통(78도)보다 좁습니다 - 팔로 치는 것이라
 ## 넓으면 옆으로 굴러 나가도 안 빠집니다.
@@ -1363,7 +1380,7 @@ func _drive_slam_disc(delta: float) -> void:
 		var k := clampf(1.0 - _windup / total, 0.0, 1.0)
 		var g := lerpf(0.25, 1.0, k)
 		_disc.scale = Vector3(g, 1.0, g)
-		_disc_mat.albedo_color = Color(0.42, 0.66, 1.0, lerpf(0.20, 0.52, k))
+		_disc_mat.albedo_color = WARN_EARLY.lerp(WARN_LATE, k)
 		_disc.visible = true
 		return
 	# 예고가 끝나면 한 박자에 사라집니다. 남겨 두면 이미 맞은 자리가 아직
@@ -1407,19 +1424,18 @@ func _drive_charge_lane(delta: float) -> void:
 	# 됩니다 - 그 뒤로는 길이 안 바뀌니 몸이 곧 예고입니다. 큰 아이는 달리는
 	# 동안 길이 계속 돌아가므로, 띠를 끄면 **어디로 오는지 볼 방법이 사라집니다.**
 	if _charge > 0.0 and float(stats.get("charge_track", 0.0)) > 0.0 and not _dead:
-		_lane_mat.albedo_color = Color(1.0, 0.22, 0.14, 0.52)
+		_lane_mat.albedo_color = WARN_TRACK
 		_lane.visible = true
 		return
 	if _lane_flash > 0.0:
 		var k := clampf(_lane_flash / FAN_FLASH, 0.0, 1.0)
-		_lane_mat.albedo_color = Color(1.0, 0.14, 0.10, 0.58 * k)
+		_lane_mat.albedo_color = Color(WARN_HIT.r, WARN_HIT.g, WARN_HIT.b, WARN_HIT.a * k)
 		_lane.visible = true
 		return
 	if _windup >= 0.0 and stats.get("attack", "melee") == "charge" and not _dead:
 		var total := maxf(float(stats["windup"]), 0.001)
 		var t := clampf(1.0 - _windup / total, 0.0, 1.0)
-		_lane_mat.albedo_color = Color(1.0, 0.82, 0.40, 0.13).lerp(
-			Color(1.0, 0.30, 0.18, 0.44), t)
+		_lane_mat.albedo_color = WARN_EARLY.lerp(WARN_LATE, t)
 		_lane.visible = true
 		return
 	_lane.visible = false
@@ -1453,14 +1469,13 @@ func _drive_melee_fan(delta: float) -> void:
 	if _melee_flash > 0.0:
 		_melee_flash -= delta
 		var k := clampf(_melee_flash / FAN_FLASH, 0.0, 1.0)
-		_melee_fan_mat.albedo_color = Color(1.0, 0.14, 0.10, 0.58 * k)
+		_melee_fan_mat.albedo_color = Color(WARN_HIT.r, WARN_HIT.g, WARN_HIT.b, WARN_HIT.a * k)
 		_melee_fan.visible = _melee_flash > 0.0
 		return
 	if _windup >= 0.0 and stats.get("attack", "melee") == "melee" and not _dead:
 		var total := maxf(float(stats["windup"]), 0.001)
 		var t := clampf(1.0 - _windup / total, 0.0, 1.0)
-		_melee_fan_mat.albedo_color = Color(1.0, 0.84, 0.38, 0.13).lerp(
-			Color(1.0, 0.34, 0.20, 0.42), t)
+		_melee_fan_mat.albedo_color = WARN_EARLY.lerp(WARN_LATE, t)
 		_melee_fan.visible = true
 		return
 	_melee_fan.visible = false
@@ -1499,15 +1514,13 @@ func _drive_shout_fan(delta: float) -> void:
 	if _fan_flash > 0.0:
 		_fan_flash -= delta
 		var k := clampf(_fan_flash / FAN_FLASH, 0.0, 1.0)
-		_shout_fan_mat.albedo_color = Color(1.0, 0.14, 0.10, 0.58 * k)
+		_shout_fan_mat.albedo_color = Color(WARN_HIT.r, WARN_HIT.g, WARN_HIT.b, WARN_HIT.a * k)
 		_shout_fan.visible = _fan_flash > 0.0
 		return
 	if _windup >= 0.0 and stats.get("attack", "melee") == "shout" and not _dead:
 		var total := maxf(float(stats["windup"]), 0.001)
 		var t := clampf(1.0 - _windup / total, 0.0, 1.0)
-		# 옅은 노랑 -> 붉음. 알파도 같이 올라가서, 다 차오르면 맞습니다.
-		_shout_fan_mat.albedo_color = Color(1.0, 0.84, 0.38, 0.13).lerp(
-			Color(1.0, 0.34, 0.20, 0.42), t)
+		_shout_fan_mat.albedo_color = WARN_EARLY.lerp(WARN_LATE, t)
 		_shout_fan.visible = true
 		return
 	# 예고가 끊겼습니다(맞아서 풀렸거나 죽었거나). 그 자리에서 사라집니다.
