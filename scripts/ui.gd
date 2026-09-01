@@ -1135,9 +1135,9 @@ func update_hud(state: RunState, enemies_left: int, _unused: float) -> void:
 	if box != null:
 		box.bg_color = (Color(0.45, 0.72, 0.95) if state.breath >= Player.BREATH_SHOUT
 			else Color(0.36, 0.44, 0.55))
-	_stats_line.text = "공격 %d   속도 %.1f   치명 %d%%  x%.1f%s" % [
+	_stats_line.text = "공격 %d   속도 %.1f   치명 %d%%  x%.1f" % [
 		int(round(state.damage)), state.move_speed, int(round(state.crit_chance * 100)),
-		state.crit_mult, ("   흡혈 %d%%" % int(round(state.lifesteal * 100))) if state.lifesteal > 0.0 else ""]
+		state.crit_mult]
 
 
 func set_boons(names: Array) -> void:
@@ -1321,9 +1321,12 @@ func show_boons(options: Array, title: String = "층을 정리했다",
 		var tag := "[%d]" % (i + 1)
 		if lv > 0:
 			tag = "Lv%d → Lv%d   [%d]" % [lv, lv + 1, i + 1]
+		# **계통이 곧 스킬입니다.** 예전에는 계통 안에 스킬이 여럿이라
+		# 「밀기 · 억센 손」처럼 둘을 붙여 적었는데, 스킬을 여섯 계통으로
+		# 줄이면서 두 이름이 같아졌습니다 - 「구르기 · 구르기」가 떴습니다.
 		var fam := String(opt.get("family_name", ""))
 		var label: String = String(opt["name"])
-		if fam != "":
+		if fam != "" and fam != label:
 			label = "%s · %s" % [fam, label]
 		var b := _card(String(opt["icon"]), label, String(opt["desc"]), tag)
 		var id := String(opt["id"])

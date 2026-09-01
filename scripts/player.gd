@@ -13,9 +13,12 @@ signal died
 const GRAVITY := 22.0
 const ACCEL := 55.0
 const FRICTION := 40.0
-## 구르기: 5.0m/s 로 0.28초 = 1.40m (예전 1.76m 의 0.8배).
-## 달리기(3.1m/s)의 1.6배라 회피로는 충분히 튀어 나갑니다.
-const DASH_SPEED := 5.0
+## 구르기: 4.0m/s 로 0.28초 = **1.12m** (1.76 -> 1.40 -> 1.12, 두 번 0.8배).
+##
+## 달리기(3.1m/s)의 1.29배입니다. 1.40m 일 때는 한 번 구르면 방 절반을
+## 건너서, 굴러 피하기가 **아슬아슬하게 비키는 것**이 아니라 그냥 자리를
+## 뜨는 것이 됐습니다. 방을 6~9칸으로 줄인 뒤로는 더 그랬습니다.
+const DASH_SPEED := 4.0
 const DASH_TIME := 0.28
 ## 동작 전체 길이. 이동(DASH_TIME)이 끝난 뒤의 남은 구간이 착지·반동·복귀
 ## 입니다 - 구르는 모습이 보이려면 이 꼬리가 있어야 합니다.
@@ -54,6 +57,24 @@ const GRAB_RANGE := 1.25
 ## 것에는 노란 띠가 뜨고, 그 띠는 잡기 판정과 **같은 함수**로 고른 대상에
 ## 뜹니다. 각이 좁아도 무엇이 잡히는지는 눌러 보기 전에 보입니다.
 const GRAB_ARC := deg_to_rad(76.0)
+## **록온을 껐을 때**의 잡기 각. 76 -> 150 도.
+##
+## 록온이 꺼져 있으면 조준은 **가는 쪽**입니다(폰에는 마우스가 없습니다).
+## 그래서 옆에 붙은 적을 밀려면 그쪽으로 걸어가면서 눌러야 했는데, 붙어 있는
+## 상대일수록 각이 크게 벌어져서 **가까울수록 안 맞는** 거꾸로 된 일이
+## 생겼습니다 - 2.6m 밖에서는 38도 안에 들지만 0.6m 앞에서는 조금만 어긋나도
+## 벗어납니다.
+##
+## 넓혀도 손해가 없는 이유는 **고리가 거짓말을 안 하기 때문**입니다. 고리는
+## 이 함수가 고른 대상 아래에 깔리므로(`_drive_grab_hint`), 각이 넓어지면
+## 고리도 같이 넓어집니다 - 무엇이 밀릴지는 누르기 전에 보입니다.
+const GRAB_ARC_FREE := deg_to_rad(150.0)
+## 넓힌 각에서 **정면을 얼마나 우대하는가**(m/라디안).
+##
+## 그냥 넓히기만 하면 "가장 가까운 것" 이 이겨서, 정면 1.2m 를 겨누고 눌렀는데
+## 어깨 뒤 0.9m 가 밀립니다. 각을 거리로 환산해 더합니다 - 1.0 이면 60도
+## 벌어진 적은 1.05m 더 먼 것으로 칩니다.
+const GRAB_ANGLE_COST := 1.0
 const SHOVE_MULT := 1.7
 ## 달려드는 속도와 시간.
 ##
@@ -431,11 +452,6 @@ var _joy_turn := 0.0
 ## 이번 질주에서 이미 친 적. 한 번씩만 칩니다 - 안 그러면 붙어 있는 적을
 ## 매 프레임 쳐서 즉사시킵니다.
 var _joy_hit: Dictionary = {}
-## 물장난이 남은 시간.
-var _splash_time := 0.0
-## 팔을 바꾸기까지 남은 시간과, 지금 어느 쪽 팔이 물을 치고 있나.
-var _splash_swap := 0.0
-var _splash_left := true
 ## 고함을 모은 정도(0~1). **-1 이면 모으는 중이 아닙니다.**
 var _shout_charge := -1.0
 ## 이번에 지른 고함이 얼마나 모은 것인가. 판정과 그림이 같이 씁니다.
@@ -449,6 +465,8 @@ var _shout_prev_mat: StandardMaterial3D = null
 var _shout_vortex: Node3D = null
 ## 지른 뒤 소용돌이가 스러지는 시간(초).
 const VORTEX_FADE := 0.30
+## 구가 선 위를 흘러간 정도(0~1). 상태는 **부르는 쪽이** 듭니다.
+var _shout_flow := 0.0
 ## 고함 자세를 붙잡고 있는 시간. 판정(_swing_time, 0.30초)보다 깁니다.
 ##
 ## 목소리 클립이 1.05초인데 자세가 0.30초에 풀리면, 아직 지르고 있는데 아이는
@@ -571,11 +589,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_aim()
 
-	if _splash_time > 0.0:
-		# 물장난 중에는 발이 묶입니다. 짧고(1.8초) 안전한 방에서만 도는
-		# 것이라 답답할 자리가 없습니다.
-		_drive_splash(delta)
-	elif _joy_time > 0.0:
+	if _joy_time > 0.0:
 		# **자동차를 타는 동안에는 다른 것이 아무것도 안 됩니다.** 걷지도,
 		# 구르지도, 밀지도 못합니다 - 못 모는 것이 이 물건의 값입니다.
 		_drive_joyride(delta)
@@ -870,8 +884,10 @@ func _auto_aim() -> bool:
 	var best: Node3D = null
 	var closest := lock_on_range()
 	for n in get_tree().get_nodes_in_group("enemies"):
-		var e := n as Node3D
-		if not is_instance_valid(e):
+		var e := n as Enemy
+		# 밀려 날아가는 적은 **록온도 안 걸립니다.** 못 미는 상대를 계속
+		# 보고 있으면, 다음에 밀 상대에게서 몸이 돌아가 있습니다.
+		if not is_instance_valid(e) or not e.is_targetable():
 			continue
 		var d := e.global_position.distance_to(global_position)
 		if d < closest:
@@ -1062,10 +1078,9 @@ func _drive_body(delta: float) -> void:
 		Sfx.play(Sfx.STEP, -27.5, 0.18)
 		# 이동 계통 Lv3 부터 발자국이 빛납니다. 소리를 거의 지운 자리라
 		# 눈으로 걸음이 보이는 편이 낫습니다.
-		var mlv := skill_lv("move")
-		if mlv >= 3:
+		if skill_lv("move") >= 3:
 			Fx.ring(get_parent(), global_position, Color(0.7, 1.0, 0.8),
-				0.5 if mlv < 5 else 0.9, 0.26)
+				0.5, 0.26)
 
 	var bob := 0.0
 	var lean := Vector2.ZERO      # x=앞뒤(pitch), y=좌우(roll)
@@ -1439,14 +1454,6 @@ func _drive_pose_layer(delta: float) -> void:
 	if _pose == null or _roll_time > 0.0:
 		return
 	var want := 0.0
-	if _splash_time > 0.0:
-		# **물장난이 가장 앞입니다.** 이때는 다른 아무 일도 안 일어나므로
-		# 뒤엣것과 겨룰 일이 없습니다.
-		_pose.pose = PoseOverride.SPLASH_A if _splash_left else PoseOverride.SPLASH_B
-		# 팔을 바꿀 때마다 **덜 섞인 데서 출발**합니다. 1.0 에 붙여 두면 두
-		# 자세 사이를 미끄러지듯 오가서 첨벙거리는 맛이 없습니다.
-		_pose.weight = lerpf(_pose.weight, 1.0, 1.0 - exp(-16.0 * delta))
-		return
 	if _lunge_time > 0.0 and _lunge_at != null:
 		# 달려드는 자세가 맞은 자세 다음입니다. 달려가다 맞으면 그쪽이
 		# 먼저 보여야 합니다.
@@ -1682,10 +1689,11 @@ func _roll_afterimage() -> void:
 	##
 	## 값이 싸지 않으므로(뼈 38개짜리 subtree 복제) 구르는 0.28초 동안 넷까지만
 	## 떨굽니다. 그보다 촘촘해도 눈에는 같습니다.
-	# 계통 상한이 3 이 되면서 문턱을 2 로 내렸습니다(옛 3). 잔상이 Lv3 에서만
-	# 뜨면, 마지막 한 단계까지 구르기가 눈에 아무 변화도 없는 기술이 됩니다.
+	# **문턱은 Lv3 입니다.** 잔상은 「기존 5레벨 이펙트」였고, 계통을 끝까지
+	# 판 자리의 상입니다. 상한이 3 이 되면서 2 로 내려 둔 적이 있는데, 그러면
+	# 적을 통과하기만 하는 Lv2 가 눈에는 Lv3 과 같아 보입니다.
 	var lv := skill_lv("roll")
-	if lv < 2 or body == null:
+	if lv < 3 or body == null:
 		return
 	# 밝은 잔상은 **뚫는 몸**(「구르는 돌」)입니다. 장수는 여기서 안 셉니다 -
 	# 잔상은 **거리마다** 떨구므로 「먼 구르기」를 찍으면 그만큼 늘어납니다.
@@ -1750,7 +1758,7 @@ func grab_press() -> void:
 		return
 	if ultimate_press("grab"):
 		return
-	if _splash_time > 0.0 or _joy_time > 0.0 or _dash_time > 0.0 or _dead or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _dash_time > 0.0 or _dead or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
 	if _held != null:
 		if not is_instance_valid(_held):
@@ -1970,13 +1978,8 @@ func _drive_throw(delta: float) -> void:
 	# 날아가는 소리가 먼저 납니다.
 	Sfx.play(Sfx.THROW, -4.0, 0.10)
 	if thrown is Prop:
-		# 폭죽 놀이(축복). 맞는 순간 터집니다.
-		thrown.blast = state.prop_blast
 		thrown.throw(_throw_dir, state.damage * THROW_MULT)
 	elif thrown is Enemy:
-		# 메다꽂기(축복). 떨어지는 자리에서 주변이 함께 굳습니다 - 던진 적을
-		# **폭탄으로** 쓰는 판이 됩니다.
-		thrown.slam_stun = state.slam_stun
 		# **밀기 계통 이펙트는 던지기에도 붙습니다.**
 		#
 		# 던지기는 밀기의 큰 형인데 이펙트만 안 붙어 있었습니다 - 계통을
@@ -2500,20 +2503,36 @@ func _play_push() -> void:
 func _lunge_target() -> Node3D:
 	## 보고 있는 쪽의 가장 가까운 적. 등 뒤는 세지 않습니다 - 뒤로 달려드는
 	## 것은 조작이 아니라 사고입니다.
+	# **록온이 꺼져 있으면 넓게 봅니다.** 그때는 조준이 가는 쪽이라, 좁은 각을
+	# 그대로 두면 옆에 붙은 적을 밀려고 매번 몸을 돌려 세워야 합니다.
+	var arc := GRAB_ARC if auto_aim else GRAB_ARC_FREE
+	var half := cos(arc * 0.5)
 	var best: Node3D = null
-	var closest := LUNGE_RANGE
+	# **닿는지(사거리·각)와 고르는 것(점수)은 다른 일입니다.** 점수를 사거리로
+	# 막아 두면 2.4m 40도처럼 **닿는데 점수만 넘는** 적이 조용히 빠집니다.
+	var best_score := INF
 	for node in get_tree().get_nodes_in_group("enemies"):
 		var enemy := node as Enemy
 		if not is_instance_valid(enemy) or enemy.held_by != null:
 			continue
+		# **밀려 날아가는 중이면 못 겁니다.** 붙잡아 두는 밀기를 막습니다.
+		if not enemy.is_targetable():
+			continue
 		var to: Vector3 = enemy.global_position - global_position
 		to.y = 0.0
 		var d := to.length()
-		if d >= closest:
+		if d >= LUNGE_RANGE:
 			continue
-		if d > 0.2 and to.normalized().dot(aim) < cos(GRAB_ARC * 0.5):
+		var dot := 1.0 if d <= 0.2 else to.normalized().dot(aim)
+		if dot < half:
 			continue
-		closest = d
+		# **거리에 각을 얹어 고릅니다.** 순전히 가까운 것으로 고르면 넓힌
+		# 각에서 어깨 뒤가 이깁니다 - 겨눈 쪽이 아닌 것이 밀리면, 넓힌 것이
+		# 도움이 아니라 딴 데를 치는 일이 됩니다.
+		var score := d + acos(clampf(dot, -1.0, 1.0)) * GRAB_ANGLE_COST
+		if score >= best_score:
+			continue
+		best_score = score
 		best = enemy
 	return best
 
@@ -2633,8 +2652,6 @@ func _shove_one(enemy: Node3D) -> void:
 	enemy.call("take_damage", float(roll[0]) * shove_mult, bool(roll[1]),
 		Vector3.ZERO, 0.0, global_position)
 	note_hit()
-	if state.lifesteal > 0.0:
-		state.heal(float(roll[0]) * shove_mult * state.lifesteal)
 	Fx.burst(get_parent(), enemy.global_position + Vector3(0, 0.7, 0),
 		Color(1.0, 0.8, 0.5), 12, 3.6)
 	# 밀기 계통 Lv3 부터 **미는 힘이 보입니다.**
@@ -2646,13 +2663,12 @@ func _shove_one(enemy: Node3D) -> void:
 	# 실루엣 뒤로 파란 직선을 깔고(만화가 속도를 그리는 방법), 팔에만 잔상을
 	# 남깁니다. 색은 구르기 잔상과 같은 파랑입니다 - 같은 힘에서 나온 것으로
 	# 읽히게.
-	# **이펙트는 계통 Lv2 부터** 붙습니다(Lv3 이 강한 쪽).
+	# **이펙트는 계통 Lv3 에서만** 붙습니다(옛 5레벨 이펙트).
 	#
-	# 예전 문턱은 3 과 5 였는데, 계통 상한이 3 이 되면서 5 는 영영 안 옵니다.
-	# 세기는 여전히 **실제로 오른 값**에서 뽑습니다 - 레벨로 세면 이펙트가
-	# 수치와 따로 놀아 거짓말을 합니다.
+	# 세기는 레벨이 아니라 **실제로 오른 값**에서 뽑습니다 - 레벨로 세면
+	# 이펙트가 수치와 따로 놀아 거짓말을 합니다.
 	var plv := skill_lv("push")
-	if plv >= 2:
+	if plv >= 3:
 		# **장수는 넉백, 진하기는 피해**입니다(위 _picks 참고).
 		var knock := _picks(state.shove_knock, 0.7)
 		var ghosts := clampi(2 + knock, 2, 6)
@@ -2778,7 +2794,7 @@ func _begin_shout() -> bool:
 		return false
 	if _shout_charge >= 0.0:
 		return false        # 이미 모으는 중
-	if _splash_time > 0.0 or _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 			or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 			or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return false
 	# **숨은 여기서 확인만** 하고 뺏지 않습니다. 모으다 그만두는 일이 값을
 	# 치르는 일이 되면, 잘못 눌렀을 때 손해가 두 번입니다.
@@ -2811,6 +2827,48 @@ func _drive_shout_charge(delta: float) -> void:
 		return
 	# 느려지는 것은 `_swing_move_scale` 이 맡습니다(평소의 0.2배).
 	_shout_preview()
+	_shout_charge_hits()
+
+
+## 모으는 동안 부채꼴 안의 적을 굳혀 두는 시간(초).
+##
+## 매 프레임 새로 걸므로 **머무는 동안 계속 굳어 있습니다.** 값이 짧아야
+## 부채꼴 밖으로 나간 순간 곧바로 풀립니다 - 길게 걸면 스쳐 지나간 적이
+## 한참 뒤까지 굳어 있어서, 굳힌 것이 내가 한 일로 안 읽힙니다.
+const SHOUT_CHARGE_STAGGER := 0.12
+
+
+func _shout_charge_hits() -> void:
+	## **소리는 지르기 시작할 때부터 적에게 닿습니다.**
+	##
+	## 예전에는 손을 뗄 때 한 번만 판정했습니다. 그러면 0.5초 동안 부채꼴을
+	## 얼굴에 대고 있어도 적은 아무 일 없이 때리다가, 마지막 한 프레임에
+	## 갑자기 굳었습니다 - **보이는 것과 일어나는 일이 어긋납니다.**
+	##
+	## 여기서 넣는 것은 **굳힘뿐**입니다. 피해와 밀어냄은 지를 때 한 번입니다 -
+	## 그것들은 상태가 아니라 한 방이라, 매 프레임 넣으면 0.5초 모으는 동안
+	## 예순 번 들어가 즉사시키고 적을 방 밖으로 날려 버립니다.
+	if state == null:
+		return
+	var charge := maxf(_shout_charge, SHOUT_CHARGE_MIN)
+	var half := cos(deg_to_rad(shout_arc(charge)) * 0.5)
+	for node in get_tree().get_nodes_in_group("enemies"):
+		var enemy := node as Node3D
+		if not is_instance_valid(enemy) or not enemy.has_method("stagger_for"):
+			continue
+		var to: Vector3 = enemy.global_position - global_position
+		to.y = 0.0
+		# 그림(`Fx.shout_fan`)·판정(`_resolve_swing`)과 **같은 함수**를 씁니다.
+		var reach: float = shout_reach(charge) 			+ float(enemy.get_meta("body_radius", 0.4))
+		if to.length() > reach:
+			continue
+		if to.length() > 0.05 and to.normalized().dot(aim) < half:
+			continue
+		# 막는 적(베개)은 소리에도 안 굳습니다. 피해가 0 인데 경직만 걸리면
+		# 막은 것이 아무 값도 안 하는 셈입니다(`_guarded` 참고).
+		if _guarded(enemy):
+			continue
+		enemy.call("stagger_for", SHOUT_CHARGE_STAGGER)
 
 
 func _shout_preview() -> void:
@@ -2832,24 +2890,37 @@ func _shout_preview() -> void:
 	_shout_prev.global_position = global_position + Vector3(0, 0.05, 0)
 	_shout_prev.rotation.y = atan2(-aim.x, -aim.z)
 
-	# **소용돌이도 같이 자랍니다.**
+	# **소리가 퍼져 나가는 선도 같이 자랍니다.**
 	#
-	# 지를 때 한 번 터뜨리던 것을 모으는 동안 내내 띄우는 것으로 바꿨습니다 -
-	# 소리는 누르는 순간부터 나고 부채꼴도 그때부터 자라는데 소용돌이만
-	# 마지막에 나오면, 셋이 서로 다른 것을 말합니다.
+	# 소용돌이(원뿔 + 나선 셰이더)를 걷어낸 자리입니다. 모양은 그럴듯했지만
+	# **덩어리**라 그 뒤의 적이 가려졌습니다 - 굴러 피할 자리를 보려고 켜 둔
+	# 그림이 그 자리를 덮는 셈이었습니다. 선 다섯과 그 위를 흐르는 구는
+	# **사이가 비어 있어서 뒤가 그대로 보입니다.**
 	#
 	# **판정과 같은 값**을 넘깁니다(`shout_reach`, `shout_arc`). 부채꼴이
-	# 자라면 소용돌이도 정확히 그만큼 자랍니다.
+	# 자라면 선도 정확히 그만큼 길고 넓어집니다.
 	if _shout_vortex == null or not is_instance_valid(_shout_vortex):
-		_shout_vortex = Fx.make_vortex(get_parent())
-	Fx.drive_vortex(_shout_vortex,
+		_shout_vortex = Fx.make_shout_rays(get_parent())
+		_shout_flow = 0.0
+	_shout_flow = fposmod(_shout_flow + get_physics_process_delta_time()
+		/ Fx.RAY_FLOW, 1.0)
+	Fx.drive_shout_rays(_shout_vortex,
 		global_position + Vector3(0, MOUTH_HEIGHT, 0),
 		aim, shout_reach(charge) + 0.4, MOUTH_HEIGHT, shout_arc(charge),
-		# 모을수록 진해집니다. 다 모이면 진하기도 최대입니다.
-		0.45 + 0.55 * charge)
-	# 다 모이면 진해집니다. 언제가 최대인지 눈으로도 알 수 있어야 합니다.
-	_shout_prev_mat.albedo_color = Color(1.0, 0.88, 0.5, 0.16).lerp(
-		Color(1.0, 0.72, 0.32, 0.40), charge)
+		# 모을수록 조금 진해집니다. **시작부터 진합니다** - 아래 참고.
+		0.85 + 0.15 * charge, _shout_flow)
+	# **누르는 순간부터 보여야 합니다.**
+	#
+	# 시작 진하기가 0.16 이었습니다. 부채꼴도 소용돌이도 누르는 첫 프레임부터
+	# 있었는데(실측: 모은 0.20 에 부채꼴·소용돌이 둘 다 true), 그때는 사거리도
+	# 최소(×0.14)라 **작고 옅은 것이 겹쳐** 폰에서는 아무것도 없는 것으로
+	# 보였습니다 - 손에는 "지를 때만 뭔가 나온다" 로 느껴집니다.
+	#
+	# 크기는 안 건드립니다. 작게 시작하는 것은 정한 규칙이고, 크기를 올리면
+	# 살짝 지르는 것과 끝까지 모으는 것의 차이가 없어집니다. **진하기만**
+	# 올립니다 - 모으는 정도는 크기가 이미 말하고 있습니다.
+	_shout_prev_mat.albedo_color = Color(1.0, 0.84, 0.45, 0.34).lerp(
+		Color(1.0, 0.72, 0.32, 0.46), charge)
 
 
 func _clear_shout_preview() -> void:
@@ -2857,16 +2928,16 @@ func _clear_shout_preview() -> void:
 		_shout_prev.queue_free()
 	_shout_prev = null
 	_shout_prev_mat = null
-	# 소용돌이는 **그 자리에 두고 스러지게** 합니다. 같이 지우면 지르는
-	# 순간에 화면에서 사라져서, 소리는 이어지는데 그림만 끊깁니다.
+	# 선은 **그 자리에 두고 스러지게** 합니다. 같이 지우면 지르는 순간에
+	# 화면에서 사라져서, 소리는 이어지는데 그림만 끊깁니다.
 	if _shout_vortex != null and is_instance_valid(_shout_vortex):
 		var gone := _shout_vortex
 		var tw := gone.create_tween()
 		tw.tween_method(func(f: float) -> void:
-			for i in gone.get_child_count():
-				var m := gone.get_child(i) as MeshInstance3D
-				if m != null and m.material_override is ShaderMaterial:
-					(m.material_override as ShaderMaterial) 						.set_shader_parameter("fade", f),
+			for mi in Fx.all_meshes(gone):
+				var m := mi.material_override as StandardMaterial3D
+				if m != null:
+					m.albedo_color.a = m.albedo_color.a * f,
 			1.0, 0.0, VORTEX_FADE)
 		tw.tween_callback(gone.queue_free)
 	_shout_vortex = null
@@ -2901,7 +2972,7 @@ func _try_attack() -> void:
 		return
 	# 끌고 있으면 고함도 못 지릅니다. 두 손이 이미 차 있습니다 - 자세가
 	# 서로 덮어써서 팔이 두 곳을 동시에 가리키게 됩니다.
-	if _splash_time > 0.0 or _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
 	# **모은 만큼 냅니다.** 살짝 지른 것은 30%, 끝까지 모은 것은 100% 입니다.
 	var shout_cost := breath_cost("shout", BREATH_SHOUT) 		* lerpf(SHOUT_COST_MIN, 1.0, clampf(_shout_fired, 0.0, 1.0))
@@ -2910,7 +2981,7 @@ func _try_attack() -> void:
 		return
 	_spend_breath(shout_cost)
 	_note_repeat("shout")
-	_attack_cd = SHOUT_COOLDOWN / maxf(0.2, state.attack_rate)
+	_attack_cd = SHOUT_COOLDOWN
 	_attack_cd_max = _attack_cd
 	_swing_time = SWING_TIME
 	_shout_hold = SHOUT_POSE_TIME
@@ -2940,55 +3011,9 @@ func _try_attack() -> void:
 			shout_reach(_shout_fired), 5 + slv * 3, state.shout_knock > 0.0)
 
 
-## 물장난이 도는 시간과, 팔을 좌우로 바꾸는 주기.
-##
-## 1.8초는 "쉬었다" 가 몸에 남는 최소 길이입니다. 0.28초마다 팔을 바꾸면
-## 여섯 번쯤 첨벙거립니다 - 두세 번이면 실수처럼 보이고, 더 잦으면 떠는
-## 것처럼 보입니다.
-const SPLASH_TIME := 1.8
-const SPLASH_SWAP := 0.28
-
-
-func begin_splash(at: Vector3) -> void:
-	## 물놀이터에 들어가 물장난을 칩니다.
-	##
-	## 회복이 숫자로만 일어나면 그 자리가 무엇을 하는 곳인지 화면에 안
-	## 남습니다 - 값을 치른 것이 몸으로 보여야 다음 층에서도 찾아갑니다.
-	_splash_time = SPLASH_TIME
-	# 물 한가운데로 걸어 들어갑니다. 가장자리에 선 채로 팔만 저으면 물에
-	# 들어간 것이 아니라 물을 향해 손짓하는 것으로 보입니다.
-	global_position = Vector3(at.x, global_position.y, at.z)
-	velocity = Vector3.ZERO
-	_splash_burst(at)
-
-
-func _splash_burst(at: Vector3) -> void:
-	Fx.burst(get_parent(), at + Vector3(0, 0.35, 0),
-		Color(0.62, 0.88, 1.0), 14, 3.0)
-	Sfx.play(Sfx.STEP, -4.0, 0.18)
-
-
-func _drive_splash(delta: float) -> void:
-	## 물장난이 도는 동안. 걷지도 기술을 쓰지도 못합니다.
-	_splash_time -= delta
-	velocity.x = 0.0
-	velocity.z = 0.0
-	_splash_swap -= delta
-	if _splash_swap <= 0.0:
-		_splash_swap = SPLASH_SWAP
-		_splash_left = not _splash_left
-		# 팔을 바꿀 때마다 물이 튑니다. 자세만 오가면 소리 없는 체조입니다.
-		_splash_burst(global_position)
-
-
 func begin_joyride(car: Prop) -> bool:
 	## 자동차에 올라탑니다. 이미 타고 있거나 다른 일을 하는 중이면 안 탑니다.
-	# **물장난 중에는 못 탑니다.**
-	#
-	# 빠져 있어서 물놀이 도중에도 탈 수 있었는데, 그러면 물장난 갈래가 먼저라
-	# (`_physics_process` 의 elif) 자동차 시계가 멈춘 채로 남습니다 - 재 보니
-	# 2.23초 동안 0.75초밖에 안 줄었습니다.
-	if _splash_time > 0.0 or _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
 		return false
 	if car == null or not is_instance_valid(car) or car.spent:
 		return false
@@ -3119,7 +3144,7 @@ func _try_dash() -> void:
 		return
 	# 끌고 있으면 못 구릅니다. 사람을 잡은 채로 앞구르기를 하면 잡은 손이
 	# 어디로 가야 할지 정할 수가 없습니다.
-	if _splash_time > 0.0 or _joy_time > 0.0 or _dash_cd > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _read_time > 0.0:
+	if _joy_time > 0.0 or _dash_cd > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _read_time > 0.0:
 		return
 	var roll_cost := breath_cost("roll", BREATH_ROLL) * state.roll_cost_mult()
 	if not _has_breath(roll_cost):
@@ -3230,7 +3255,7 @@ func _resolve_swing() -> void:
 				aim, 1.2, 5, true)
 		var blocked := _guarded(enemy)
 		enemy.call("take_damage", float(roll[0]), bool(roll[1]), aim,
-			Enemy.SHOUT_STAGGER + state.shout_stun, global_position)
+			Enemy.SHOUT_STAGGER, global_position)
 		if blocked:
 			continue
 		# 돌풍(축복). 소리에 밀려 뒤로 날아갑니다.
@@ -3246,10 +3271,6 @@ func _resolve_swing() -> void:
 			enemy.knock_back(away.normalized() * state.shout_knock)
 		hit_any = true
 		note_hit()
-		if state.lifesteal > 0.0 and float(roll[0]) > 0.0:
-			var healed: float = float(roll[0]) * state.lifesteal
-			state.heal(healed)
-			health_changed.emit(state.hp, state.max_hp)
 	if hit_any:
 		Game.shake(0.16, 0.10)
 

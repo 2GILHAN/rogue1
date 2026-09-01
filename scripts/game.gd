@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.26.2"
+const VERSION := "v0.27"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -107,10 +107,9 @@ var dungeon: Dungeon
 var player: Player
 var portal: Portal
 var shop: Shopkeeper
-## 물놀이터의 풀장. 상호작용 거리를 여기서 잽니다.
+## 풀장. **곧 물물교환 자리**입니다 - 상호작용 거리를 여기서 잽니다.
+## 풀장. **물물교환하는 아이가 그 안에서 놉니다** - 이 자리가 곧 상점입니다.
 var _waterpark: Prop = null
-## 이 층에서 물놀이터를 이미 썼는가. 층마다 한 번입니다.
-var _waterpark_used := false
 ## 회피 확인용.
 var _dodged := false
 var _hp_at_windup := 0.0
@@ -118,17 +117,9 @@ var _hp_at_windup := 0.0
 ##
 ## 풀장이 지름 3.7m(반지름 1.85)라 2.35 면 가장자리 바깥 0.5m 입니다 -
 ## 물에 잠기지도, 따로 떨어져 보이지도 않는 자리입니다.
-## 풀장 한가운데에서 물물교환하는 아이까지의 거리(m).
-##
-## 풀장이 지름 3.69m(반지름 1.84)이고 테두리 높이가 1.20m 입니다. **1.68 이
-## 테두리 한가운데**라, 거기 걸터앉으면 다리가 물 쪽으로 늘어집니다.
-##
-## 물 안(1.25)에 앉히려던 것을 물렸습니다 - 테두리가 아이 키와 거의 같아서
-## 무엇을 해도 가립니다.
-const SHOP_GAP := 1.68
 ## 적 한 마리에 필요한 방 칸 수. 방이 줄면 적도 이 값으로 같이 줄어듭니다.
 const FOE_ROOM_TILES := 26
-## 테스트 방에서 물놀이터를 놓는 자리(방 한가운데에서 몇 m 떨어져서).
+## 테스트 방에서 풀장을 놓는 자리(방 한가운데에서 몇 m 떨어져서).
 ##
 ## 방이 22칸(33m)이라 9m 면 한가운데에서 넉넉히 벗어나면서도 벽에 안 붙습니다 -
 ## 풀장 반지름이 1.85m 이고 물물교환하는 아이가 그 옆 2.9m 에 섭니다.
@@ -229,6 +220,8 @@ var _leak_probe := false
 var _spam_prev := {}
 var _spam_count := {}
 var _probe_arg := ""
+## --pose=reach 에서 적을 먼 쪽(2.4m)에 세울까.
+var _probe_far := false
 var _probe_foe: Enemy = null
 var _probe_hp := 0.0
 ## --push-lv=N 으로 밀기 계통을 미리 올려 둡니다(비교용).
@@ -376,6 +369,8 @@ func _read_args() -> void:
 			# 확인용 배치에 곁들이는 낱말. 지금은 벽 확인(`wallhug`)에서
 			# 등 뒤 벽/가리는 벽을 고르는 데 씁니다.
 			_probe_arg = a.substr(7)
+		elif a == "--far":
+			_probe_far = true
 		elif a.begins_with("--tiger="):
 			# 고함 Lv5 의 호랑이를 옆얼굴/정면 중에 고릅니다. 둘 다 남겨 두고
 			# 화면에서 견줍니다.
@@ -760,7 +755,7 @@ func build_floor() -> void:
 		# 실험용 방에는 출구도 소품도 두지 않습니다. 보려는 것 하나만 남기는
 		# 것이 이 방의 전부입니다.
 		#
-		# **물놀이터와 물물교환은 예외입니다.** 둘 다 방 하나에 놓여야 하는
+		# **풀장은 예외입니다.** 방 하나에 놓여야 하는
 		# 것이고, 실제 판에서는 2층부터 한 번씩만 나와서 손볼 때마다 층을
 		# 넘겨야 했습니다 - 확인하려는 것을 확인할 수 없는 자리였습니다.
 		# 구석에 놓아 방 한가운데(적이 나오고 스킬을 시험하는 자리)를 비워
@@ -769,10 +764,9 @@ func build_floor() -> void:
 		_place_waterpark(corner)
 		shop = Shopkeeper.new()
 		world.add_child(shop)
-		shop.global_position = corner + Vector3(0.0, 0.0, -SHOP_GAP)
-		_waterpark_used = false
-		# 사탕이 없으면 물놀이터가 "사탕이 모자랍니다" 만 말합니다. 실험하는
-		# 자리에서는 값이 아니라 **일어나는 일**을 봐야 합니다.
+		shop.stand_in(_waterpark)
+		# 사탕이 없으면 교환 창이 "모자랍니다" 만 말합니다. 실험하는 자리에서는
+		# 값이 아니라 **일어나는 일**을 봐야 합니다.
 		state.gold = 300
 		ui.set_minimap(dungeon, player.global_position, player.global_position)
 		ui.set_boons(_boon_names)
@@ -798,7 +792,7 @@ func build_floor() -> void:
 	portal.global_position = dungeon.room_center(exit_room)
 	portal.entered.connect(_on_portal_entered)
 
-	# **물놀이터가 상점 자리를 씁니다.**
+	# **풀장이 상점 자리입니다.**
 	#
 	# 상인을 뺀 이유: 사탕를 모아 능력치를 사는 일이 스킬 고르기와 하는 말이
 	# 같았습니다(둘 다 "무엇을 세게 할까"). 층이 다섯뿐이라 상인을 두 번쯤
@@ -812,18 +806,12 @@ func build_floor() -> void:
 		shop_room = rng.randi_range(1, dungeon.rooms.size() - 2)
 		var heart: Vector3 = dungeon.room_center(shop_room)
 		_place_waterpark(heart)
-		# **물물교환하는 아이는 풀장 안에 앉습니다.**
-		#
-		# 자리는 **화면에서 먼 쪽**입니다. 카메라가 +Z 쪽에서 내려다보므로
-		# -Z 가 먼 쪽 물가이고, 거기 기대앉으면 얼굴이 이쪽을 봅니다 - 가까운
-		# 쪽에 앉히면 등만 보입니다.
-		#
-		# 같은 방(같은 물)에 두는 이유: 사탕을 쓰는 곳이 둘(교환·물놀이)인데
-		# 갈라 두면 "어느 쪽에 쓸까" 가 한 화면에서 안 보입니다. 물가에 서면
-		# 물놀이, 그 아이 앞까지 돌아가면 교환입니다(`Shopkeeper.RANGE`).
+		# **풀장 한가운데에 세웁니다.** 아이가 곧 이 자리이고, 이 자리가 곧
+		# 상점입니다 - 물놀이터와 상인이 따로 있으면 같은 버튼으로 두 가지가
+		# 나와서, 어느 쪽이 열릴지를 반걸음 차이가 정합니다.
 		shop = Shopkeeper.new()
 		world.add_child(shop)
-		shop.global_position = heart + Vector3(0.0, 0.0, -SHOP_GAP)
+		shop.stand_in(_waterpark)
 
 	_spawn_enemies(exit_room, shop_room)
 	_place_teacher(exit_room)
@@ -833,7 +821,6 @@ func build_floor() -> void:
 	if _alive == 0:
 		portal.unlock()
 	_bot_shopped = false
-	_waterpark_used = false
 	if _bot:
 		print("[bot] 지하 %d층 시작 - 적 %d, 방 %d" % [state.floor_num, _alive, dungeon.rooms.size()])
 	ui.set_test_panel(false)
@@ -988,7 +975,7 @@ func _scatter_props() -> void:
 	# 우유는 남깁니다. 던지는 물건이 아니라 **마시는 물건**이고, 체력이 자원인
 	# 이상 방에서 찾아내는 것 자체가 할 일입니다.
 	_scatter_fixed_count("milk", 2)
-	# 풀장과 미끄럼틀은 여기서 안 놓습니다 - **한 벌(물놀이터)로만** 나옵니다
+	# 풀장은 여기서 안 놓습니다 - **물물교환 자리로만** 나옵니다
 	# (`_place_waterpark`). 따로 흩으면 방마다 미끄럼틀이 서서, 무엇을 하는
 	# 물건인지 알기 전에 시야만 가립니다.
 	# 책장은 벽 가구라 여러 개 있어도 방을 막지 않습니다.
@@ -1578,10 +1565,8 @@ func _drive_pose() -> void:
 					st.shove_knock, st.shove_damage,
 					clampi(2 + knock, 2, 6), str(st.shove_damage >= 0.8),
 					clampi(6 + knock * 2, 6, 14)])
-				print("  고함   경직=%.1f 돌풍=%.0f -> 구슬 %d개(맞은자리 폭발=%s)" % [
-					st.shout_stun, st.shout_knock,
-					clampi(5 + player._picks(st.shout_stun, 0.5) * 3, 5, 14),
-					str(st.shout_knock > 0.0)])
+				print("  고함   돌풍=%.0f -> 구슬(맞은자리 폭발=%s)" % [
+					st.shout_knock, str(st.shout_knock > 0.0)])
 				print("  구르기 뚫기=%.0f -> 밝은 잔상=%s" % [
 					st.roll_pierce, str(st.roll_pierce > 0.0)])
 			player.bot_active = true
@@ -1825,6 +1810,89 @@ func _drive_pose() -> void:
 					player.global_position + Vector3(0, 1.25, 0))
 				print("[화면] 발 %.2f  머리 %.2f  (0.5=한가운데, 클수록 아래)" % [
 					feet.y / vp.y, head.y / vp.y])
+		"reach":
+			# **록온을 끄고 밀기가 닿는 각**을 잽니다.
+			#
+			# 적을 여러 각에 하나씩 세워 두고, 조준은 정면(-Z)에 고정한 채
+			# 잡기를 눌러 봅니다. 각이 커질수록 어디서 끊기는지가 나옵니다.
+			if _frames == 12:
+				player.bot_active = false
+				lock_on = false
+				player.auto_aim = false
+			if _frames >= 20 and _frames < 20 + 10 * 14 and (_frames - 20) % 14 == 0:
+				var idx := (_frames - 20) / 14
+				var deg := float(idx) * 20.0
+				for n in get_tree().get_nodes_in_group("enemies"):
+					(n as Node3D).queue_free()
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.speed = 0.0
+				foe.set_physics_process(false)
+				var r := deg_to_rad(deg)
+				# 1.4m 앞, 각도만 바꿔 세웁니다.
+				foe.global_position = player.global_position 					+ Vector3(sin(r), 0.0, -cos(r)) * (2.4 if _probe_far else 1.4)
+				_probe_foe = foe
+			if _frames >= 24 and _frames < 24 + 10 * 14 and (_frames - 24) % 14 == 0:
+				var idx2 := (_frames - 24) / 14
+				player.aim = Vector3(0, 0, -1)
+				var picked: Node3D = player._lunge_target()
+				print("[사거리] %.1fm %3d도 -> 걸림=%s" % [
+					2.4 if _probe_far else 1.4, int(float(idx2) * 20.0),
+					str(picked != null)])
+		"cleanup":
+			# **이번 정리가 실제로 도는지** 잽니다.
+			#
+			# 적은 못 움직이게 세워 둡니다 - 스스로 달려가면 밀림이 언제
+			# 풀리는지가 그 걸음에 섞입니다.
+			if _frames == 10:
+				player.bot_active = false
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.global_position = player.global_position + Vector3(2.0, 0, 0)
+				foe.speed = 0.0
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+			#
+			#   1. 물물교환에서 산 것이 스킬을 찍어도 안 지워지는가
+			#   2. 계통 Lv3 에서 필살기 게이지가 열리는가
+			#   3. 구르기 거리(기본/Lv3)
+			#   4. 밀려 날아가는 적이 지정 불가가 되는가
+			if _frames == 20:
+				state.gold = 999
+				state.buy({"id": "vigor", "price": 0})
+				state.buy({"id": "swift", "price": 0})
+				state.buy({"id": "breath", "price": 0})
+				print("[정리] 산 직후   최대체력=%.0f 속도=%.2f 회복=%.1f" % [
+					state.max_hp, state.move_speed, state.breath_regen])
+			if _frames == 30:
+				state.apply_boon("push")
+				print("[정리] 스킬 찍은 뒤 최대체력=%.0f 속도=%.2f 회복=%.1f  (지워지면 실패)" % [
+					state.max_hp, state.move_speed, state.breath_regen])
+				print("[정리] 필살기 Lv1 에서 열림=%s (false 여야 함)" % str(player.ultimate.unlocked()))
+			if _frames == 34:
+				state.apply_boon("push")
+				state.apply_boon("push")
+				print("[정리] 필살기 밀기 Lv%d 에서 열림=%s (true 여야 함)" % [
+					state.family_level("push"), str(player.ultimate.unlocked())])
+			if _frames == 40:
+				state.skill_lv["roll"] = 0
+				state._recompute()
+				print("[정리] 구르기 Lv0 %.2fm   Lv1 %.2fm   Lv2 %.2fm   Lv3 %.2fm" % [
+					Player.DASH_SPEED * Player.DASH_TIME,
+					Player.DASH_SPEED * Player.DASH_TIME * 1.20,
+					Player.DASH_SPEED * Player.DASH_TIME * 1.50,
+					Player.DASH_SPEED * Player.DASH_TIME * 1.80])
+			if _frames == 50 and is_instance_valid(_probe_foe):
+				print("[정리] 밀기 전  지정가능=%s" % str(_probe_foe.is_targetable()))
+				_probe_foe.knock_back(Vector3(1, 0, 0) * 6.5)
+			if _frames == 52 and is_instance_valid(_probe_foe):
+				print("[정리] 밀린 직후 지정가능=%s (false 여야 함) 밀림=%.2f" % [
+					str(_probe_foe.is_targetable()), _probe_foe._knock])
+			if _frames == 90 and is_instance_valid(_probe_foe):
+				print("[정리] 멎은 뒤   지정가능=%s (true 여야 함) 밀림=%.2f" % [
+					str(_probe_foe.is_targetable()), _probe_foe._knock])
 		"lockon":
 			# 록온 범위가 **밀기 사거리를 따라가는지** 봅니다.
 			if _frames == 20:
@@ -1890,6 +1958,11 @@ func _drive_pose() -> void:
 					_frames, player.shout_reach(player._shout_charge) + 0.4,
 					player.shout_arc(player._shout_charge),
 					vs, vfrac, vfrac * 132.0])
+				print("[모으는중] f=%d 모은 %.2f 부채꼴=%s 소용돌이=%s 진하기=%.2f" % [
+					_frames, player._shout_charge,
+					str(player._shout_prev != null and is_instance_valid(player._shout_prev)),
+					str(player._shout_vortex != null and is_instance_valid(player._shout_vortex)),
+					player._shout_prev_mat.albedo_color.a if player._shout_prev_mat != null else -1.0])
 				print("[모으는중] f=%d 모은 %.2f 속도 %.2f (평소 %.2f) 팔뒤=%.2f" % [
 					_frames, player._shout_charge,
 					Vector2(player.velocity.x, player.velocity.z).length(),
@@ -2076,7 +2149,7 @@ func _drive_pose() -> void:
 		"balance":
 			# **이번 개편이 실제로 도는지** 한 자리에서 봅니다.
 			#
-			#   숨 100 · 고함 피해 0 · 밀기 연쇄 · 물놀이터 · 자동차 · 5층 끝
+			#   숨 100 · 고함 피해 0 · 밀기 연쇄 · 풀장 · 자동차 · 5층 끝
 			#
 			# 봇 소크는 6000 프레임에 두 층밖에 못 가서 5층 마무리를 못 봅니다.
 			# 여기서는 층을 5로 놓고 시작해 출구로 걸어 들어갑니다.
@@ -2094,18 +2167,16 @@ func _drive_pose() -> void:
 					str(state.has_roll_damage()), str(state.has_revive())])
 				# 다 찍었으면 더 내밀 것이 없어야 합니다.
 				print("[균형] 남은 선택지 %d 개" % state.offer_boons(rng).size())
-				print("[균형] 물놀이터=%s 자동차=%d대" % [
+				print("[균형] 풀장=%s 자동차=%d대" % [
 					str(_waterpark != null),
 					len(get_tree().get_nodes_in_group("props").filter(
 						func(n: Node) -> bool: return (n as Prop).kind == "ridecar"))])
 			if _frames == 20 and _waterpark != null and is_instance_valid(player):
-				# 물놀이터를 화면에 담습니다 - 카메라는 주인공을 따라갑니다.
+				# 풀장을 화면에 담습니다 - 카메라는 주인공을 따라갑니다.
 				player.global_position = _waterpark.global_position + Vector3(0, 0, 1.0)
 			if _frames == 40 and _waterpark != null and is_instance_valid(player):
-				# 물놀이터로 걸어가 씁니다.
+				# 물가로 걸어가 말을 겁니다.
 				player.global_position = _waterpark.global_position + Vector3(-1.6, 0, 0)
-				state.hp = 20.0
-				state.breath = 5.0
 				state.gold = 200
 			if _frames == 30 and shop != null and is_instance_valid(shop):
 				var boxes := []
@@ -2146,16 +2217,22 @@ func _drive_pose() -> void:
 					hy = (sk.global_transform * sk.get_bone_global_pose(head)).origin.y
 				if foot >= 0:
 					fy = (sk.global_transform * sk.get_bone_global_pose(foot)).origin.y
-				print("[앉음] 자리 z=%.2f(풀 기준 %.2f)  머리 %.2fm  발 %.2fm  물 위 %s" % [
-					shop.global_position.z, shop.global_position.z - _waterpark.global_position.z,
-					hy, fy, str(fy > 0.2)])
-				print("[앉음] 무릎 %.0f도  얼굴 방향 yaw %.0f도 (180 이면 화면 쪽)" % [
-					shop._pose.pose["LeftLeg"].x,
-					rad_to_deg(shop.get_node("Node3D").rotation.y) if shop.get_node_or_null("Node3D") != null else 999.0])
+				print("[물장난] 풀 한가운데에서 %.2fm  수면 %.2fm  발 %.2fm  머리 %.2fm" % [
+					Vector2(shop.global_position.x - _waterpark.global_position.x,
+						shop.global_position.z - _waterpark.global_position.z).length(),
+					_waterpark.water_y(), fy, hy])
+				print("[물장난] 팔 %.0f도  얼굴 방향 yaw %.0f도 (180 이면 화면 쪽)" % [
+					shop._pose.pose["LeftArm"].x,
+					rad_to_deg((shop.get_child(0) as Node3D).rotation.y) if shop.get_child_count() > 0 else 999.0])
+			# 교환 창이 열리면 **화면이 멈춥니다.** 확인용 배치는 그 뒤로도
+			# 볼 것이 있으므로 곧바로 닫습니다 - 안 닫으면 남은 검사가
+			# 통째로 안 돕니다(실제로 그렇게 조용히 빠져 있었습니다).
 			if _frames == 46:
-				print("[균형] 물놀이 전 체력 %.0f 숨 %.0f" % [state.hp, state.breath])
-				try_interact()
-				print("[균형] 물놀이 후 체력 %.0f 숨 %.0f" % [state.hp, state.breath])
+				print("[균형] 물가에서 잡기 -> 열림=%s 단계=%d (3=물물교환)" % [
+					str(try_interact()), phase])
+				_close_overlay()
+				phase = Phase.PLAYING
+				get_tree().paused = false
 			if _frames == 170 and is_instance_valid(player):
 				var car := get_tree().get_nodes_in_group("props").filter(
 					func(n: Node) -> bool: return (n as Prop).kind == "ridecar")
@@ -2163,6 +2240,12 @@ func _drive_pose() -> void:
 					player.global_position = (car[0] as Node3D).global_position + Vector3(0.8, 0, 0)
 			if _frames == 176:
 				print("[균형] 자동차 탐=%s" % str(try_interact()))
+				# 자동차가 없는 층에서는 이것도 교환 창을 엽니다. 같은
+				# 프레임에 닫아야 합니다 - 멈춘 뒤에는 프레임이 안 흘러서
+				# 다음 프레임의 닫기가 영영 안 옵니다.
+				_close_overlay()
+				phase = Phase.PLAYING
+				get_tree().paused = false
 			if _frames in [200, 260, 320] and is_instance_valid(player):
 				# 조작이 먹는지: 한쪽으로 계속 밀어 보고 그쪽 성분을 봅니다.
 				player.bot_active = true
@@ -2183,7 +2266,7 @@ func _drive_pose() -> void:
 			if _frames == 240:
 				print("[균형] 질주 끝난 뒤 무적=%s" % str(player.is_invulnerable()))
 			# ── 고함 피해와 밀기 연쇄 ────────────────────────────────
-			if _frames == 300 and is_instance_valid(player):
+			if _frames == 420 and is_instance_valid(player):
 				phase = Phase.PLAYING
 				get_tree().paused = false
 				state.skill_lv = {"push": 0, "shout": 1, "roll": 0,
@@ -2198,20 +2281,33 @@ func _drive_pose() -> void:
 				# _update_aim 이 마우스 자리(0,0)로 덮어써서, 부채꼴 판정이
 				# 엉뚱한 쪽을 봅니다.
 				debug_aim = Vector3(1, 0, 0)
-			if _frames == 306 and is_instance_valid(_probe_foe):
-				var before: float = _probe_foe.hp
-				player.attack()
-			if _frames == 330 and is_instance_valid(_probe_foe):
+			if _frames == 426 and is_instance_valid(_probe_foe):
+				print("[균형] 고함 누르기 전 적 굳음=%.2f" % _probe_foe._stagger)
+				player.shout_press()
+			if _frames == 432 and is_instance_valid(_probe_foe):
+				print("[균형] 모으는 중 모은=%.2f 굳음=%.2f 거리=%.2f 사거리=%.2f 조준%s" % [
+					player._shout_charge, _probe_foe._stagger,
+					_probe_foe.global_position.distance_to(player.global_position),
+					player.shout_reach(maxf(player._shout_charge, 0.0)),
+					str(player.aim.round())])
+			if _frames == 440 and is_instance_valid(_probe_foe):
+				player.shout_release()
+			if _frames == 470 and is_instance_valid(_probe_foe):
 				print("[균형] 고함 Lv1 뒤 적 체력 %.0f / %.0f  (안 깎여야 맞음)" % [
 					_probe_foe.hp, _probe_foe.max_hp])
 				state.skill_lv["shout"] = 3
 				state._recompute()
 				player.state.breath = 100.0
-				player.attack()
-			if _frames == 352 and is_instance_valid(_probe_foe):
+				# **끝까지 모아 지릅니다.** `attack()` 은 최소로 지르는데,
+				# 그때 사거리가 ×0.14(0.80m)라 1.0m 앞의 적에게도 안 닿습니다 -
+				# 안 닿은 것을 "피해가 없다" 로 잘못 읽을 뻔했습니다.
+				player.shout_press()
+			if _frames == 504 and is_instance_valid(_probe_foe):
+				player.shout_release()
+			if _frames == 524 and is_instance_valid(_probe_foe):
 				print("[균형] 고함 Lv3 뒤 적 체력 %.0f / %.0f  (깎여야 맞음)" % [
 					_probe_foe.hp, _probe_foe.max_hp])
-			if _frames == 470:
+			if _frames == 570:
 				# 문은 적이 다 죽어야 열립니다. 여기서는 **들어간 것으로**
 				# 치고 부릅니다 - 보려는 것은 5층 뒤에 무엇이 오는가입니다.
 				print("[균형] 출구 전 층=%d" % state.floor_num)
@@ -2257,7 +2353,7 @@ func _drive_pose() -> void:
 				start_test()
 				for _i in _push_lv:
 					state.apply_family("shout", rng)
-				print("[연타] 고함 Lv%d  공격속도=%.2f" % [_push_lv, state.attack_rate])
+				print("[연타] 고함 Lv%d" % _push_lv)
 			player.bot_active = true
 			player.bot_move = Vector2.ZERO
 			if _probe_foe == null and _frames > 12 and _frames < 200:
@@ -2604,9 +2700,13 @@ func _drive_pose() -> void:
 				if _waterpark != null and is_instance_valid(player):
 					player.global_position = _waterpark.global_position + Vector3(-1.6, 0, 0)
 			if _frames == 46:
-				print("[테스트방] 물놀이 전 체력 %.0f 사탕 %d" % [state.hp, state.gold])
-				try_interact()
-				print("[테스트방] 물놀이 후 체력 %.0f 사탕 %d" % [state.hp, state.gold])
+				print("[테스트방] 물가에서 잡기 -> 열림=%s 단계=%d" % [
+					str(try_interact()), phase])
+			if _frames == 20 and shop != null and _waterpark != null:
+				print("[테스트방] 풀장 %s 수면 y=%.2f | 아이 %s 발 y=%.2f 머리 y=%.2f" % [
+					str(_waterpark.global_position.round()), _waterpark.water_y(),
+					str(shop.global_position.round()), shop.global_position.y,
+					shop.global_position.y + 1.25])
 			# 테스트 방 확인용. 방을 열고 붙잡는 아기를 계속 내보냅니다.
 			# **제목 화면을 실제로 띄운 뒤** 테스트 방으로 들어갑니다.
 			# 자동 시작으로 들어오면 제목이 애초에 없어서, 닫히는지를
@@ -3175,23 +3275,17 @@ func try_interact() -> bool:
 	## 대로 이어집니다.
 	if phase != Phase.PLAYING:
 		return false
-	# **물놀이터와 물물교환은 같은 방에 있습니다.** 둘 다 닿는 자리에서는
-	# 가까운 쪽이 이깁니다 - 순서로 정하면 물가에 서 있는데 교환 창이 열려서,
-	# 무엇을 누른 것인지 손이 모릅니다.
-	var d_shop := INF
-	if shop != null and is_instance_valid(shop) and shop.is_near():
-		d_shop = shop.global_position.distance_to(player.global_position)
-	var d_pool := INF
-	if _waterpark != null and is_instance_valid(_waterpark):
-		var to: Vector3 = _waterpark.global_position - player.global_position
-		to.y = 0.0
-		if to.length() <= WATERPARK_REACH:
-			d_pool = to.length()
-	if d_shop < INF and d_shop <= d_pool:
-		_open_shop()
-		return true
-	if d_pool < INF and _use_waterpark():
-		return true
+	# **풀장이 곧 물물교환입니다.** 아이가 그 안에서 놀고 있고, 물가에서
+	# 잡기를 누르면 교환 창이 열립니다.
+	#
+	# 예전에는 둘이 따로였습니다 - 풀장은 사탕을 내고 체력을 채우는 자리,
+	# 아이는 그 옆에서 물건을 바꾸는 자리. 같은 방에서 같은 버튼으로 두 가지가
+	# 나오니 **어느 쪽이 열릴지를 반걸음 차이가 정했고**, 물가에 서서 누를
+	# 때마다 다른 것이 나왔습니다. 하나로 합치면 그 갈림이 통째로 사라집니다.
+	if shop != null and is_instance_valid(shop):
+		if shop.is_near() or _near_waterpark():
+			_open_shop()
+			return true
 	if _ride_car():
 		return true
 	var shelf := _shelf_near()
@@ -3201,54 +3295,24 @@ func try_interact() -> bool:
 	return false
 
 
-## 물놀이터에 닿는 거리. 풀장 반지름(1.85)에 한 걸음 더.
+## 풀장에서 말이 닿는 거리. 풀장 반지름(1.85)에 한 걸음 더.
+##
+## 아이 자신의 거리(`Shopkeeper.RANGE` 1.7)보다 넓습니다 - 아이는 물 안에
+## 있으므로, 물가 어디에 서든 말이 닿아야 합니다.
 const WATERPARK_REACH := 2.6
-## 물놀이 값(사탕). 층이 깊을수록 비싸집니다 - 아래층의 회복이 더 값진
-## 만큼 사탕도 더 모여 있습니다.
-const WATERPARK_PRICE := 20
 ## 자동차에 올라타는 거리.
 const CAR_REACH := 1.6
 
 
-func _use_waterpark() -> bool:
-	## 물놀이터. **사탕을 내고 체력과 숨을 채웁니다.**
-	##
-	## 값을 받는 이유: 바로 옆에 물물교환하는 아이가 있어서, 같은 사탕을
-	## **지금 쉬는 데 쓸까 다음 층을 위해 쓸까**가 그 자리에서 갈립니다.
-	## 공짜면 그 선택이 통째로 사라지고, 들르는 것이 늘 이득인 절차가 됩니다.
-	##
-	## 층마다 한 번뿐인 것은 그대로입니다 - 사탕만 있으면 계속 채울 수 있으면
-	## 체력이 자원이 아니라 사탕의 다른 이름이 됩니다.
+func _near_waterpark() -> bool:
+	## 풀장 물가에 서 있나.
 	if _waterpark == null or not is_instance_valid(_waterpark):
 		return false
 	if not is_instance_valid(player):
 		return false
 	var to: Vector3 = _waterpark.global_position - player.global_position
 	to.y = 0.0
-	if to.length() > WATERPARK_REACH:
-		return false
-	if _waterpark_used:
-		ui.toast("물이 다 빠졌습니다", UiTheme.DIM)
-		return true
-	if state.gold < WATERPARK_PRICE:
-		ui.toast("사탕 %d 개가 있어야 들어갑니다 (지금 %d)" % [
-			WATERPARK_PRICE, state.gold], UiTheme.BAD)
-		return true
-	state.gold -= WATERPARK_PRICE
-	_waterpark_used = true
-	state.heal(state.max_hp)
-	state.breath = state.max_breath
-	player.health_changed.emit(state.hp, state.max_hp)
-	Sfx.play(Sfx.STAIRS, -4.0, 0.08)
-	Fx.burst(world, _waterpark.global_position + Vector3(0, 0.5, 0),
-		Color(0.55, 0.85, 1.0), 22, 3.4)
-	ui.toast("첨벙! 체력과 숨을 다 채웠습니다 (사탕 -%d)" % WATERPARK_PRICE,
-		UiTheme.ACCENT)
-	# **물에 들어가 물장난을 칩니다.** 회복이 숫자로만 일어나면 그 자리가
-	# 무엇을 하는 곳인지 화면에 안 남습니다.
-	if is_instance_valid(player):
-		player.begin_splash(_waterpark.global_position)
-	return true
+	return to.length() <= WATERPARK_REACH
 
 
 func _ride_car() -> bool:
@@ -3570,11 +3634,8 @@ func _process(delta: float) -> void:
 
 	if phase == Phase.PLAYING:
 		ui.update_hud(state, _alive, 0.0)
-		if shop != null and is_instance_valid(shop) and shop.is_near():
+		if shop != null and is_instance_valid(shop) 				and (shop.is_near() or _near_waterpark()):
 			ui.set_prompt("밀기 - 물물교환")
-		elif _waterpark != null and is_instance_valid(_waterpark) 				and player.global_position.distance_to(_waterpark.global_position) <= WATERPARK_REACH:
-			ui.set_prompt("밀기 - 물놀이 (사탕 %d)" % WATERPARK_PRICE
-				if not _waterpark_used else "물이 다 빠졌습니다")
 		elif _alive == 0 and portal != null:
 			ui.set_prompt("파란 문으로 내려가세요")
 		else:

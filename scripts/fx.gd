@@ -202,8 +202,8 @@ static func warm_up(parent: Node3D) -> void:
 	shimmer(parent, Vector3(0, -40, 0), Vector3.FORWARD, 1, false)
 	# 소용돌이도 같이 데웁니다. 셰이더가 하나 더 늘었고, 그 첫 번이 고함을
 	# 지르는 순간에 오면 딱 그때 화면이 끊깁니다.
-	var warm := make_vortex(parent)
-	drive_vortex(warm, Vector3(0, -40, 0), Vector3.FORWARD, 1.0, 1.0, 60.0, 1.0)
+	var warm := make_shout_rays(parent)
+	drive_shout_rays(warm, Vector3(0, -40, 0), Vector3.FORWARD, 1.0, 1.0, 60.0, 1.0, 0.0)
 	warm.create_tween().tween_callback(warm.queue_free).set_delay(0.1)
 
 
@@ -673,6 +673,16 @@ static func ghost_at(parent: Node3D, body: Node3D, at: Vector3, tone: Color,
 	tw.tween_callback(ghost.queue_free)
 
 
+static func all_meshes(root: Node) -> Array:
+	## 밑에 달린 MeshInstance3D 를 다 모읍니다. 선과 구가 두 겹으로 달려
+	## 있어서(홀더 > 선줄기 > 선·구), 직속 자식만 보면 절반을 놓칩니다.
+	var out: Array = []
+	for n in _all(root):
+		if n is MeshInstance3D:
+			out.append(n)
+	return out
+
+
 static func _all(root: Node) -> Array:
 	var out: Array = [root]
 	for c in root.get_children():
@@ -680,127 +690,81 @@ static func _all(root: Node) -> Array:
 	return out
 
 
-## 소용돌이에 쓰는 노이즈. **한 번 만들어 나눠 씁니다** - 고함마다 새로
-## 만들면 그때마다 텍스처를 굽습니다.
-static var _vortex_noise: NoiseTexture2D = null
-## 부채꼴 판의 메시. **한 번 만들어 겹마다 나눠 씁니다.**
+## 소리를 그리는 **선**과 **구**의 수.
 ##
-## 고함마다 새로 만들었더니 5.2ms 였습니다(프레임의 3분의 1).
-static var _vortex_mesh_cached: ArrayMesh = null
-## 겹치는 원뿔의 수.
-##
-## 넷 이상 겹쳐 봤는데 **이 게임에는 과합니다.** 더하기로 섞이는 터라 겹칠수록
-## 밝아져서, 수채화 배경 위에 파란 덩어리가 생깁니다. 셋이면 소용돌이로
-## 읽히면서 뒤가 비칩니다.
-const VORTEX_CONES := 3
-## 도는 동안. 고함 자세(0.62초)보다 짧게 둡니다 - 자세보다 오래 남으면
-## 소리가 끝난 자리에 기운만 떠 있습니다.
-const VORTEX_TIME := 0.42
+## 선 다섯이 부채꼴 안에 고르게 퍼지고, 그 위를 구가 셋씩 바깥으로 흘러
+## 나갑니다. 더 늘리면 겹쳐서 덩어리가 되고, 줄이면 방향만 남고 "퍼진다" 가
+## 안 됩니다.
+const RAY_LINES := 5
+const RAY_BEADS := 3
+## 구가 입에서 끝까지 한 번 흘러가는 데 걸리는 시간(초).
+const RAY_FLOW := 0.42
 
 
-static func _noise() -> NoiseTexture2D:
-	if _vortex_noise == null:
-		var n := FastNoiseLite.new()
-		n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-		n.frequency = 0.035
-		var tex := NoiseTexture2D.new()
-		tex.noise = n
-		tex.width = 128
-		tex.height = 128
-		# 극좌표로 감아 쓰므로 좌우가 이어져야 이음매가 안 보입니다.
-		tex.seamless = true
-		_vortex_noise = tex
-	return _vortex_noise
-
-
-## 만들어 두는 최대 각도(도). 실제 고함은 이 안에서 잘라 씁니다.
-##
-## `Player.SHOUT_ARC_MAX` 와 같아야 합니다 - 작으면 최대로 지른 고함이 잘리고,
-## 크면 잘라 쓰는 값(`arc_frac`)이 1 에 못 미쳐 언제나 좁아 보입니다.
-const VORTEX_ARC_MAX := 132.0
-
-
-static func shout_cone_mesh() -> ArrayMesh:
-	## **부채꼴에서 뽑은 판.** 꼭짓점이 입(0, 1, 0)이고 테두리가 바닥의 호입니다.
+static func make_shout_rays(parent: Node3D) -> Node3D:
+	## 소리가 퍼져 나가는 그림 한 벌. **부르는 쪽이 들고 있다가** 모으는 동안
+	## 자리와 크기를 고쳐 씁니다(`drive_shout_rays`).
 	##
-	## 크기 1 로 한 번만 만들고, 부르는 쪽에서 사거리와 입 높이로 늘입니다 -
-	## 모으는 동안 매 프레임 다시 만들면 그 값이 그대로 듭니다(원뿔을 매번
-	## 만들었을 때 5.2ms 였습니다).
-	##
-	## UV 를 **극좌표로** 답니다: u 는 부채꼴을 가로지르는 각도(0~1), v 는
-	## 입에서 테두리까지(0~1). 셰이더가 그대로 흘려 소용돌이를 만듭니다.
-	if _vortex_mesh_cached != null:
-		return _vortex_mesh_cached
-	var half := deg_to_rad(VORTEX_ARC_MAX) * 0.5
-	var steps := 28
-	# 입에서 테두리까지도 몇 마디로 나눕니다. 한 마디면 UV 가 선형이라
-	# 무늬가 부챗살처럼 곧게 뻗습니다 - 감기는 것으로 안 보입니다.
-	var rings := 6
-	var verts := PackedVector3Array()
-	var uvs := PackedVector2Array()
-	for r in range(rings + 1):
-		var v := float(r) / float(rings)
-		for i2 in range(steps + 1):
-			var u := float(i2) / float(steps)
-			var a2 := lerpf(-half, half, u)
-			# 입(0,1,0)에서 바닥의 호까지 곧게 잇습니다.
-			verts.append(Vector3(sin(a2) * v, 1.0 - v, -cos(a2) * v))
-			uvs.append(Vector2(u, v))
-	var idx := PackedInt32Array()
-	for r in range(rings):
-		for i2 in range(steps):
-			var a3 := r * (steps + 1) + i2
-			var b := a3 + 1
-			var c := a3 + steps + 1
-			var d := c + 1
-			idx.append(a3); idx.append(c); idx.append(b)
-			idx.append(b); idx.append(c); idx.append(d)
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_INDEX] = idx
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	_vortex_mesh_cached = mesh
-	return mesh
-
-
-static func make_vortex(parent: Node3D) -> Node3D:
-	## 소용돌이 한 벌을 만들어 돌려줍니다. **부르는 쪽이 들고 있다가** 모으는
-	## 동안 크기와 각도를 고쳐 씁니다(`drive_vortex`).
-	##
-	## 겹은 셋입니다. 넷 이상 겹쳐 봤는데 더하기로 섞이는 터라 겹칠수록
-	## 밝아져서, 수채화 배경 위에 파란 덩어리가 생깁니다.
+	## 소용돌이(원뿔 + 나선 셰이더)를 걷어낸 자리입니다. 모양은 그럴듯했지만
+	## **덩어리**라, 그 뒤에 있는 적이 가려지고 어디까지가 판정인지도 흐려
+	## 졌습니다. 선과 구는 사이가 비어 있어서 **뒤가 그대로 보입니다** -
+	## 판정은 바닥의 부채꼴이 이미 칠하고 있으므로, 이쪽은 "소리가 나간다"
+	## 만 말하면 됩니다.
 	var holder := Node3D.new()
 	parent.add_child(holder)
-	for i in VORTEX_CONES:
-		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
-		var mat := ShaderMaterial.new()
-		mat.shader = load("res://assets/shaders/vortex.gdshader")
-		mat.set_shader_parameter("noise_tex", _noise())
-		mat.set_shader_parameter("vortex_color",
-			Color(RUSH_COLOR.r, RUSH_COLOR.g, RUSH_COLOR.b,
-				0.30 * lerpf(1.0, 0.55, t)))
-		# 겹마다 다른 빠르기로 흐릅니다. 같으면 한 장으로 보입니다.
-		mat.set_shader_parameter("scroll_speed", lerpf(1.2, 2.3, t))
-		mat.set_shader_parameter("spiral_amount", lerpf(2.4, 3.8, t))
-		var mesh := MeshInstance3D.new()
-		mesh.mesh = shout_cone_mesh()
-		mesh.material_override = mat
-		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		# 카툰 외곽선이 판을 검게 두르면 소용돌이가 아니라 종이가 됩니다.
-		mesh.set_meta("flat", true)
-		# 겹끼리 아주 조금 띄웁니다. 딱 붙이면 서로 다투어 지지직거립니다.
-		mesh.position.y = 0.012 * float(i)
-		holder.add_child(mesh)
+
+	# 선과 구의 **메시와 재질을 한 벌씩만** 만들어 나눠 씁니다. 매번 새로
+	# 만들던 소용돌이가 고함마다 5.2ms(프레임의 3분의 1)를 먹었습니다.
+	var line_mesh := BoxMesh.new()
+	line_mesh.size = Vector3(0.05, 0.02, 1.0)
+	var bead_mesh := SphereMesh.new()
+	bead_mesh.radius = 0.5
+	bead_mesh.height = 1.0
+	bead_mesh.radial_segments = 8
+	bead_mesh.rings = 4
+
+	for i in RAY_LINES:
+		var ray := Node3D.new()
+		holder.add_child(ray)
+		var line := MeshInstance3D.new()
+		line.mesh = line_mesh
+		line.material_override = _ray_material(0.34)
+		line.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		# 카툰 외곽선이 선을 검게 두르면 소리가 아니라 막대가 됩니다.
+		line.set_meta("flat", true)
+		ray.add_child(line)
+		for _b in RAY_BEADS:
+			var bead := MeshInstance3D.new()
+			bead.mesh = bead_mesh
+			bead.material_override = _ray_material(0.55)
+			bead.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			bead.set_meta("flat", true)
+			ray.add_child(bead)
 	return holder
 
 
-static func drive_vortex(holder: Node3D, at: Vector3, dir: Vector3,
-		reach: float, mouth: float, arc_deg: float, fade: float) -> void:
-	## 모으는 동안 매 프레임 고쳐 씁니다. **판정과 같은 값**을 받으므로
-	## 부채꼴이 자라면 소용돌이도 같이 자랍니다.
+static func _ray_material(alpha: float) -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(RUSH_COLOR.r, RUSH_COLOR.g, RUSH_COLOR.b, alpha)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# 더하기로 섞습니다. 소리는 덮는 것이 아니라 **밝아지는 것**입니다.
+	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# 깊이를 안 씁니다. 바닥의 부채꼴과 다투면 지지직거립니다.
+	mat.no_depth_test = false
+	mat.disable_receive_shadows = true
+	return mat
+
+
+static func drive_shout_rays(holder: Node3D, at: Vector3, dir: Vector3,
+		reach: float, mouth: float, arc_deg: float, fade: float, phase: float) -> void:
+	## 모으는 동안 매 프레임 고쳐 씁니다. **판정과 같은 값**(사거리·각)을
+	## 받으므로 부채꼴이 자라면 선도 같이 길고 넓어집니다.
+	##
+	## `phase` 는 구가 흐르는 위치(0~1)입니다. 시간을 밖에서 받는 이유는
+	## 이 함수가 상태를 안 들기 때문입니다 - 상태를 여기 두면 고함이 둘
+	## 이상일 때 서로 흐름을 덮어씁니다.
 	if holder == null or not is_instance_valid(holder):
 		return
 	var flat := Vector3(dir.x, 0.0, dir.z)
@@ -809,19 +773,55 @@ static func drive_vortex(holder: Node3D, at: Vector3, dir: Vector3,
 	flat = flat.normalized()
 	holder.global_position = at
 	holder.rotation.y = atan2(-flat.x, -flat.z)
-	var frac := clampf(arc_deg / VORTEX_ARC_MAX, 0.0, 1.0)
 	for i in holder.get_child_count():
-		var mesh := holder.get_child(i) as MeshInstance3D
-		if mesh == null:
+		var ray := holder.get_child(i) as Node3D
+		if ray == null:
 			continue
-		var t := float(i) / float(maxi(VORTEX_CONES - 1, 1))
-		# 겹마다 조금씩 짧고 좁게 - 안쪽에 포개집니다.
-		var k := lerpf(1.0, 0.82, t)
-		mesh.scale = Vector3(reach * k, mouth, reach * k)
-		var mat := mesh.material_override as ShaderMaterial
-		if mat != null:
-			mat.set_shader_parameter("arc_frac", frac * lerpf(1.0, 0.86, t))
-			mat.set_shader_parameter("fade", fade)
+		# **부채꼴 안에 고르게 폅니다.** 가운데 선이 정면이고 나머지가
+		# 좌우로 갈라집니다 - 판정 각을 그대로 나눠 쓰므로 선이 판정 밖으로
+		# 나가지 않습니다.
+		var t := 0.5 if RAY_LINES <= 1 else float(i) / float(RAY_LINES - 1)
+		ray.rotation.y = deg_to_rad(arc_deg) * (t - 0.5)
+		# 가장자리 선은 조금 짧습니다. 다 같은 길이면 끝이 일자로 잘려서
+		# 부채꼴이 아니라 빗살무늬가 됩니다.
+		var edge := 1.0 - absf(t - 0.5) * 0.7
+		var span := reach * edge
+		# **입에서 바닥의 부채꼴 테두리로 내려갑니다.**
+		#
+		# 입 높이에서 수평으로 뻗었더니 화면에서 부채꼴 **밖으로** 나갔습니다.
+		# 내려다보는 카메라에서는 높이 뜬 선의 끝이 더 멀리 찍히기 때문입니다 -
+		# 판정은 바닥에 칠해 놓고 그림만 그 밖으로 나가면 거짓말이 됩니다.
+		# 끝이 바닥에 닿으면 선의 끝과 부채꼴의 테두리가 화면에서 겹칩니다.
+		# 부호를 눈으로 고르지 마세요. +X 로 돌리면 -Z 가 **위로** 올라갑니다
+		# (재서 확인: 한 번 위로 뻗어 부채꼴 밖으로 나갔습니다).
+		ray.rotation.x = -atan2(mouth, maxf(span, 0.01))
+		var run := sqrt(span * span + mouth * mouth)
+		var line := ray.get_child(0) as MeshInstance3D
+		if line != null:
+			# 상자를 늘여 선으로 씁니다. 굵기는 사거리를 안 따라갑니다 -
+			# 길어질수록 굵어지면 멀리 지를수록 시야를 더 가립니다.
+			line.scale = Vector3(1.0, 1.0, run)
+			line.position = Vector3(0, 0, -run * 0.5)
+			_ray_fade(line, fade * 0.9)
+		for b in RAY_BEADS:
+			var bead := ray.get_child(1 + b) as MeshInstance3D
+			if bead == null:
+				continue
+			# 구는 **입에서 끝까지 흘러갑니다.** 셋이 같은 간격으로 따라가고,
+			# 끝에 닿으면 처음으로 돌아옵니다.
+			var f := fposmod(phase + float(b) / float(RAY_BEADS), 1.0)
+			bead.position = Vector3(0, 0, -run * f)
+			# 나갈수록 커지고 옅어집니다 - 퍼지면서 흩어지는 그림입니다.
+			var size := 0.10 + 0.16 * f
+			bead.scale = Vector3.ONE * size
+			_ray_fade(bead, fade * (1.0 - f * 0.75))
+
+
+static func _ray_fade(mi: MeshInstance3D, a: float) -> void:
+	var mat := mi.material_override as StandardMaterial3D
+	if mat == null:
+		return
+	mat.albedo_color.a = clampf(a, 0.0, 1.0)
 
 
 static func shout_fan(parent: Node3D, at: Vector3, dir: Vector3,

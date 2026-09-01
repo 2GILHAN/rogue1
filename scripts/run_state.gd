@@ -15,10 +15,8 @@ var damage := 20.0
 ## 두 번에 걸쳐 낮췄습니다: 6.5 -> 5.2(0.8배) -> 3.1(다시 0.6배).
 ## 축복과 상점의 증가폭도 같은 비율로 줄여 성장 곡선의 모양은 유지했습니다.
 var move_speed := 3.1
-var attack_rate := 1.0      # 배수. 1.4 면 초당 공격 횟수가 1.4배
 var crit_chance := 0.05
 var crit_mult := 2.0
-var lifesteal := 0.0        # 준 피해의 비율만큼 회복
 ## 구르기 재사용 대기. **거의 없습니다**(1.1 -> 0.22).
 ##
 ## 연달아 구르는 것을 막는 것은 숨(20)이지 시계가 아닙니다. 시계로 막으면
@@ -31,14 +29,11 @@ var dash_cooldown := 0.22
 ## 쌓이게 하려는 것입니다. bool 이면 두 번째는 아무 일도 안 일어나고,
 ## 그때가 하필 셋 다 마음에 안 드는 판입니다.
 var shout_knock := 0.0      # 고함이 밀어내는 힘
-var prop_blast := 0.0       # 던진 소품이 터지는 세기(1 = 한 번 뽑음)
 var roll_pierce := 0.0      # 구르며 뚫고 지나가는 피해 배율
-var slam_stun := 0.0        # 던진 적이 주변을 굳히는 시간(초)
 
 ## 기술별 강화. 상수로 박혀 있던 것들을 여기서 더해 씁니다 - 값을 한곳에
 ## 모아 두면 어떤 스킬이 무엇을 건드리는지 표만 봐도 압니다.
 var shout_range := 0.0      # 고함 사거리 +m
-var shout_stun := 0.0       # 고함 경직 +초
 var shove_knock := 0.0      # 밀기 넉백 +
 var shove_damage := 0.0     # 밀기 피해 배율 +
 var roll_dist := 0.0        # 구르기 거리 배율 +
@@ -47,6 +42,14 @@ var breath_regen := 0.0     # 숨 회복 +/초
 ## 그만큼 줄어듭니다. 없애지는 못합니다 - 0 이 되면 연타가 다시 최선이 되고,
 ## 그러면 이 규칙을 넣은 이유가 사라집니다.
 var repeat_relief := 0.0
+
+## 물물교환에서 산 몫. **레벨 표와 따로 듭니다.**
+##
+## `_recompute` 가 max_hp·move_speed·breath_regen 을 표에서 새로 쓰기 때문에,
+## 여기 안 모아 두면 산 것이 다음 축복 한 번에 사라집니다.
+var bought_hp := 0.0
+var bought_speed := 0.0
+var bought_regen := 0.0
 
 ## 기술 계통별 레벨. **여섯 계통, 각 3 레벨이 끝입니다.**
 ##
@@ -226,13 +229,15 @@ func _recompute() -> void:
 	shout_knock = [0.0, 0.0, 9.0, 12.0][ls]
 
 	# 구르기.
-	roll_dist = [0.0, 0.30, 0.60, 0.90][lr]
+	# 단계마다 10% 포인트씩 낮췄습니다(옛 30/60/90). 기본 거리도 같이 줄여서
+	# (player.gd 의 DASH_SPEED), 다 찍어도 방을 가로지르지는 못합니다.
+	roll_dist = [0.0, 0.20, 0.50, 0.80][lr]
 	roll_pierce = 1.0 if lr >= 3 else 0.0
 
-	max_hp = 100.0 + 40.0 * lh
-	move_speed = 3.1 * [1.0, 1.15, 1.29, 1.44][lm]
+	max_hp = 100.0 + 40.0 * lh + bought_hp
+	move_speed = 3.1 * [1.0, 1.15, 1.29, 1.44][lm] + bought_speed
 	max_breath = 100.0 + [0.0, 30.0, 60.0, 100.0][lb]
-	breath_regen = [0.0, 12.0, 24.0, 40.0][lb]
+	breath_regen = [0.0, 12.0, 24.0, 40.0][lb] + bought_regen
 	repeat_relief = 0.5 if lb >= 3 else 0.0
 	hp = minf(hp, max_hp)
 	breath = minf(breath, max_breath)
@@ -387,9 +392,14 @@ func buy(item: Dictionary) -> bool:
 		"heal": heal(60.0)
 		"power": damage += 6.0
 		"vigor":
-			max_hp += 25.0
+			bought_hp += 25.0
+			_recompute()
 			heal(25.0)
-		"swift": move_speed += 0.29
+		"swift":
+			bought_speed += 0.29
+			_recompute()
 		"keen": crit_chance = minf(0.75, crit_chance + 0.08)
-		"breath": breath_regen += 8.0
+		"breath":
+			bought_regen += 8.0
+			_recompute()
 	return true

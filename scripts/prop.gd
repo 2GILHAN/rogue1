@@ -403,6 +403,12 @@ func _add_water(box: Vector3) -> void:
 	add_child(_water)
 
 
+func water_y() -> float:
+	## 수면 높이(소품 기준). 물 안에 무엇을 놓으려면 이 값이 있어야 합니다 -
+	## 눈으로 고르면 물에 뜨거나 잠깁니다.
+	return _water_y
+
+
 func _local_aabb() -> AABB:
 	## _mesh_root 기준의 경계. 자식이 중첩돼 있어도 변환을 누적해 내려갑니다 -
 	## 부모 변환을 빼먹으면 눕힌 소품의 경계가 세워진 채로 나옵니다.

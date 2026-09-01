@@ -38,11 +38,15 @@ const COMBO_MAX := 4
 ## 연속이 끊기는 시간. 이 안에 다음 타격이 없으면 연속수가 0 으로 돌아갑니다.
 const COMBO_HOLD := 2.6
 
-## **계통 하나가 Lv5 이상일 때만 찹니다.**
+## **계통 하나를 끝까지(Lv3) 팠을 때만 찹니다.**
 ##
 ## 필살기는 판을 어느 정도 판 사람에게 열리는 문입니다. 처음부터 차면 그냥
 ## 또 하나의 기술이고, 스킬을 고르는 일과도 이어지지 않습니다.
-const NEED_FAMILY_LV := 5
+##
+## **5 로 박혀 있었습니다.** 계통 상한이 3 이 되면서 이 조건이 영영 안
+## 맞아서, 게이지도 명령도 통째로 죽어 있었습니다 - 계통을 끝까지 판 보상이
+## 아무것도 없던 이유입니다.
+const NEED_FAMILY_LV := 3
 
 ## 발동 명령. 이 차례대로 눌러야 합니다.
 ##
@@ -106,7 +110,9 @@ func unlocked() -> bool:
 	## 아직 못 쓰는 게이지가 늘 떠 있으면 무엇을 보라는 표시인지 모릅니다.
 	if _state == null:
 		return false
-	for fam in ["push", "shout", "roll", "move", "passive"]:
+	# 여섯 계통 전부를 봅니다. `"passive"` 라는 계통은 개편에서 사라졌고,
+	# 체력·스테미나를 끝까지 판 판만 문이 안 열릴 이유가 없습니다.
+	for fam in RunState.FAMILY_NAME.keys():
 		if _state.family_level(fam) >= NEED_FAMILY_LV:
 			return true
 	return false

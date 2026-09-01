@@ -454,6 +454,16 @@ func _bar_material(color: Color) -> StandardMaterial3D:
 
 # ---------------------------------------------------------------- 루프
 
+func is_targetable() -> bool:
+	## **겨눌 수 있는 상대인가.** 록온과 밀기가 같은 답을 봐야 "보고 있는데
+	## 안 밀린다" 가 안 생깁니다.
+	##
+	## 밀려 날아가는 동안(`_knock`)과 던져져 날아가는 동안(`_thrown`)은
+	## 못 겁니다. 그때도 겨눠지면 밀어 놓고 곧바로 다시 밀어 계속 띄워 둘 수
+	## 있어서, 밀기가 "한 번 세게" 가 아니라 "붙잡아 두는 것" 이 됩니다.
+	return not _dead and held_by == null and _knock <= 0.0 and _thrown <= 0.0
+
+
 func is_liftable() -> bool:
 	## 큰 적(돌진형·선생님)은 아이 힘으로 들리지 않습니다. 그쪽은 밀기만
 	## 됩니다 - 관문이 들려서 던져지면 관문이 아닙니다.
@@ -697,7 +707,6 @@ func _physics_process(delta: float) -> void:
 		# **멈추면 끝입니다.** 예전에는 바닥에 닿는 순간으로 봤는데, 이제는
 		# 처음부터 바닥에 있으므로 그 조건이 없습니다.
 		if _thrown <= 0.0 or slide.length() < 0.6:
-			_slam_landing()
 			_thrown = 0.0
 			_stagger = maxf(_stagger, 0.6)
 			Fx.burst(get_parent(), global_position, Color(1.0, 0.8, 0.5), 8, 3.0)
@@ -1824,9 +1833,6 @@ func _begin_charge(dir: Vector3) -> void:
 ## 잡습니다 - 박치기가 닿았는지 보는 데만 씁니다.
 const PLAYER_RADIUS := 0.42
 
-## 메다꽂기가 굳히는 범위.
-const SLAM_RADIUS := 2.8
-
 const SHOUT_STAGGER := 1.0
 ## 들썩이는 자세가 풀리는 데 걸리는 시간. 경직(1초)보다 짧아야 굳어 있는
 ## 동안 자세가 서서히 돌아옵니다.
@@ -2129,34 +2135,11 @@ func _push_what_we_hit() -> void:
 			velocity *= 0.9
 
 
-## 메다꽂기(축복)로 던져졌을 때, 떨어진 자리에서 주변을 굳히는 시간.
-## 0 이면 그 축복이 없는 것입니다.
-var slam_stun := 0.0
 ## 날아가며 다른 적을 칠 때 미는 세기. 던진 쪽(주인공)이 자기 밀기 세기를
 ## 그대로 넘겨 줍니다 - 던지기는 밀기의 연장입니다.
 var throw_knock := 3.0
 ## 연쇄로 더 밀 수 있는 횟수(「밀기」 Lv3). 0 이면 연쇄가 없습니다.
 var _chain_left := 0
-
-
-func _slam_landing() -> void:
-	## 떨어지는 순간 주변을 굳힙니다. 던진 적이 곧 폭탄이 됩니다.
-	if slam_stun <= 0.0:
-		return
-	Fx.ring(get_parent(), global_position, Color(1.0, 0.7, 0.35), SLAM_RADIUS, 0.35)
-	Game.shake(0.30, 0.20)
-	for node in get_tree().get_nodes_in_group("enemies"):
-		var other := node as Enemy
-		if other == self or not is_instance_valid(other) or other._dead:
-			continue
-		var to: Vector3 = other.global_position - global_position
-		to.y = 0.0
-		if to.length() > SLAM_RADIUS:
-			continue
-		other.stagger_for(slam_stun)
-	# 한 번 쓰면 사라집니다. 남겨 두면 그 적을 다시 잡아 던질 때마다
-	# 축복 없이도 터집니다.
-	slam_stun = 0.0
 
 
 func _hit_others_while_flying() -> void:
