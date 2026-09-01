@@ -1119,7 +1119,7 @@ func set_ultimate(ratio: float, on: bool, note: String, shown: bool) -> void:
 
 
 func update_hud(state: RunState, enemies_left: int, _unused: float) -> void:
-	_floor.text = "지하 %d층" % state.floor_num
+	_floor.text = RunState.floor_name(state.floor_num)
 	# 사탕 개수. 마름모(◆)는 금화의 기호라 그대로 두면 이름만 바뀐 것이
 	# 됩니다.
 	_gold.text = "사탕 %d" % state.gold
@@ -1243,7 +1243,7 @@ func _card(icon: String, name: String, desc: String, footer: String) -> Button:
 
 func show_title() -> void:
 	_clear_overlay()
-	_title("TOTO-FightClub")
+	_title("TOTO FIGHTCLUB")
 	_sub("불꽃 깃털의 모험가가 지하로 내려갑니다. 층의 적을 모두 쓰러뜨리면 파란 문이 열립니다.\n"
 		+ "죽으면 처음부터입니다 - 대신 매번 다른 던전, 다른 축복을 만납니다.")
 	_sub("왼쪽 아래를 끌어 이동 · 밀기(잡기)는 앞이면 밀고 등 뒤면 잡습니다"
@@ -1407,8 +1407,8 @@ func mark_sold(index: int) -> void:
 func show_death(state: RunState) -> void:
 	_clear_overlay()
 	_title("쓰러졌다", UiTheme.BAD)
-	_sub("지하 %d층까지. 처치 %d · 사탕 %d · %d분 %d초" % [
-		state.floor_num, state.kills, state.gold,
+	_sub("%s까지. 처치 %d · 사탕 %d · %d분 %d초" % [
+		RunState.floor_name(state.floor_num), state.kills, state.gold,
 		int(state.elapsed) / 60, int(state.elapsed) % 60], UiTheme.TEXT)
 	_sub("다음 던전은 다른 모양입니다.")
 	var row := HBoxContainer.new()
@@ -1427,8 +1427,8 @@ func show_win(state: RunState) -> void:
 	## 깊어지기만 하면 죽는 것 말고는 판이 끝나는 길이 없습니다.
 	_clear_overlay()
 	_title("나갔다!", UiTheme.ACCENT)
-	_sub("지하 %d층을 다 지났습니다. 처치 %d · 사탕 %d · %d분 %d초" % [
-		Game.FINAL_FLOOR, state.kills, state.gold,
+	_sub("%s까지 다 지났습니다. 처치 %d · 사탕 %d · %d분 %d초" % [
+		RunState.floor_name(Game.FINAL_FLOOR), state.kills, state.gold,
 		int(state.elapsed) / 60, int(state.elapsed) % 60], UiTheme.TEXT)
 	_sub("다음 던전은 다른 모양입니다.")
 	var row := HBoxContainer.new()

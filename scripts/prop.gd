@@ -163,7 +163,11 @@ const KINDS := {
 	# 둘 다 바퀴가 달려 있어 `heavy`(들 수는 없고 밀어서 굴리는 것)가 맞습니다 -
 	# 굴러가며 지나가는 적을 칩니다. 아이가 번쩍 들어 던지는 물건은 아닙니다.
 	"toybox":  {"class": "heavy", "damage": 1.40, "stun": 0.4, "scale": 1.47},
-	"ridecar": {"class": "heavy", "damage": 1.55, "stun": 0.5, "scale": 1.47},
+	# **앞뒤가 뒤집힌 그림**입니다. 원본이 +Z 를 앞으로 그려져 있어서, 그대로
+	# 두면 `rotation.y` 가 가리키는 쪽의 반대로 차 앞머리가 갑니다 - 타면
+	# 아이는 가는 쪽을 보는데 차만 뒤를 봅니다.
+	"ridecar": {"class": "heavy", "damage": 1.55, "stun": 0.5, "scale": 1.47,
+		"face_flip": true},
 
 	"pool": {"class": "fixed", "damage": 0.0, "stun": 0.0,
 		# 원본 메시가 지름 0.92m 라 아이(키 0.85m) 옆에서 대야만 했습니다.
@@ -210,6 +214,14 @@ func setup(prop_kind: String) -> void:
 	# 담요나 바닥에 굴러다니는 장난감으로도 자연스럽습니다.
 	if bool(stats.get("lay", false)):
 		_mesh_root.rotation.x = -PI * 0.5
+
+	# **앞뒤가 뒤집힌 그림은 여기서 한 번 돌려 놓습니다.**
+	#
+	# 쓰는 쪽에서 180도를 더하는 방법도 있지만, 그러면 이 소품을 돌리는 코드가
+	# 늘 때마다 같은 보정을 다시 적어야 합니다. 여기서 돌려 두면 `rotation.y`
+	# 가 다른 소품과 같은 뜻이 됩니다.
+	if bool(stats.get("face_flip", false)):
+		_mesh_root.rotation.y += PI
 
 	# GLB 는 Y 가 위이고 바닥이 y=0 입니다. 물리 몸체의 원점은 가운데가
 	# 편하므로, 눕힌 뒤의 실제 경계를 재서 절반만 내려 답니다.

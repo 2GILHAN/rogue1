@@ -1730,7 +1730,6 @@ func shout_release() -> void:
 ## 지르려면 매번 서 있어야 하고 그동안 발이 0.2배로 묶입니다. 목소리(1.05초)의
 ## 절반이 채 안 되므로 남은 절반은 지르고 난 여운이 됩니다.
 const SHOUT_CHARGE_TIME := 0.50
-const SHOUT_COST_MIN := 0.30
 ## 살짝 눌렀을 때의 몫. 0 이면 스쳐 누른 것이 헛손질이 되어, 눌렀는데 아무 일도
 ## 안 일어난 것처럼 보입니다.
 ## **끝까지 모았다**고 보는 값. 모으는 정도는 0~1 인데, 마지막 프레임에
@@ -1777,11 +1776,44 @@ func _roll_afterimage() -> void:
 	# 판 자리의 상입니다. 상한이 3 이 되면서 2 로 내려 둔 적이 있는데, 그러면
 	# 적을 통과하기만 하는 Lv2 가 눈에는 Lv3 과 같아 보입니다.
 	var lv := skill_lv("roll")
-	if lv < 3 or body == null:
+	if lv < 3:
 		return
-	# 밝은 잔상은 **뚫는 몸**(「구르는 돌」)입니다. 장수는 여기서 안 셉니다 -
-	# 잔상은 **거리마다** 떨구므로 「먼 구르기」를 찍으면 그만큼 늘어납니다.
-	var strong := state.roll_pierce > 0.0
+	# 밝은 잔상은 **뚫는 몸**입니다(구르며 피해, Lv3).
+	_afterimage(state.roll_pierce > 0.0)
+
+
+## 달려드는 동안 잔상을 떨구는 간격(m). 구르기(0.34m)보다 성깁니다 - 달려드는
+## 속도가 구르기보다 느려서, 같은 간격이면 잔상이 뭉쳐 한 덩어리로 보입니다.
+const LUNGE_TRAIL_STEP := 0.42
+
+## 달려들며 잔상을 떨군 뒤 지나간 거리(m).
+var _lunge_trail := 0.0
+
+
+func _lunge_afterimage(delta: float) -> void:
+	## **밀기 계통 Lv3 부터** 달려드는 동안에도 파란 잔상이 남습니다.
+	##
+	## 밀기 Lv3 은 이미 밀리는 적 쪽에 잔상을 붙이는데(`_shove_one`), 그건
+	## **맞은 뒤**의 그림입니다. 달려가는 사이는 여전히 평소와 같아서, 계통을
+	## 끝까지 판 것이 **기술이 나가기 전까지는 화면에 안 보였습니다.**
+	##
+	## 구르기와 같은 방법입니다 - 거리마다 떨굽니다. 시간으로 떨구면 멀리서
+	## 달려들 때 성기고 코앞에서 걸 때 뭉칩니다.
+	if skill_lv("push") < 3:
+		return
+	_lunge_trail += Vector2(velocity.x, velocity.z).length() * delta
+	if _lunge_trail < LUNGE_TRAIL_STEP:
+		return
+	_lunge_trail = 0.0
+	# 밝은 잔상은 **피해까지 오른 밀기**입니다(Lv3 의 +60%). 구르기 잔상이
+	# 「뚫는 몸」을 밝게 쓰는 것과 같은 규칙 - 밝으면 아픕니다.
+	_afterimage(state.shove_damage >= 0.5)
+
+
+func _afterimage(strong: bool) -> void:
+	## 지금 자세 그대로의 **파란 잔상** 한 장.
+	if body == null:
+		return
 	var ghost := body.duplicate(DUPLICATE_USE_INSTANTIATION) as Node3D
 	if ghost == null:
 		return
@@ -2143,9 +2175,22 @@ func _throw_direction(wish: Vector3) -> Vector3:
 ##
 ## 재사용 대기는 짧게 두고 **여기서 막습니다.** 대기로 막으면 기다리는 것이
 ## 답이 되지만, 숨으로 막으면 섞어 쓰는 것이 답이 됩니다.
-const BREATH_SHOUT := 28.0
-const BREATH_ROLL := 20.0
-const BREATH_GRAB := 8.0
+## **처음 값**입니다(스테미나 계통을 안 찍은 상태). 숨이 100 이므로 곧
+## "몇 번 쓸 수 있나" 로 읽힙니다 - 구르기 두 번 반, 밀기 세 번입니다.
+##
+## 28 / 20 / 8 이었습니다. 밀기가 너무 싸서 **밀기만 계속 누르는 것**이 늘
+## 답이었고, 셋 중 무엇을 쓸지가 선택이 안 됐습니다.
+const BREATH_SHOUT := 40.0
+const BREATH_ROLL := 40.0
+const BREATH_GRAB := 30.0
+## **다 지른 고함은 덜 지른 것보다 쌉니다**(40 -> 30).
+##
+## 거꾸로였습니다 - 모은 만큼 값을 매기면 살짝 지르는 것이 늘 이득이라,
+## 0.5초를 서서 모을 이유가 없습니다. 그러면 모으기를 넣은 이유가 사라집니다.
+##
+## 지금은 **끝까지 모으는 쪽이 싸고 세고**(Lv3 피해·호랑이), 살짝 지르는 것은
+## 급할 때 값을 더 치르고 쓰는 수가 됩니다.
+const BREATH_SHOUT_FULL := 30.0
 ## 잡고 있는 동안 새는 양(초당). 0.1초에 0.5 씩 = 초당 5.
 const BREATH_CARRY_DRAIN := 5.0
 ## 무거운 가구를 들고 있을 때. 세 배로 닳습니다 - 6.7초면 숨이 바닥납니다.
@@ -2642,7 +2687,9 @@ func _drive_lunge(delta: float) -> void:
 	if _lunge_at == null or not is_instance_valid(_lunge_at):
 		_lunge_at = null
 		_lunge_time = 0.0
+		_lunge_trail = 0.0
 		return
+	_lunge_afterimage(delta)
 	var to: Vector3 = _lunge_at.global_position - global_position
 	to.y = 0.0
 	# **손이 실제로 닿는 거리**입니다.
@@ -2899,7 +2946,9 @@ func _begin_shout() -> bool:
 	# 치르는 일이 되면, 잘못 눌렀을 때 손해가 두 번입니다.
 	# 살짝 지르는 것도 못 할 만큼 숨이 없을 때만 막습니다. 실제로 빼는 것은
 	# 지를 때이고, 그때 **모은 만큼** 냅니다.
-	if not _has_breath(breath_cost("shout", BREATH_SHOUT) * SHOUT_COST_MIN):
+	# 확인은 **가장 비싼 쪽**(덜 지른 값)으로 합니다. 싼 쪽으로 물으면 모으다
+	# 그만뒀을 때 낼 수 없는 값이 나옵니다.
+	if not _has_breath(breath_cost("shout", BREATH_SHOUT)):
 		_out_of_breath()
 		return false
 	_shout_charge = 0.0
@@ -3092,7 +3141,9 @@ func _try_attack() -> void:
 	if _joy_time > 0.0 or _attack_cd > 0.0 or _dash_time > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _drink_time > 0.0 or _read_time > 0.0:
 		return
 	# **모은 만큼 냅니다.** 살짝 지른 것은 30%, 끝까지 모은 것은 100% 입니다.
-	var shout_cost := breath_cost("shout", BREATH_SHOUT) 		* lerpf(SHOUT_COST_MIN, 1.0, clampf(_shout_fired, 0.0, 1.0))
+	# **모을수록 쌉니다**(BREATH_SHOUT 40 -> BREATH_SHOUT_FULL 30).
+	var shout_cost := breath_cost("shout",
+		lerpf(BREATH_SHOUT, BREATH_SHOUT_FULL, clampf(_shout_fired, 0.0, 1.0)))
 	if not _has_breath(shout_cost):
 		_out_of_breath()
 		return
@@ -3128,6 +3179,63 @@ func _try_attack() -> void:
 			shout_reach(_shout_fired), 5 + slv * 3, state.shout_knock > 0.0)
 
 
+## 자동차를 탄 동안 **허리 아래를 지웁니다.**
+##
+## 앉는 자세가 없어서 다리가 자동차 지붕을 뚫고 나왔습니다. 자세로는 못
+## 풉니다 - 어떻게 접어도 발끝이 어딘가로 삐져나오고, 무릎을 굽히면 이번에는
+## 무릎이 나옵니다. **높이로 지우면** 자세와 상관이 없습니다.
+const RIDE_FADE_TOP := 0.62
+const RIDE_FADE_SPAN := 0.30
+
+## 지우기 전의 재질. 내릴 때 그대로 되돌립니다.
+var _ride_mats: Array = []
+
+
+func _fade_lower_body(on: bool) -> void:
+	## 몸의 재질을 **면마다** 갈아 끼웁니다.
+	##
+	## `material_override` 가 아니라 면별(`surface_override`)인 이유: 덮어쓰기는
+	## 메시의 모든 면에 같은 재질을 씌워서, 면마다 다른 그림을 쓰는 모델이면
+	## 통째로 한 색이 됩니다.
+	if not on:
+		for e in _ride_mats:
+			var mi := e[0] as MeshInstance3D
+			if is_instance_valid(mi):
+				mi.set_surface_override_material(int(e[1]), e[2])
+		_ride_mats.clear()
+		return
+	if not _ride_mats.is_empty() or body == null:
+		return
+	var shader := load("res://assets/shaders/body_fade.gdshader") as Shader
+	if shader == null:
+		return
+	for node in _all_nodes(body):
+		var mi := node as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			var src := mi.get_active_material(i) as BaseMaterial3D
+			var m := ShaderMaterial.new()
+			m.shader = shader
+			if src != null:
+				m.set_shader_parameter("albedo_tex", src.albedo_texture)
+				m.set_shader_parameter("albedo", src.albedo_color)
+			m.set_shader_parameter("fade_span", RIDE_FADE_SPAN)
+			_ride_mats.append([mi, i, mi.get_surface_override_material(i)])
+			mi.set_surface_override_material(i, m)
+
+
+func _drive_ride_fade() -> void:
+	## 지우는 높이는 **세계 좌표**라 매 프레임 몸을 따라 옮깁니다.
+	for e in _ride_mats:
+		var mi := e[0] as MeshInstance3D
+		if not is_instance_valid(mi):
+			continue
+		var m := mi.get_surface_override_material(int(e[1])) as ShaderMaterial
+		if m != null:
+			m.set_shader_parameter("waist_y", global_position.y + RIDE_FADE_TOP)
+
+
 func begin_joyride(car: Prop) -> bool:
 	## 자동차에 올라탑니다. 이미 타고 있거나 다른 일을 하는 중이면 안 탑니다.
 	if _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
@@ -3142,6 +3250,8 @@ func begin_joyride(car: Prop) -> bool:
 	_joy_car = car
 	_joy_time = JOY_TIME
 	_joy_hit.clear()
+	# **허리 아래를 지웁니다.** 앉는 자세가 없어서 다리가 지붕을 뚫습니다.
+	_fade_lower_body(true)
 	# 처음 방향은 **보고 있는 쪽**입니다. 아무 데로나 튀어 나가면 탄 것이
 	# 아니라 사고를 당한 것으로 보입니다.
 	_joy_dir = aim if aim.length_squared() > 0.01 else Vector3.FORWARD
@@ -3208,6 +3318,7 @@ func _drive_joyride(delta: float) -> void:
 	if is_instance_valid(_joy_car):
 		_joy_car.global_position = global_position + Vector3(0, 0.12, 0)
 		_joy_car.rotation.y = atan2(-_joy_dir.x, -_joy_dir.z)
+	_drive_ride_fade()
 	if _joy_time <= 0.0:
 		_end_joyride()
 
@@ -3237,6 +3348,7 @@ func _joyride_hits() -> void:
 
 func _end_joyride() -> void:
 	_joy_time = 0.0
+	_fade_lower_body(false)
 	if is_instance_valid(_joy_car):
 		# 내린 자리에 세워 둡니다. 다시 탈 수 있어야 이 물건이 방의 자원으로
 		# 남습니다 - 한 번 쓰고 사라지면 그냥 이벤트입니다.

@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.31"
+const VERSION := "v0.32"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -122,8 +122,14 @@ var _hp_at_windup := 0.0
 ## 물에 잠기지도, 따로 떨어져 보이지도 않는 자리입니다.
 ## 적 한 마리에 필요한 방 칸 수. 방이 줄면 적도 이 값으로 같이 줄어듭니다.
 const FOE_ROOM_TILES := 26
-## **방마다 최소 몇 마리.** 한 마리뿐인 방은 한 번 밀고 지나가는 통로입니다.
-const MIN_PER_ROOM := 2
+## **방마다 몇 마리까지.** 1 ~ 3 입니다.
+##
+## 아래를 2 로 올려 봤는데 방이 여럿인 층에서 한꺼번에 너무 많이 나왔습니다 -
+## 방 여덟이면 열여섯이 깔립니다. 1 로 되돌리고 **위를 3 으로 막습니다**:
+## 좁은 방에 넷이 서면 들어서자마자 둘러싸이고, 그때는 무엇을 쓸지가 아니라
+## 어디로 도망칠지만 남습니다.
+const MIN_PER_ROOM := 1
+const MAX_PER_ROOM := 3
 ## 테스트 방에서 풀장을 놓는 자리(방 한가운데에서 몇 m 떨어져서).
 ##
 ## 방이 22칸(33m)이라 9m 면 한가운데에서 넉넉히 벗어나면서도 벽에 안 붙습니다 -
@@ -626,7 +632,7 @@ func start_run() -> void:
 			state.apply_boon(String(RunState.BOONS[rng.randi_range(0, RunState.BOONS.size() - 1)]["id"]))
 	_close_overlay()
 	build_floor()
-	ui.toast("지하 %d층" % state.floor_num, UiTheme.ACCENT)
+	ui.toast(RunState.floor_name(state.floor_num), UiTheme.ACCENT)
 
 
 func start_test() -> void:
@@ -828,7 +834,7 @@ func build_floor() -> void:
 		shop.stand_in(_waterpark)
 
 	_spawn_enemies(exit_room, shop_room)
-	_place_teacher(exit_room)
+	_place_boss(exit_room)
 	_scatter_props()
 	# 방이 하나뿐인 층이 나오면 적을 놓을 곳이 없습니다. 그때 문이 잠긴 채로
 	# 남으면 나갈 방법이 사라지므로, 처음부터 비어 있으면 열어 둡니다.
@@ -896,14 +902,8 @@ func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 		return
 
 	var pool := _kind_pool()
-	# **방마다 최소 두 마리.**
-	#
-	# 한 마리만 있는 방은 들어가서 한 번 밀고 나오는 통로가 됩니다 - 무엇을
-	# 쓸지 고를 일이 없어서, 스킬을 여섯으로 나눠 놓은 것이 그 방에서는
-	# 아무 뜻도 없습니다. 둘이면 **누구를 먼저 처리할지**가 생깁니다.
-	#
-	# 층 예산(`budget`)이 방 수에 못 미치면 예산 쪽을 올립니다. 방마다 두
-	# 마리를 보장하는 것이 먼저이고, 예산은 "그 위에 얼마나 더" 입니다.
+	# **빈 방은 없습니다**(방마다 최소 `MIN_PER_ROOM`). 아무도 없는 방은
+	# 지나가는 복도가 됩니다.
 	budget = maxi(budget, MIN_PER_ROOM * rooms_available.size())
 	var per_room := maxi(1, int(ceil(float(budget) / float(rooms_available.size()))))
 	var placed := 0
@@ -920,10 +920,10 @@ func _spawn_enemies(exit_room: int, shop_room: int) -> void:
 		#
 		# 한 마리에 FOE_ROOM_TILES 칸. 지금 방(30~72칸)이면 1~3마리입니다.
 		#
-		# **최소 두 마리는 이 상한보다 셉니다.** 상한은 "좁은 방에 예전 수가
-		# 그대로 들어가 겹쳐 서는 것" 을 막으려는 것인데, 둘은 가장 작은 방
-		# (30칸, 9×5m)에도 넉넉히 들어갑니다.
-		n = maxi(MIN_PER_ROOM, mini(n, maxi(1, _room_tiles(room) / FOE_ROOM_TILES)))
+		# **위아래로 막습니다.** 방 크기 상한이 그 사이에서 정합니다 -
+		# 좁은 방은 하나, 넓은 방은 셋까지입니다.
+		n = clampi(n, MIN_PER_ROOM, MAX_PER_ROOM)
+		n = mini(n, maxi(MIN_PER_ROOM, _room_tiles(room) / FOE_ROOM_TILES))
 		for _i in range(n):
 			var kind: String = pool[rng.randi_range(0, pool.size() - 1)]
 			var e := Enemy.new()
@@ -1177,19 +1177,32 @@ func _spot_for(radius: float):
 	return null
 
 
-func _place_teacher(exit_room: int) -> void:
-	## 선생님은 3층부터, 출구 방에 **한 명만** 섭니다.
+## **관문이 서는 층과 그 종류.**
+##
+## 층마다 마지막에 넘어야 할 벽이 있으면 좋겠지만, 매 층에 두면 벽이 아니라
+## 절차가 됩니다. 다섯 층 중 **둘**에만 둡니다 - 가운데(햇님반)와 끝(원장실)
+## 이라, 한 번 넘고 나서 두 층 뒤에 더 큰 것을 만납니다.
+##
+## 베개 아기가 가운데인 이유: 이 적은 **"뒤로 돌아가라"** 하나만 묻습니다.
+## 답이 분명해서 관문으로 삼기 좋고, 그 답을 배운 채로 원장실에 갑니다.
+const BOSS_BY_FLOOR := {3: "pillow", 5: "teacher"}
+
+
+func _place_boss(exit_room: int) -> void:
+	## 관문은 출구 방에 **한 마리만** 섭니다.
 	##
-	## 층마다 마지막에 넘어야 할 벽이 하나 있어야 층이 기억에 남습니다. 출구
-	## 방에 두면 "다 왔다" 싶을 때 마주치게 되고, 한 명뿐이라 다른 적과 섞여
-	## 흐려지지 않습니다.
-	if not _teacher_here and (state.floor_num < 3 or dungeon.rooms.size() < 2):
+	## 출구 방에 두면 "다 왔다" 싶을 때 마주치게 되고, 한 마리뿐이라 다른 적과
+	## 섞여 흐려지지 않습니다.
+	var boss: String = String(BOSS_BY_FLOOR.get(state.floor_num, ""))
+	if _teacher_here:
+		boss = "teacher"
+	if boss == "" or dungeon.rooms.size() < 2:
 		return
 	if _teacher_here:
 		exit_room = 0
 	var teacher := Enemy.new()
 	world.add_child(teacher)
-	teacher.setup("teacher", state.floor_num, dungeon, player)
+	teacher.setup(boss, state.floor_num, dungeon, player)
 	teacher.global_position = dungeon.room_center(exit_room)
 	if _teacher_here:
 		# 시작 방의 한가운데는 플레이어가 서 있는 자리입니다. 겹쳐 놓으면
@@ -1273,7 +1286,7 @@ func _on_boon_chosen(id: String) -> void:
 		ui.toast("스킬을 익혔다", UiTheme.ACCENT)
 		return
 	build_floor()
-	ui.toast("지하 %d층" % state.floor_num, UiTheme.ACCENT)
+	ui.toast(RunState.floor_name(state.floor_num), UiTheme.ACCENT)
 
 
 func _on_record_stopped(reason: String) -> void:
@@ -1975,6 +1988,115 @@ func _drive_pose() -> void:
 				print("[끼임] f=%d 처음 자리에서 %.2fm (끼임시계 %.2f)" % [
 					_frames, player.global_position.distance_to(_wedge_from),
 					player._stuck_time])
+		"breath":
+			# **기술마다 숨이 얼마나 드는가.** 처음 값(스테미나 계통 Lv0)입니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				debug_aim = Vector3(1, 0, 0)
+			# **연타 벌금을 끊고 잽니다.** 앞선 기술과 이어지면 같은 기술이
+			# 1.5배가 되어(REPEAT_STEP), 처음 값을 재는 자리에서 45 가 찍힙니다.
+			if _frames in [30, 60, 140, 190] and is_instance_valid(player):
+				player._repeat_t = 0.0
+				player._repeat_n = 0
+			if _frames == 30 and is_instance_valid(player):
+				state.breath = state.max_breath
+				var b0: float = state.breath
+				player.attack()
+				print("[숨] 고함 **살짝**  %.0f -> %.0f  (%.0f 듦)" % [
+					b0, state.breath, b0 - state.breath])
+			if _frames == 60 and is_instance_valid(player):
+				# **다 모이면 손을 떼지 않아도 나갑니다**(0.5초 = 30프레임).
+				# 그 뒤에 재면 이미 낸 값을 못 봅니다 - 누르기 전 값과
+				# 견줘야 합니다.
+				state.breath = state.max_breath
+				player.shout_press()
+			if _frames == 100 and is_instance_valid(player):
+				print("[숨] 고함 **끝까지**  %.0f -> %.0f  (%.0f 듦)" % [
+					state.max_breath, state.breath, state.max_breath - state.breath])
+			if _frames == 140 and is_instance_valid(player):
+				state.breath = state.max_breath
+				var b2: float = state.breath
+				player.dash()
+				print("[숨] 구르기        %.0f -> %.0f  (%.0f 듦)" % [
+					b2, state.breath, b2 - state.breath])
+			if _frames == 190 and is_instance_valid(player):
+				state.breath = state.max_breath
+				var b3: float = state.breath
+				player.grab_press()
+				print("[숨] 밀기          %.0f -> %.0f  (%.0f 듦)" % [
+					b3, state.breath, b3 - state.breath])
+		"lungeghost":
+			# **밀기 Lv3 의 달려드는 잔상**이 실제로 떨어지는지 셉니다.
+			#
+			# 잔상은 world 밑에 붙었다 사라지는 노드라, 달려드는 동안 world 의
+			# 자식 수가 늘어나는지로 봅니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				# `--side=off` 로 부르면 Lv0 과 견줄 수 있습니다.
+				state.skill_lv["push"] = 0 if _probe_arg == "off" else 3
+				state._recompute()
+				var foe := Enemy.new()
+				world.add_child(foe)
+				foe.setup("grunt", 1, dungeon, player)
+				foe.speed = 0.0
+				foe.set_physics_process(false)
+				foe.global_position = player.global_position + Vector3(2.4, 0, 0)
+				foe.died.connect(_on_enemy_died)
+				_probe_foe = foe
+				debug_aim = Vector3(1, 0, 0)
+			if _frames == 30:
+				_wedge_from = Vector3(world.get_child_count(), 0, 0)
+				player.grab_press()
+			if _frames in [36, 42, 50]:
+				print("[잔상] f=%d 밀기 Lv%d  달려드는 중=%s  world 자식 %d (시작 %d)" % [
+					_frames, state.family_level("push"),
+					str(player._lunge_time > 0.0), world.get_child_count(),
+					int(_wedge_from.x)])
+		"cardir":
+			# **자동차가 가는 쪽을 보고 있나.** 앞뒤가 뒤집혔는지 재는 자리입니다.
+			#
+			# 차를 하나 놓고 **-Z 를 보도록**(rotation.y = 0) 세운 뒤, 차체
+			# 메시의 무게중심이 앞(-Z)에 있는지 뒤(+Z)에 있는지 봅니다.
+			# 자동차 그림은 앞이 길고 뒤가 짧으므로, 앞을 보고 있으면 메시의
+			# 가운데가 원점보다 **뒤(+Z)** 로 치우칩니다.
+			if _frames == 20:
+				var car := Prop.new()
+				world.add_child(car)
+				car.setup("ridecar")
+				car.global_position = dungeon.room_center(0) + Vector3(2.0, 0, 0)
+				car.rotation.y = 0.0
+				_wedge_prop = car
+			if _frames == 40 and is_instance_valid(_wedge_prop):
+				var lo := Vector3.INF
+				var hi := -Vector3.INF
+				var stack: Array = [_wedge_prop]
+				while not stack.is_empty():
+					var cur: Node = stack.pop_back()
+					if cur is VisualInstance3D:
+						var ab: AABB = (cur as VisualInstance3D).global_transform 							* (cur as VisualInstance3D).get_aabb()
+						lo = lo.min(ab.position); hi = hi.max(ab.position + ab.size)
+					stack.append_array(cur.get_children())
+				var mid := (lo.z + hi.z) * 0.5 - _wedge_prop.global_position.z
+				print("[차방향] rotation.y=0 일 때 메시 가운데 z=%+.3f (길이 %.2f)" % [
+					mid, hi.z - lo.z])
+				if is_instance_valid(player):
+					player.global_position = _wedge_prop.global_position + Vector3(0, 0, 2.2)
+		"boss":
+			# **층마다 관문이 누구인가.** 3층 베개, 5층 선생님이어야 맞습니다.
+			if _frames == 30:
+				# **출구 방 한가운데에 선 것**이 관문입니다. 종류만 세면
+				# 4층의 베개(일반 등장)를 관문으로 잘못 읽습니다.
+				var want: String = String(BOSS_BY_FLOOR.get(state.floor_num, "없음"))
+				var at_exit := "없음"
+				for n in get_tree().get_nodes_in_group("enemies"):
+					var e := n as Enemy
+					if not is_instance_valid(e):
+						continue
+					if e.global_position.distance_to(dungeon.room_center(dungeon.rooms.size() - 1)) < 1.0:
+						at_exit = e.kind
+				print("[관문] %s(%d층)  적어 둔 것=%s  출구 방 한가운데=%s" % [
+					RunState.floor_name(state.floor_num), state.floor_num,
+					want, at_exit])
 		"foecount":
 			# **방마다 몇 마리가 섰나.** 최소 두 마리가 실제로 지켜지는지 봅니다.
 			if _frames == 30:
