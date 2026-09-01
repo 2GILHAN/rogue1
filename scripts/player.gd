@@ -1806,17 +1806,44 @@ func _lunge_afterimage(delta: float) -> void:
 	_afterimage(state.shove_damage >= 0.5)
 
 
+## 잔상 한 장을 만드는 시간을 마디마디 모읍니다(`--pose=pushcost`).
+static var ghost_n := 0
+static var ghost_dup := 0
+static var ghost_strip := 0
+static var ghost_mat := 0
+static var ghost_add := 0
+static var ghost_tail := 0
+
+
 func _afterimage(strong: bool) -> void:
 	## 지금 자세 그대로의 **파란 잔상** 한 장.
 	if body == null:
 		return
+	# **마디마다 시간을 챙깁니다**(`--pose=pushcost` 가 읽습니다). 잔상은
+	# 구르기와 밀기가 같이 쓰는 자리라, 무거워지면 두 기술이 함께 끊깁니다.
+	var _t0 := Time.get_ticks_usec()
 	var ghost := body.duplicate(DUPLICATE_USE_INSTANTIATION) as Node3D
 	if ghost == null:
 		return
+	var _t1 := Time.get_ticks_usec()
 	# 애니메이션과 자세 층을 떼어냅니다. 두면 잔상이 살아 움직입니다.
+	#
+	# **`queue_free()` 로는 안 됩니다.** 그건 프레임 끝에 도는데, 그 전에
+	# 아래 `add_child` 가 돌아 층들이 트리에 **들어갑니다.** 그중 물리뼈
+	# 층(`PhysicalBoneSimulator3D`)이 트리에 들어가면 뼈를 못 찾는다면서
+	# 오류를 뼈 수만큼 냅니다. 오류 한 줄마다 GDScript 백트레이스가 붙어서,
+	# **잔상 한 장이 100ms** 를 먹고 있었습니다(재서 찾았습니다 - 복제는
+	# 1.02ms 인데 붙이기가 100ms 였습니다).
+	#
+	# 아직 트리 밖이라 `free()` 를 바로 불러도 됩니다. 부모를 먼저 지우면
+	# 자식이 같이 사라지므로 `is_instance_valid` 로 한 번 거릅니다.
 	for node in _all_nodes(ghost):
-		if node is AnimationPlayer or node is SkeletonModifier3D:
-			node.queue_free()
+		if is_instance_valid(node) and (node is AnimationPlayer
+				or node is SkeletonModifier3D):
+			if node.get_parent() != null:
+				node.get_parent().remove_child(node)
+			node.free()
+	var _t2 := Time.get_ticks_usec()
 
 	var tone := Color(0.28, 0.60, 1.0) if not strong else Color(0.40, 0.80, 1.0)
 	var mat := StandardMaterial3D.new()
@@ -1833,12 +1860,21 @@ func _afterimage(strong: bool) -> void:
 			# 카툰 외곽선이 잔상마다 검은 테두리를 두르면 그림자 떼가 됩니다.
 			mi.set_meta("flat", true)
 
+	var _t3 := Time.get_ticks_usec()
 	get_parent().add_child(ghost)
+	var _t4 := Time.get_ticks_usec()
 	ghost.global_transform = body.global_transform
 	var life := 0.30 if not strong else 0.45
 	var tw := ghost.create_tween()
 	tw.tween_property(mat, "albedo_color:a", 0.0, life)
 	tw.tween_callback(ghost.queue_free)
+	var _t5 := Time.get_ticks_usec()
+	ghost_n += 1
+	ghost_dup += _t1 - _t0
+	ghost_strip += _t2 - _t1
+	ghost_mat += _t3 - _t2
+	ghost_add += _t4 - _t3
+	ghost_tail += _t5 - _t4
 
 
 func _all_nodes(root: Node) -> Array:
@@ -3095,7 +3131,7 @@ func _try_attack() -> void:
 		# Lv2 는 맞은 자리에서 구슬이 한 번 더 터집니다. 소용돌이는 이미
 		# 모으는 동안 내내 떠 있으므로, 여기서는 **맞았다**만 보태면 됩니다.
 		Fx.orbs(get_parent(), global_position + Vector3(0, 0.7, 0), aim,
-			shout_reach(_shout_fired), 5 + slv * 3, state.shout_knock > 0.0)
+			shout_reach(_shout_fired), 5 + slv * 3, state.shout_stun > 0.0)
 
 
 ## 자동차를 탄 동안 **허리 아래를 지웁니다.**
@@ -3405,10 +3441,9 @@ func _resolve_swing() -> void:
 		# 발은 0.2배로 묶이므로, 언제 그 값을 치를지가 선택이 됩니다.
 		if state.has_shout_damage() and _shout_fired >= SHOUT_FULL:
 			roll = state.roll_damage(rng)
-		if state.shout_knock > 0.0:
-			# **「돌풍」을 찍었으면** 맞은 자리에서 한 번 더 터집니다.
-			# 밀어내는 힘이 있다는 것을 맞는 쪽에서 보여 줍니다 - 예전에는
-			# 계통 Lv5 로 켰는데, 돌풍을 안 찍어도 터져서 거짓말이었습니다.
+		if state.shout_stun > 0.0:
+			# 맞은 자리에서 한 번 더 터집니다. **끊겼다**는 것을 맞는 쪽에서
+			# 보여 줍니다.
 			Fx.orbs(get_parent(), enemy.global_position + Vector3(0, 0.5, 0),
 				aim, 1.2, 5, true)
 		var blocked := _guarded(enemy)
@@ -3416,17 +3451,18 @@ func _resolve_swing() -> void:
 			Enemy.SHOUT_STAGGER, global_position)
 		if blocked:
 			continue
-		# 돌풍(축복). 소리에 밀려 뒤로 날아갑니다.
+		# **고함은 밀어내지 않습니다. 끊습니다.**
 		#
-		# 밀어내는 방향은 **적에게서 멀어지는 쪽**이지 내가 보는 쪽이 아닙니다.
-		# 부채꼴이 110도라 가장자리에 있는 적을 조준 방향으로 밀면 옆에 있던
-		# 적이 내 쪽으로 끌려옵니다.
-		if state.shout_knock > 0.0 and enemy.has_method("knock_back"):
-			var away: Vector3 = enemy.global_position - global_position
-			away.y = 0.0
-			if away.length_squared() < 0.0001:
-				away = aim
-			enemy.knock_back(away.normalized() * state.shout_knock)
+		# 예전에는 뒤로 날려 보냈습니다. 그런데 이 기술이 파는 자리가 「판을
+		# 정리하는 것」이고 정리한 뒤 때리는 일은 밀기가 하는데, 밀어내면
+		# **정리해 놓고 멀리 보내는 셈**이라 둘이 이어지지 않았습니다. 넓은
+		# 범위로 적을 흩어 놓기만 하니 쓸 이유도 잘 안 생겼습니다.
+		#
+		# 지금은 **하던 동작을 통째로 끊습니다.** 달려오던 박치기가 그 자리에
+		# 멈추고, 들어 올리던 베개가 내려오다 맙니다 - 소리를 질러 상대를
+		# 멈춰 세운다는 그림 그대로입니다. 굳는 시간은 계통 단계를 따릅니다.
+		if enemy.has_method("interrupt"):
+			enemy.interrupt(state.shout_stun)
 		hit_any = true
 		note_hit()
 	if hit_any:

@@ -259,6 +259,10 @@ var _melee_flash := 0.0
 var _lane: MeshInstance3D = null
 var _lane_mat: StandardMaterial3D = null
 var _lane_flash := 0.0
+## 내려치기가 닿을 **채워진 원**. 예고 동안 커집니다 - 베개를 드는 동작과
+## 원이 자라는 것이 같은 시간을 씁니다.
+var _disc: MeshInstance3D = null
+var _disc_mat: StandardMaterial3D = null
 ## 호통의 판정 범위를 칠하는 바닥 판. 그 공격을 쓰는 적만 만듭니다.
 var _shout_fan: MeshInstance3D = null
 var _shout_fan_mat: StandardMaterial3D = null
@@ -848,6 +852,7 @@ func _physics_process(delta: float) -> void:
 	_drive_shout_fan(delta)
 	_drive_melee_fan(delta)
 	_drive_charge_lane(delta)
+	_drive_slam_disc(delta)
 	_drive_animation()
 
 
@@ -1074,29 +1079,33 @@ func _begin_attack() -> void:
 		return
 
 	if mode == "cling":
-		# 붙잡기는 예고가 짧습니다(0.32초). 대신 **오는 길이 예고**입니다 -
-		# 등 뒤로 빙 돌아 들어오는 동안 내내 보입니다. 발밑의 작은 고리는
-		# "지금 손을 뻗었다" 만 알립니다.
-		Fx.ring(get_parent(), global_position, Color(0.75, 0.6, 1.0), 1.1, _windup)
+		# 붙잡기는 예고가 짧습니다(0.32초). **오는 길이 예고**입니다 - 등
+		# 뒤로 빙 돌아 들어오는 동안 내내 보입니다.
+		#
+		# 발밑 고리를 뺐습니다. 예고는 **닿는 자리를 칠하는 것**인데, 발밑
+		# 고리는 닿는 자리가 아니라 "얘가 뭘 한다" 만 말합니다 - 그건 몸이
+		# 이미 하고 있습니다. 게다가 빈 고리는 가운데가 안전해 보입니다.
 		return
 
 	if mode == "slam":
-		# 내리칠 **자리**를 그립니다. 방향은 여기서 고정되므로, 예고를 보고
-		# 옆으로 굴러 들어가면 그대로 등이 열립니다 - 이 적을 이기는 길이
-		# 예고 안에 들어 있습니다.
+		# 내리칠 **자리를 칠합니다.** 베개가 내려앉을 바닥이 그대로 원입니다.
+		#
+		# 고리(테두리)였습니다. 테두리는 "이 선 위가 위험" 처럼 읽혀서 가운데가
+		# 안전해 보이는데, 내려치기는 **가운데가 가장 위험합니다.** 칠하면 그
+		# 오해가 없습니다(박치기의 띠·고함의 부채꼴과 같은 규칙).
+		#
+		# 방향은 여기서 고정되므로, 예고를 보고 옆으로 굴러 나가면 빗나갑니다.
 		var to3: Vector3 = (target.global_position - global_position) if is_instance_valid(target) else -_pivot.global_transform.basis.z
 		to3.y = 0.0
 		if to3.length_squared() > 0.001:
 			_slam_dir = to3.normalized()
-		var hit_at := global_position + _slam_dir * (float(stats["range"]) * 0.6)
-		Fx.ring(get_parent(), hit_at, Color(0.55, 0.75, 1.0),
-			float(stats["range"]) * 0.9, _windup)
+		_show_slam_disc()
 		return
 
 	if mode == "toss":
-		# 던지는 것은 **날아오는 물건 자체가 예고**입니다. 여기서는 겨누는
-		# 순간만 알립니다 - 발밑의 작은 고리 하나면 "이제 온다" 가 됩니다.
-		Fx.ring(get_parent(), global_position, Color(1.0, 0.7, 0.35), 1.6, _windup)
+		# 던지는 것은 **날아오는 물건 자체가 예고**입니다. 발밑 고리는
+		# 닿는 자리가 아니라서 뺐습니다(위 붙잡기와 같은 이유) - 몸이 팔을
+		# 드는 것과 번쩍임으로 충분합니다.
 		return
 
 	if mode == "charge":
@@ -1117,7 +1126,7 @@ func _begin_attack() -> void:
 		return
 
 	if mode == "spit":
-		Fx.ring(get_parent(), global_position, Color(0.5, 1.0, 0.5), 1.4, _windup)
+		# 뱉는 것도 날아오는 것이 곧 예고입니다. 발밑 고리는 뺐습니다.
 		return
 
 	# ── 맨손 공격. **방향을 고정하고 그 부채꼴을 칠합니다.** ──────────
@@ -1301,6 +1310,70 @@ func _aim_charge_lane() -> void:
 	if _lane == null:
 		return
 	_lane.rotation.y = atan2(-_charge_dir.x, -_charge_dir.z)
+
+
+func _exit_tree() -> void:
+	## 예고 원반은 세계에 달아 두었으므로 **직접 치웁니다.** 적과 함께
+	## 사라지지 않으면 층을 넘길 때마다 한 장씩 쌓입니다.
+	if is_instance_valid(_disc):
+		_disc.queue_free()
+		_disc = null
+
+
+func _slam_center(reach: float) -> Vector3:
+	## 베개가 내려앉는 자리. 예고와 판정이 **같은 함수**를 봅니다 - 둘을
+	## 따로 적으면 반드시 어긋납니다(돌진에서 2.85m 를 그리고 4.9m 를 달린
+	## 적이 있습니다).
+	return global_position + _slam_dir * (reach * 0.55)
+
+
+func _slam_radius(reach: float) -> float:
+	return reach * 0.5
+
+
+func _show_slam_disc() -> void:
+	## 내리칠 자리를 **채워진 원**으로 칠합니다. 예고 동안 커집니다.
+	if _disc == null:
+		_disc_mat = Fx.fan_material()
+		_disc = MeshInstance3D.new()
+		_disc.name = "SlamDisc"
+		_disc.material_override = _disc_mat
+		_disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_disc.set_meta("flat", true)
+		# **적 노드가 아니라 세계에 답니다.** 원이 놓이는 자리는 적의 발밑이
+		# 아니라 베개가 내려앉을 앞쪽이고, 예고 중에 적이 조금 움직여도
+		# 그 자리는 굳어 있어야 합니다.
+		get_parent().add_child(_disc)
+	var reach: float = float(stats["range"]) + 0.4
+	# 360 도 부채꼴이 곧 원입니다. 새 규약을 만들 이유가 없습니다.
+	_disc.mesh = Fx.fan_mesh(_slam_radius(reach), 360.0, 28)
+	_disc.global_position = _slam_center(reach) + Vector3(0, 0.045, 0)
+	_disc.scale = Vector3(0.25, 1.0, 0.25)
+	_disc.visible = true
+
+
+func _drive_slam_disc(delta: float) -> void:
+	## 예고가 도는 동안 **원이 자랍니다.** 베개를 드는 동작과 같은 시간을
+	## 쓰므로, 다 자라면 맞습니다 - 남은 시간을 눈으로 셀 수 있습니다.
+	if _disc == null or _disc_mat == null:
+		return
+	var slam: bool = stats.get("attack", "melee") == "slam"
+	if _windup >= 0.0 and slam and not _dead:
+		var total := maxf(float(stats["windup"]), 0.001)
+		var k := clampf(1.0 - _windup / total, 0.0, 1.0)
+		var g := lerpf(0.25, 1.0, k)
+		_disc.scale = Vector3(g, 1.0, g)
+		_disc_mat.albedo_color = Color(0.42, 0.66, 1.0, lerpf(0.20, 0.52, k))
+		_disc.visible = true
+		return
+	# 예고가 끝나면 한 박자에 사라집니다. 남겨 두면 이미 맞은 자리가 아직
+	# 위험한 것으로 보입니다.
+	if _disc.visible:
+		var a := _disc_mat.albedo_color
+		a.a = maxf(0.0, a.a - delta * 3.4)
+		_disc_mat.albedo_color = a
+		if a.a <= 0.001:
+			_disc.visible = false
 
 
 func _show_charge_lane() -> void:
@@ -1653,21 +1726,24 @@ func release_cling() -> void:
 
 
 func _slam_hit() -> void:
-	## 베개로 내리칩니다. 고정한 방향으로 좁은 부채꼴(80도)입니다.
+	## 베개로 내리칩니다. **고정한 자리에 놓이는 원** 하나입니다.
 	##
-	## 호통보다 좁고 가깝지만 더 아픕니다. 막고 서 있는 적이 가만히만 있으면
-	## 뒤로 돌아갈 시간을 무한히 주는 셈이라, **붙어 있는 것 자체가 위험**
-	## 이어야 앞뒤를 재는 판단이 생깁니다.
+	## 부채꼴(80도)이었습니다. 베개를 내려찍는 그림은 부채꼴이 아니라 **바닥에
+	## 눌리는 원**이고, 예고도 그 원을 칠하므로 판정도 같아야 합니다 - 보이는
+	## 것과 맞는 것이 다르면 피한 것이 억울해집니다.
+	##
+	## 크기는 부채꼴과 비슷하게 잡았습니다: 축을 따라 0.05~1.05 배, 옆으로는
+	## 가운데에서 ±0.5 배(예전 부채꼴은 그 자리에서 ±0.46 배였습니다).
+	## 옆으로 굴러 나가면 여전히 빗나갑니다.
 	_slam_time = 0.28
 	var reach: float = float(stats["range"]) + 0.4
+	var at := _slam_center(reach)
 	if is_instance_valid(target):
-		var to: Vector3 = target.global_position - global_position
+		var to: Vector3 = target.global_position - at
 		to.y = 0.0
-		var in_arc := to.length_squared() > 0.0001 and to.normalized().dot(_slam_dir) >= cos(deg_to_rad(80.0) * 0.5)
-		if to.length() <= reach and in_arc:
+		if to.length() <= _slam_radius(reach):
 			target.call("take_damage", damage, global_position,
 				float(stats.get("knock", 8.0)))
-	var at := global_position + _slam_dir * (reach * 0.55)
 	Fx.ring(get_parent(), at, Color(0.7, 0.85, 1.0), reach * 0.8, 0.3)
 	Fx.burst(get_parent(), at + Vector3(0, 0.4, 0), Color(0.9, 0.95, 1.0), 12, 3.4)
 	Sfx.play(Sfx.PUSH, -6.0, 0.14)
@@ -1953,7 +2029,11 @@ func _begin_charge(dir: Vector3) -> void:
 	_charge_dir = dir
 	_charge_hit = false
 	_cooldown = float(stats.get("cooldown", 2.6))
-	Fx.ring(get_parent(), global_position, Color(1.0, 0.5, 0.3), 2.0, 0.3)
+	# **발밑 고리를 뺐습니다.** 달려갈 길은 이미 띠(`_show_charge_lane`)가
+	# 칠하고 있어서, 고리는 같은 말을 다른 모양으로 한 번 더 하는 것이었고
+	# 예고와 헷갈렸습니다. 남는 것은 **박차고 나가는 먼지**뿐입니다.
+	Fx.burst(get_parent(), global_position + Vector3(0, 0.12, 0),
+		Color(0.86, 0.78, 0.66), 7, 2.0)
 
 
 # ---------------------------------------------------------------- 피해
@@ -1969,6 +2049,38 @@ const SHOUT_STAGGER := 1.0
 ## 들썩이는 자세가 풀리는 데 걸리는 시간. 경직(1초)보다 짧아야 굳어 있는
 ## 동안 자세가 서서히 돌아옵니다.
 const FLINCH_TIME := 0.45
+
+
+func interrupt(hold: float) -> void:
+	## **하던 동작을 통째로 끊습니다.** 고함이 하는 일입니다.
+	##
+	## 밀어내는 것과 다릅니다. 밀면 자리가 바뀌고 하던 일은 그대로라 다시
+	## 달려옵니다. 끊으면 자리는 그대로인데 **하던 일이 없어집니다** - 정리한
+	## 자리에서 그대로 잡거나 밀 수 있습니다(고함 → 밀기가 이어집니다).
+	##
+	## 끊는 것 넷:
+	##
+	##   예고     `_windup` — 들어 올리던 베개가 내려오다 맙니다
+	##   돌진     `_charge` — 달려오던 몸이 그 자리에 섭니다
+	##   내려치기 `_slam_time` — 이미 나간 것도 거둡니다
+	##   예고 그림 띠와 원반 — 안 지우면 없는 공격의 예고가 남습니다
+	if _dead:
+		return
+	_windup = -1.0
+	_charge = 0.0
+	_charge_hit = true
+	_slam_time = 0.0
+	velocity.x = 0.0
+	velocity.z = 0.0
+	# **다시 시작하기까지 쉽니다.** 끊기자마자 곧바로 다시 예고를 시작하면
+	# 끊은 것이 눈에 안 보입니다 - 굳는 시간이 곧 파고들 틈입니다.
+	_cooldown = maxf(_cooldown, hold)
+	_stagger = maxf(_stagger, hold)
+	if _lane != null:
+		_lane.visible = false
+	_lane_flash = 0.0
+	if _disc != null:
+		_disc.visible = false
 
 
 func knock_back(impulse: Vector3, chain: int = 0) -> void:
@@ -2301,12 +2413,17 @@ func _die() -> void:
 	remove_from_group("enemies")
 	set_physics_process(false)
 	_bar_root.visible = false
+	# 예고 원반은 **세계에 달려 있습니다**(적을 따라 돌면 안 되니까).
+	# 물리가 멈추면 `_drive_slam_disc` 도 안 도므로 여기서 직접 끕니다.
+	if is_instance_valid(_disc):
+		_disc.visible = false
 	if _anim != null:
 		_anim.pause()
 
+	# 터지는 조각만 남깁니다. 퍼지는 고리는 **예고와 같은 모양**이라, 죽는
+	# 자리마다 "여기 뭔가 온다" 로 잘못 읽혔습니다.
 	Fx.burst(get_parent(), global_position + Vector3(0, 0.6, 0),
 		Color(1.0, 0.55, 0.35), 16, 5.0)
-	Fx.ring(get_parent(), global_position, Color(1.0, 0.6, 0.3), 2.2, 0.4)
 
 	var tween := _pivot.create_tween()
 	tween.set_parallel(true)

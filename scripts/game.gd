@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.48"
+const VERSION := "v0.49"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -1759,8 +1759,8 @@ func _drive_pose() -> void:
 				print("  밀기   넉백=%.1f 피해=%.2f -> 달려드는 잔상(Lv3 부터, 밝게=%s)" % [
 					st.shove_knock, st.shove_damage,
 					str(st.shove_damage >= 0.5)])
-				print("  고함   돌풍=%.0f -> 구슬(맞은자리 폭발=%s)" % [
-					st.shout_knock, str(st.shout_knock > 0.0)])
+				print("  고함   굳힘=%.1f초 -> 하던 동작을 끊음(구슬=%s)" % [
+					st.shout_stun, str(st.shout_stun > 0.0)])
 				print("  구르기 뚫기=%.0f -> 밝은 잔상=%s" % [
 					st.roll_pierce, str(st.roll_pierce > 0.0)])
 			player.bot_active = true
@@ -2309,6 +2309,211 @@ func _drive_pose() -> void:
 				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
 				_foe_n += 1
+		"slamdisc":
+			# **내려치기 예고가 칠해지는가.** 베개 아이를 세워 두고 예고가
+			# 도는 동안 원이 자라는지를 봅니다(`--shot=` 으로 같이 찍습니다).
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("pillow", 3, dungeon, player)
+				e.max_hp = 99999.0
+				e.hp = e.max_hp
+				e.global_position = player.global_position + Vector3(0, 0, -1.6)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+			if _frames > 24 and _frames % 4 == 0 and is_instance_valid(_probe_foe) 					and _probe_foe._windup >= 0.0:
+				var d: MeshInstance3D = _probe_foe._disc
+				if d != null and d.visible:
+					var total := maxf(float(_probe_foe.stats["windup"]), 0.001)
+					print("[내려치기] 남은 예고 %.2f초  원 크기 %.2f배  반지름 %.2fm  진하기 %.2f" % [
+						_probe_foe._windup, d.scale.x,
+						_probe_foe._slam_radius(float(_probe_foe.stats["range"]) + 0.4) * d.scale.x,
+						(d.material_override as StandardMaterial3D).albedo_color.a])
+		"shoutstop":
+			# **고함이 달려오는 적을 멈추는가.**
+			#
+			# 밀어내지 않고 끊는 것이 요점이라, 두 가지를 같이 봅니다:
+			# 달리던 것이 멈췄나(속도), 그리고 **제자리에 있나**(움직인
+			# 거리). 밀어냈다면 멈추긴 해도 멀리 가 있습니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				for _i in 3:
+					state.apply_family("shout", rng)
+				_boon_names = state.skill_summary()
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("brute", 3, dungeon, player)
+				e.max_hp = 99999.0
+				e.hp = e.max_hp
+				# 돌진 사거리 안에 세웁니다. 그래야 달려옵니다.
+				e.global_position = player.global_position + Vector3(0, 0, -5.0)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+				print("[고함끊기] 고함 Lv%d  굳힘 %.1f초" % [
+					state.family_level("shout"), state.shout_stun])
+			# **적을 보고 질러야 합니다.** 고함은 정면 부채꼴이라 엉뚱한 쪽으로
+			# 지르면 안 맞습니다. `player.aim` 에 직접 넣으면 다음 프레임에
+			# 덮어써집니다(조준은 매 프레임 다시 정합니다) - 처음에 그렇게
+			# 넣어 놓고 "끊기가 안 먹는다" 로 볼 뻔했습니다. **`debug_aim`**
+			# 이 그 자리를 위해 있는 통로입니다.
+			if _frames > 22 and is_instance_valid(_probe_foe):
+				var to_f: Vector3 = _probe_foe.global_position - player.global_position
+				to_f.y = 0.0
+				if to_f.length_squared() > 0.0001:
+					debug_aim = to_f.normalized()
+			# 달리기 시작할 때까지 둡니다.
+			if _frames > 30 and _frames < 200 and is_instance_valid(_probe_foe) 					and _probe_foe._charge > 0.0 and _probe_t0 <= 0.0:
+				_probe_t0 = 1.0
+				_wedge_from = _probe_foe.global_position
+				var v := Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()
+				print("[고함끊기] 달리는 중: 속도 %.2fm/s  남은 돌진 %.2f초" % [
+					v, _probe_foe._charge])
+				# **적을 보고 질러야 합니다.** 고함은 정면 부채꼴(110도)이라,
+				# 봇을 끈 채로 그냥 지르면 엉뚱한 쪽으로 나갑니다 - 처음에
+				# 이걸 빠뜨리고 "끊기가 안 먹는다" 로 볼 뻔했습니다.
+				player.attack()
+				print("[고함끊기] 지른 뒤: 휘두름 %.2f  모음 %.2f  숨 %.0f" % [
+					player._swing_time, player._shout_fired, state.breath])
+			if _probe_t0 > 0.0 and is_instance_valid(_probe_foe):
+				_probe_t0 += 1.0
+				if int(_probe_t0) == 10:
+					var to_f: Vector3 = _probe_foe.global_position - player.global_position
+					to_f.y = 0.0
+					print("[고함끊기] 판정 시점: 휘두름 %.2f  이미판정=%s  거리 %.2f  사거리 %.2f  각 %.0f도  겨눔각 %.0f도" % [
+						player._swing_time, str(player._swing_hit), to_f.length(),
+						player.shout_reach(player._shout_fired)
+							+ float(_probe_foe.get_meta("body_radius", 0.4)),
+						player.shout_arc(player._shout_fired),
+						rad_to_deg(acos(clampf(player.aim.dot(to_f.normalized()), -1.0, 1.0)))])
+				if int(_probe_t0) == 20:
+					var v2 := Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()
+					print("[고함끊기] 고함 뒤 0.33초: 속도 %.2fm/s  움직인 거리 %.2fm  남은 돌진 %.2f초  굳음 %.2f  대기 %.2f  막힘=%s" % [
+						v2, _probe_foe.global_position.distance_to(_wedge_from),
+						_probe_foe._charge, _probe_foe._stagger, _probe_foe._cooldown,
+						str(_probe_foe.call("guard_blocks", player.global_position))])
+				if int(_probe_t0) == 70:
+					print("[고함끊기] 고함 뒤 1.15초: 움직인 거리 %.2fm  다시 예고=%s" % [
+						_probe_foe.global_position.distance_to(_wedge_from),
+						str(_probe_foe._windup >= 0.0)])
+		"pushcost":
+			# **밀기 이펙트가 무거운가.** 계통 Lv 를 바꿔 가며 같은 밀기를
+			# 반복하고, 그 사이의 값을 평균 냅니다.
+			#
+			# `--side=` 로 계통 Lv 를 줍니다(1 이면 잔상 없음, 3 이면 파란
+			# 잔상). 둘을 나란히 놓아야 **잔상이 값인지 밀기가 값인지**
+			# 갈립니다 - 하나만 재면 "밀기가 무겁다" 로만 보입니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				for n in get_tree().get_nodes_in_group("props"):
+					(n as Node3D).queue_free()
+				var want := 1 if _probe_arg == "" else int(_probe_arg)
+				for _i in want:
+					state.apply_family("push", rng)
+				_boon_names = state.skill_summary()
+				# 밀 것을 셋 세웁니다. 하나면 죽고 나서 잴 것이 없습니다.
+				for i in 3:
+					var e := Enemy.new()
+					world.add_child(e)
+					e.setup("brute", 3, dungeon, player)
+					e.speed = 0.0
+					e.max_hp = 99999.0
+					e.hp = e.max_hp
+					e.global_position = player.global_position 						+ Vector3(sin(TAU * float(i) / 3.0), 0, cos(TAU * float(i) / 3.0)) * 2.2
+					e.died.connect(_on_enemy_died)
+					_alive += 1
+				print("[밀기값] 밀기 Lv%d  잔상=%s" % [
+					player.skill_lv("push"),
+					str(player.skill_lv("push") >= 3)])
+			# 0.35초마다 밉니다(대기가 그만합니다). 숨은 계속 채워 둡니다 -
+			# 숨이 말라 밀기가 안 나가면 "가볍다" 는 엉뚱한 답이 나옵니다.
+			if _frames > 30:
+				state.breath = state.max_breath
+			if _frames > 40 and _frames % 21 == 0:
+				player.grab_press()
+			# 달려드는 중간을 찍으려고 **한 마리를 멀리** 둡니다. 코앞이면
+			# 잔상이 남을 거리가 없습니다.
+			if _frames == 200 and _alive > 0:
+				for n in get_tree().get_nodes_in_group("enemies"):
+					(n as Node3D).global_position = player.global_position 						+ Vector3(0, 0, -6.0)
+					break
+			if _frames > 45:
+				_foe_sum += Performance.get_monitor(Performance.TIME_PROCESS)
+				_foe_draw += Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+				_foe_n += 1
+				_alive = maxi(_alive, get_tree().get_nodes_in_group("enemies").size())
+			# **잔상 한 장이 얼마인가.** 밀기와 섞이면 안 갈립니다 -
+			# Lv3 은 적을 더 멀리 밀어 화면 밖으로 보내므로 같은 밀기라도
+			# 그리는 양이 달라집니다(그래서 Lv3 이 더 가벼워 보였습니다).
+			# 여기서는 **잔상만** 직접 불러서 잽니다.
+			if _frames == 250:
+				var n0 := Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
+				# **한 장씩 따로** 잽니다. 뭉쳐 재면 첫 장의 셰이더
+				# 컴파일이 열 장에 퍼져서 "잔상이 무겁다" 로 잘못 읽힙니다.
+				var each: Array = []
+				for _i in 10:
+					var t1 := Time.get_ticks_usec()
+					player._afterimage(false)
+					each.append(float(Time.get_ticks_usec() - t1) / 1000.0)
+				var dn := Performance.get_monitor(Performance.OBJECT_NODE_COUNT) - n0
+				var rest := 0.0
+				for i in range(1, each.size()):
+					rest += float(each[i])
+				print("[잔상] 첫 장 %.1fms  나머지 평균 %.2fms  노드 한 장당 %.0f개" % [
+					float(each[0]), rest / float(each.size() - 1), dn / 10.0])
+			# **한 프레임에 한 장씩** 도 재 봅니다. 열 장을 몰아 부르면
+			# 할당이 몰려서 값이 부풀 수 있습니다.
+			if _frames >= 260 and _frames <= 269:
+				var t2 := Time.get_ticks_usec()
+				player._afterimage(false)
+				_probe_t0 += float(Time.get_ticks_usec() - t2) / 1000.0
+			if _frames == 271:
+				var gn := maxf(float(Player.ghost_n), 1.0)
+				print("[잔상] 프레임마다 한 장씩 열 번: 평균 %.2fms" % [_probe_t0 / 10.0])
+				print("[잔상] 한 장 마디별(%d장 평균)  복제 %.2f  떼기 %.2f  재질 %.2f  붙이기 %.2f  꼬리 %.2f ms" % [
+					Player.ghost_n,
+					float(Player.ghost_dup) / gn / 1000.0,
+					float(Player.ghost_strip) / gn / 1000.0,
+					float(Player.ghost_mat) / gn / 1000.0,
+					float(Player.ghost_add) / gn / 1000.0,
+					float(Player.ghost_tail) / gn / 1000.0])
+				# 어느 줄이 무거운가. 복제만 따로 잽니다.
+				var t3 := Time.get_ticks_usec()
+				var dup := player.body.duplicate(Node.DUPLICATE_USE_INSTANTIATION) as Node3D
+				var dup_ms := float(Time.get_ticks_usec() - t3) / 1000.0
+				var t4 := Time.get_ticks_usec()
+				var nodes := player._all_nodes(dup)
+				var walk_ms := float(Time.get_ticks_usec() - t4) / 1000.0
+				dup.queue_free()
+				# **떼어낸 뒤에도 그릴 것이 남아 있어야** 합니다. 물리뼈
+				# 층을 통째로 지우므로, 메시가 그 밑에 있었다면 잔상이
+				# 안 보이게 됩니다.
+				var meshes := 0
+				for n in nodes:
+					if n is MeshInstance3D:
+						meshes += 1
+				var left := 0
+				for n in player._all_nodes(dup):
+					if is_instance_valid(n) and (n is AnimationPlayer
+							or n is SkeletonModifier3D):
+						left += 1
+				print("[잔상] 복제 %.2fms  훑기 %.2fms  하위 노드 %d개  메시 %d개  남은 층 %d개" % [
+					dup_ms, walk_ms, nodes.size(), meshes, left])
+			if _frames == 252:
+				print("[잔상] 열 장 떠 있을 때  콜 %d  삼각형 %.0f천" % [
+					Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+					Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0])
+			if _frames == 300:
+				# 잔상이 몇 장 살아 있는지는 **노드 수**가 말해 줍니다 -
+				# 한 장이 몸 전체의 복제라 하위 노드까지 통째로 늡니다.
+				print("[밀기값] Lv%d  그리기 %.2fms  콜 %.0f  삼각형 %.0f천  노드 %d" % [
+					player.skill_lv("push"),
+					_foe_sum / maxf(float(_foe_n), 1.0) * 1000.0,
+					_foe_draw / maxf(float(_foe_n), 1.0),
+					Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0,
+					Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
 		"tracetest":
 			# **프레임 기록이 쓸모 있는 글을 내는지** 봅니다.
 			if _frames == 20:
