@@ -1,6 +1,6 @@
 """골반(Hips)을 올리고 다리를 그만큼 늘립니다.
 
-    python tools/raise_hips.py assets/models/dowon_b.glb --hip 0.33
+    python tools/raise_hips.py assets/characters/hero.glb --hip 0.33
 
 # 왜 필요한가
 

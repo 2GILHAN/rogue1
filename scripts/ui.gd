@@ -568,17 +568,12 @@ func _build_test_panel() -> void:
 	col.add_child(_test_label)
 
 	# 적 종류. 고른 것이 시간마다 다시 나옵니다.
-	for entry in [
-		["grunt", "서진 (박치기)"],
-		["screamer", "고함 아기"],
-		["clinger", "붙잡는 아기"],
-		["pillow", "베개 아기"],
-		["spitter", "블랙 (원거리)"],
-		["brute", "큰 아이 (던지기)"],
-		["teacher", "선생님"],
-	]:
-		var kind: String = entry[0]
-		var b := _small_button(entry[1], func() -> void: test_kind_picked.emit(kind))
+	# **이름은 `Enemy.LABEL` 한 곳에서 옵니다.** 여기 따로 적어 두면 이름을
+	# 고칠 때 한쪽만 바뀝니다.
+	for kind in ["grunt", "screamer", "spitter", "brute", "clinger", "pillow",
+			"teacher"]:
+		var b := _small_button(Enemy.label_of(kind),
+			func() -> void: test_kind_picked.emit(kind))
 		b.custom_minimum_size = Vector2(0, 26)
 		col.add_child(b)
 

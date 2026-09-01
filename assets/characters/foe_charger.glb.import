@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cjw3wrh7iquhs"
-path="res://.godot/imported/teacher.glb-d34c94d85fc0f9124b86c606e6aeb651.scn"
+uid="uid://ddywmojpovxsd"
+path="res://.godot/imported/foe_charger.glb-a28c72bc06d408a6ce2bbbb77a04fc40.scn"
 
 [deps]
 
-source_file="res://assets/models/teacher.glb"
-dest_files=["res://.godot/imported/teacher.glb-d34c94d85fc0f9124b86c606e6aeb651.scn"]
+source_file="res://assets/characters/foe_charger.glb"
+dest_files=["res://.godot/imported/foe_charger.glb-a28c72bc06d408a6ce2bbbb77a04fc40.scn"]
 
 [params]
 

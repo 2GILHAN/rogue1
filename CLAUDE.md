@@ -55,6 +55,16 @@ GODOT="/c/Users/GilhanLee/Downloads/Godot_v4.7.1-stable_win64.exe/Godot_v4.7.1-s
 - 폰 빌드 주소: https://home.tailc06b21.ts.net:8456/ — `tools/serve.py`가 8807에
   붙습니다. `index.pck`는 `no-cache`여야 합니다(캐시되면 폰이 옛 코드를 돕니다).
 
+## 폴더
+
+`assets/` 는 **게임에 들어가는 것만**입니다. 굽기 전 재료(`src`·`backup`·
+`source`·`unused`)는 `art_src/` 에 있고 `.gdignore` 가 있어 Godot 이 들여오지도
+않습니다. **게임 코드가 `art_src/` 를 읽으면 안 됩니다** — 필요하면 굽어서
+`assets/` 아래로 내보내세요.
+
+사람 이름을 파일에 쓰지 않습니다. 적은 하는 일로 부릅니다
+(`foe_charger` · `foe_shouter` …), 화면 이름은 `Enemy.LABEL` 한 곳에 있습니다.
+
 ## 건드리지 말 것
 
 - **`C:\_project\test3`는 다른 프로젝트도 쓰는 공용 코드입니다.** 이 게임만의

@@ -1,4 +1,4 @@
-"""`assets/source/` 의 4면도 그림을 test3 로 3D 소품으로 굽습니다.
+"""`art_src/source/` 의 4면도 그림을 test3 로 3D 소품으로 굽습니다.
 
     python tools/make_source_props.py            # 없는 것만
     python tools/make_source_props.py --force    # 전부 다시
@@ -40,7 +40,7 @@ KOR = {"정면": "front", "우측면": "right", "좌측면": "left", "후면": "
 
 ## 무엇을 굽는가.
 ##
-##   file    assets/source 의 파일 이름 조각
+##   file    art_src/source 의 파일 이름 조각
 ##   height  업 축 크기(m). 실제 물건 크기입니다 - 게임 쪽 배율은 prop.gd 가
 ##           따로 잡으므로, 여기서는 **비례가 맞는 실물 크기**만 냅니다
 ##   crop    (위, 아래) 비율. 한 장에 줄이 둘이면 쓸 줄만 잘라 냅니다

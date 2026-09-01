@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://uqos67cmyrix"
-path.s3tc="res://.godot/imported/dowon_b_texture.png-303811cb03e88b20b2f2f785cd60954f.s3tc.ctex"
-path.etc2="res://.godot/imported/dowon_b_texture.png-303811cb03e88b20b2f2f785cd60954f.etc2.ctex"
+uid="uid://dp8d2kfunm2bv"
+path.s3tc="res://.godot/imported/foe_blocker_texture.png-aa08f6c4ec457868201bfeb0c8358685.s3tc.ctex"
+path.etc2="res://.godot/imported/foe_blocker_texture.png-aa08f6c4ec457868201bfeb0c8358685.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "68f98aa12d3085675f66dc8d38c533c5"
+"md5": "44035985726fb15fb03257b9e1b66758"
 }
 
 [deps]
 
-source_file="res://assets/models/dowon_b_texture.png"
-dest_files=["res://.godot/imported/dowon_b_texture.png-303811cb03e88b20b2f2f785cd60954f.s3tc.ctex", "res://.godot/imported/dowon_b_texture.png-303811cb03e88b20b2f2f785cd60954f.etc2.ctex"]
+source_file="res://assets/characters/foe_blocker_texture.png"
+dest_files=["res://.godot/imported/foe_blocker_texture.png-aa08f6c4ec457868201bfeb0c8358685.s3tc.ctex", "res://.godot/imported/foe_blocker_texture.png-aa08f6c4ec457868201bfeb0c8358685.etc2.ctex"]
 
 [params]
 

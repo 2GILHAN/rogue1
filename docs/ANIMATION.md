@@ -21,10 +21,10 @@ test3 리깅(.blend)          사람 형태의 본 + 스킨. 본 이름은 믹�
 굽기 직전 보정               fix_knees → scale_motion → press_arms  (순서 중요)
         │
         ▼
-Blender 로 키프레임 굽기     walk_worker.py → assets/models/_src/<이름>_<동작>.glb
+Blender 로 키프레임 굽기     walk_worker.py → art_src/src/<이름>_<동작>.glb
         │
         ▼
-합치기 + 골반 보정           merge_anims.graft → raise_hips.py → assets/models/<이름>.glb
+합치기 + 골반 보정           merge_anims.graft → raise_hips.py → assets/characters/<이름>.glb
         │
         ▼
 Godot 런타임                 ① 클립 재생 속도를 이동 속도에 맞춤
@@ -114,14 +114,14 @@ Spine     = [0, -step * 3.0, 0]          # 몸통은 다리와 반대로 비틂(
 | | Run | 62 | 40 | 70 | 0.040 |
 | | Back | 20 | 12 | 26 | 0.010 |
 | | Push | (각도 표를 직접 적음) | | | |
-| 서진 | Walk | 40 | 22 | 44 | 0.016 |
-| 블랙 | Walk | 44 | 22 | 46 | 0.016 |
+| 적1_박치기 | Walk | 40 | 22 | 44 | 0.016 |
+| 적3_던지기 | Walk | 44 | 22 | 46 | 0.016 |
 | 선생님 (어른, 1.65m) | Walk | 24 | 24 | 32 | 0.012 |
 
 아이들은 다리가 짧아 성인 기준(24°)으로 흔들면 종종거려 보여서 넓게 잡았습니다.
 선생님만 교본 기준값에 가깝습니다.
 
-**보폭을 배속만 보고 키우지 마세요.** 서진·블랙을 70°까지 넓혔다가 되돌린 적이
+**보폭을 배속만 보고 키우지 마세요.** 적1_박치기·적3_던지기을 70°까지 넓혔다가 되돌린 적이
 있습니다 — 숫자는 좋아졌지만 걷는 게 아니라 성큼 뛰어넘는 자세가 됐습니다.
 배속이 좀 높아도 자세가 사람 같은 쪽이 낫고, 배속은 클램프가 받습니다.
 
@@ -169,7 +169,7 @@ pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame)
   `make_kids.py`가 굽기 끝에 자동으로 부릅니다 — **손으로 부르지 마세요.** 여기서
   부르니까 다시 구워도 되돌아가지 않습니다.
 
-측정해 보니 골반이 낮았던 것은 **주인공뿐**이었습니다(23%). 서진 42%, 블랙 35%,
+측정해 보니 골반이 낮았던 것은 **주인공뿐**이었습니다(23%). 적1_박치기 42%, 적3_던지기 35%,
 선생님 49%는 이미 제대로라 도구가 건드리지 않습니다.
 
 ---
@@ -200,8 +200,8 @@ pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame)
 | 주인공 걷기 | `WALK_GROUND` | 0.644 m/s | `player.gd` |
 | 주인공 달리기 | `RUN_GROUND` | 1.093 | `player.gd` |
 | 주인공 뒷걸음 | `BACK_GROUND` | 0.352 | `player.gd` |
-| 서진 | `WALK_GROUND[SEOJIN]` | 1.141 | `enemy.gd` |
-| 블랙 | `[BLACK]` | 0.994 | `enemy.gd` |
+| 적1_박치기 | `WALK_GROUND[FOE_CHARGER]` | 1.141 | `enemy.gd` |
+| 적3_던지기 | `[FOE_THROWER]` | 0.994 | `enemy.gd` |
 | 선생님 | `[TEACHER]` | 1.304 | `enemy.gd` |
 | 아기(베개) | `[BABY]` | 0.531 | `enemy.gd` |
 | 여자아이(고함) | `[GIRL]` | 0.613 | `enemy.gd` |
@@ -294,7 +294,7 @@ pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame)
 
 | 손잡이 | 범위 | 무엇을 |
 |---|---|---|
-| 캐릭터 | 도원 / 서진 / 블랙 / 선생님 | |
+| 캐릭터 | 도원 / 적1_박치기 / 적3_던지기 / 선생님 | |
 | 동작 | Idle / Walk / Run / Push | |
 | 배속 | 0.1 ~ 6배 | |
 | 골반 | 18 ~ 50% | **움직이는 그 프레임에** 바뀜 |
@@ -400,8 +400,8 @@ pose_bone.keyframe_insert(data_path="rotation_euler", frame=frame)
 | `tools/raise_hips.py` | 골반 올리고 inverseBindMatrices 다시 계산 |
 | `tools/glb.py` | GLB 읽기/쓰기 |
 | `assets/anim_tuning.json` | 리그 실험실이 저장한 배율. 없으면 전부 1.0 |
-| `assets/models/_src/*.glb` | 동작 하나짜리 중간 산출물 (`.gdignore` 있음) |
-| `assets/models/*.glb` | 게임이 쓰는 최종 파일 |
+| `art_src/src/*.glb` | 동작 하나짜리 중간 산출물 (`.gdignore` 있음) |
+| `assets/characters/*.glb` | 게임이 쓰는 최종 파일 |
 | `scripts/models.gd` | 모델 불러오기, 앵커 붙이기, 발밑 그림자 |
 | `scripts/pose_override.gd` | 자세 층 |
 | `scripts/riglab.gd` | 리그 실험실 |

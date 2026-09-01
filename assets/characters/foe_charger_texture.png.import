@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c1ogv6woqfc3v"
-path.s3tc="res://.godot/imported/teacher_texture.png-fa9b66010ec892ce0f8c2c839b63c954.s3tc.ctex"
-path.etc2="res://.godot/imported/teacher_texture.png-fa9b66010ec892ce0f8c2c839b63c954.etc2.ctex"
+uid="uid://dng18sf0d4vdw"
+path.s3tc="res://.godot/imported/foe_charger_texture.png-6445a553356c4bd0dff0b6c4fe148d06.s3tc.ctex"
+path.etc2="res://.godot/imported/foe_charger_texture.png-6445a553356c4bd0dff0b6c4fe148d06.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "3fc954a9f063924f9936ea1b79741ddb"
+"md5": "3c6007dc894d8fce38b2d9d006088c01"
 }
 
 [deps]
 
-source_file="res://assets/models/teacher_texture.png"
-dest_files=["res://.godot/imported/teacher_texture.png-fa9b66010ec892ce0f8c2c839b63c954.s3tc.ctex", "res://.godot/imported/teacher_texture.png-fa9b66010ec892ce0f8c2c839b63c954.etc2.ctex"]
+source_file="res://assets/characters/foe_charger_texture.png"
+dest_files=["res://.godot/imported/foe_charger_texture.png-6445a553356c4bd0dff0b6c4fe148d06.s3tc.ctex", "res://.godot/imported/foe_charger_texture.png-6445a553356c4bd0dff0b6c4fe148d06.etc2.ctex"]
 
 [params]
 

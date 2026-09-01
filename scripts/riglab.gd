@@ -34,10 +34,10 @@ signal closed
 
 ## 볼 수 있는 캐릭터. 게임에 실제로 쓰는 것만 올립니다.
 const CHARACTERS := [
-	{"name": "도원 (주인공)", "path": "res://assets/models/dowon_b.glb"},
-	{"name": "서진 (적)", "path": "res://assets/models/seojin.glb"},
-	{"name": "블랙 (원거리)", "path": "res://assets/models/black.glb"},
-	{"name": "선생님", "path": "res://assets/models/teacher.glb"},
+	{"name": "주인공", "path": "res://assets/characters/hero.glb"},
+	{"name": "적1_박치기", "path": "res://assets/characters/foe_charger.glb"},
+	{"name": "적3_던지기", "path": "res://assets/characters/foe_thrower.glb"},
+	{"name": "보스_선생님", "path": "res://assets/characters/boss_teacher.glb"},
 ]
 
 ## 바닥을 미는 거리를 재는 창. 짧으면 걸음 하나에 걸려 값이 튀고, 길면

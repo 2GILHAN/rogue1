@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cj1kykweo24dw"
-path="res://.godot/imported/boy.glb-f6c848b268f3798e2615ac0f27b77735.scn"
+uid="uid://cjw3wrh7iquhs"
+path="res://.godot/imported/boss_teacher.glb-5acad03fba5a19717b9ab94454c464b4.scn"
 
 [deps]
 
-source_file="res://assets/models/boy.glb"
-dest_files=["res://.godot/imported/boy.glb-f6c848b268f3798e2615ac0f27b77735.scn"]
+source_file="res://assets/characters/boss_teacher.glb"
+dest_files=["res://.godot/imported/boss_teacher.glb-5acad03fba5a19717b9ab94454c464b4.scn"]
 
 [params]
 

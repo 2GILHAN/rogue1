@@ -1,7 +1,12 @@
 class_name Enemy
 extends CharacterBody3D
 
-## 적. 메시는 두 종류(서진·블랙)이고 나머지 변화는 행동에서 만듭니다.
+## 적. 나머지 변화는 행동에서 만듭니다.
+##
+## **이름은 하는 일에서 옵니다.** 화면에 뜨는 이름은 「적N_기술」이고
+## (`Enemy.LABEL`), 코드의 열쇠(`grunt`)와 파일 이름(`foe_charger.glb`)도 같은
+## 말을 씁니다 - 예전에는 사람 이름과 색 이름이 섞여 있어서, 무엇을 하는
+## 적인지 알려면 코드를 열어 봐야 했습니다.
 ##
 ##   grunt   기본. 달려와서 때립니다.
 ##   brute   느리고 단단하며, 가끔 돌진합니다. 큰 색으로 구분됩니다.
@@ -37,18 +42,34 @@ const SEPARATION := 1.5
 ## 캐릭터마다 다릅니다 - 다리 길이와 흔드는 각도에서 나오기 때문입니다.
 ## 모델을 바꾸거나 클립을 다시 구우면 여기도 다시 재야 합니다.
 const WALK_GROUND := {
-	Models.SEOJIN: 1.141,
-	Models.BLACK: 0.994,
-	Models.BABY: 0.531,
-	Models.GIRL: 0.613,
-	Models.BOY: 0.555,
-	Models.TEACHER: 1.304,
+	Models.FOE_CHARGER: 1.141,
+	Models.FOE_THROWER: 0.994,
+	Models.FOE_BLOCKER: 0.531,
+	Models.FOE_SHOUTER: 0.613,
+	Models.FOE_CLINGER: 0.555,
+	Models.BOSS_TEACHER: 1.304,
 }
 ## 표에 없는 모델이 오면 쓰는 값. 값이 없다고 다리를 멈추는 것보다는
 ## 서진 것으로라도 도는 편이 낫습니다.
 const WALK_GROUND_FALLBACK := 1.100
 ## 적 이동 속도는 늘 주인공과 같은 비율로 움직입니다(0.8배 뒤 다시 0.6배).
 ## 한쪽만 느려지면 쫓기는 긴장이나 도망칠 여유 중 하나가 사라집니다.
+
+## **화면에 뜨는 이름.** 번호는 처음 만나는 순서입니다(층이 오르며 하나씩).
+const LABEL := {
+	"grunt": "적1_박치기",
+	"screamer": "적2_고함",
+	"spitter": "적3_던지기",
+	"brute": "적4_돌진",
+	"clinger": "적5_매달리기",
+	"pillow": "적6_막기",
+	"teacher": "보스_선생님",
+}
+
+
+static func label_of(k: String) -> String:
+	return String(LABEL.get(k, k))
+
 
 const KINDS := {
 	# 서진은 **박치기**를 합니다. 손을 한 번 뻗어 겨눈 뒤, 그 방향으로 곧장
@@ -58,7 +79,7 @@ const KINDS := {
 	# 예고가 길고(0.62초) 방향이 고정되므로 정답은 **옆으로 비키기**입니다.
 	# 뒤로 물러나는 것은 답이 아닙니다 - 돌진이 물러나는 것보다 빠릅니다.
 	"grunt": {
-		"model": Models.SEOJIN,
+		"model": Models.FOE_CHARGER,
 		"hp": 42.0, "damage": 11.0, "speed": 1.73, "scale": 1.0,
 		"range": 4.6, "windup": 0.62, "cooldown": 2.4, "gold": 7,
 		"aggro": 17.0,
@@ -84,7 +105,7 @@ const KINDS := {
 	# 느리고(6.4) 길게(9.0m = 1.41초) 달립니다. 빠르면 마지막 0.5초가 너무
 	# 짧아 반응이 아니라 운이 됩니다.
 	"brute": {
-		"model": Models.SEOJIN,
+		"model": Models.FOE_CHARGER,
 		"heavy": true,
 		"hp": 120.0, "damage": 16.0, "speed": 1.30, "scale": 1.45,
 		"range": 7.5, "windup": 0.75, "cooldown": 2.8, "gold": 20,
@@ -99,7 +120,7 @@ const KINDS := {
 	"spitter": {
 		# 원거리 적만 다른 메시를 씁니다. 크기와 색조로도 구분되지만, 가장
 		# 먼저 알아봐야 하는 적이라 **실루엣**까지 다르게 둡니다.
-		"model": Models.BLACK,
+		"model": Models.FOE_THROWER,
 		"hp": 30.0, "damage": 8.0, "speed": 1.54, "scale": 0.9,
 		"range": 9.0, "windup": 0.6, "cooldown": 1.9, "gold": 12,
 		"aggro": 20.0, "attack": "spit",
@@ -119,7 +140,7 @@ const KINDS := {
 	# 아프기보다 **밀어냅니다**(knock 9). 뒤로 날아가 다른 적 쪽으로 몰리는
 	# 것이 이 적의 위협입니다.
 	"screamer": {
-		"model": Models.GIRL,
+		"model": Models.FOE_SHOUTER,
 		# **주인공보다 약간 작습니다**(발~머리뼈 0.87 대 0.924, 6% 아래).
 		#
 		# 배율을 층에 안 맡깁니다(`base_scale` = `scale`). 다른 종류는 1층에
@@ -145,7 +166,7 @@ const KINDS := {
 	# 체력이 낮아(26) 한 번에 정리됩니다. 붙잡는 적이 질기면 붙잡힌 동안
 	# 아무것도 못 하는 시간이 계속 이어집니다.
 	"clinger": {
-		"model": Models.BOY,
+		"model": Models.FOE_CLINGER,
 		# 고함 아기와 **같은 크기**입니다(주인공보다 6% 아래). 같은 이유로
 		# 층에 안 맡깁니다 - BOY 모델도 정규화 뒤 0.954 입니다.
 		"hp": 40.0, "damage": 4.0, "speed": 2.05,
@@ -167,7 +188,7 @@ const KINDS := {
 	# 막을 수 없는 길을 하나 남겨 둬야 "이 적은 어떻게 하지" 의 답이 하나로
 	# 굳지 않습니다.
 	"pillow": {
-		"model": Models.BABY,
+		"model": Models.FOE_BLOCKER,
 		"hp": 78.0, "damage": 14.0, "speed": 1.24, "scale": 1.15,
 		"range": 2.1, "windup": 0.7, "cooldown": 2.5, "gold": 18,
 		"aggro": 16.0,
@@ -177,7 +198,7 @@ const KINDS := {
 		"attack": "slam", "guard_arc": 100.0, "knock": 8.0,
 	},
 	"teacher": {
-		"model": Models.TEACHER,
+		"model": Models.BOSS_TEACHER,
 		"heavy": true,
 		"hp": 260.0, "damage": 22.0, "speed": 1.39, "scale": 1.0,
 		"range": 6.5, "windup": 0.9, "cooldown": 2.6, "gold": 55,
@@ -312,7 +333,7 @@ func setup(enemy_kind: String, floor_num: int, level: Dungeon, player: Node3D) -
 
 	var body_scale := _body_scale(floor_num)
 	_scale_now = body_scale
-	var model_path: String = stats.get("model", Models.SEOJIN)
+	var model_path: String = stats.get("model", Models.FOE_CHARGER)
 	var body: Dictionary = Models.size_of(model_path)
 	var radius: float = float(body["radius"]) * 0.8 * body_scale
 	var height: float = float(body["height"]) * body_scale

@@ -17,27 +17,33 @@ const MODEL_PITCH := PI / 2.0
 ## 실측: 세우고 나면 모델의 앞이 +Z 입니다. Godot 의 앞은 -Z 라 180도 돌립니다.
 const MODEL_YAW := PI
 
-const HERO := "res://assets/models/dowon_b.glb"
+const HERO := "res://assets/characters/hero.glb"
 ## 이전 주인공. 되돌리려면 위 HERO 를 이 값으로 바꾸면 됩니다.
-const DOWON := "res://assets/models/dowon.glb"
-## 적으로 쓰는 두 아이. 종류마다 어느 쪽을 쓸지는 enemy.gd 의 KINDS 가 정합니다.
-const SEOJIN := "res://assets/models/seojin.glb"
-const BLACK := "res://assets/models/black.glb"
+const DOWON := "res://art_src/unused/dowon.glb"
+## 적으로 쓰는 아이들. **이름은 하는 일에서 옵니다** - 파일도 상수도 같은 말을
+## 씁니다(`foe_charger.glb` / `FOE_CHARGER`).
+##
+## 예전에는 사람 이름(`seojin`)과 색 이름(`black`)이었습니다. 무엇을 하는
+## 적인지가 이름에 없어서 코드를 열어 봐야 했고, 무엇보다 **남의 이름이 게임
+## 파일에 그대로 실려 나갔습니다.**
+const FOE_CHARGER := "res://assets/characters/foe_charger.glb"
+const FOE_THROWER := "res://assets/characters/foe_thrower.glb"
 ## 새로 들어온 적 셋. 전부 원본이 0.72~0.75m 로 작게 나와서 SIZE 에 배율을
 ## 적어 둡니다(주인공과 같은 사정).
-const BABY := "res://assets/models/baby.glb"
-const GIRL := "res://assets/models/girl.glb"
-const BOY := "res://assets/models/boy.glb"
+const FOE_BLOCKER := "res://assets/characters/foe_blocker.glb"
+const FOE_SHOUTER := "res://assets/characters/foe_shouter.glb"
+const FOE_CLINGER := "res://assets/characters/foe_clinger.glb"
 ## 선생님. 유일한 어른이라 키가 1.65m 로 아이들(1.25m)보다 확연히 큽니다.
-const TEACHER := "res://assets/models/teacher.glb"
+const BOSS_TEACHER := "res://assets/characters/boss_teacher.glb"
 ## 물물교환하는 여자아이. **어린이집에도 아군은 있습니다.**
 ##
 ## 예전 상인(npc_shopkeeper)은 어른이었습니다. 이 게임의 적이 전부 또래
 ## 아이들인데 도와주는 쪽만 어른이면, 아이들 사이의 일이라는 것이 흐려집니다.
-const SHOPKEEPER := "res://assets/models/witch.glb"
-## 안 쓰는 이전 에셋. 되돌리고 싶을 때를 위해 남겨 둡니다.
-const HERO_EMBERLING := "res://assets/models/hero_emberling.glb"
-const ENEMY_SPROUT := "res://assets/models/enemy_sprout.glb"
+const SHOPKEEPER := "res://assets/characters/npc_trader.glb"
+## 안 쓰는 이전 에셋. `art_src/unused/` 에 있어 **빌드에 안 들어갑니다** -
+## 되돌리고 싶으면 `assets/characters/` 로 옮기고 여기 경로를 고칩니다.
+const HERO_EMBERLING := "res://art_src/unused/hero_emberling.glb"
+const ENEMY_SPROUT := "res://art_src/unused/enemy_sprout.glb"
 
 ## 카탈로그 asset.json 의 collider 값. 캡슐 충돌체를 메시에 맞추는 데 씁니다.
 ## 모델을 갈아 끼울 때 여기 항목을 빠뜨리기 쉬워서, 읽기는 size_of() 로만 합니다.
@@ -49,15 +55,15 @@ const SIZE := {
 	# 사거리 같은 규칙 값은 height 를 그대로 쓰니 건드릴 것이 없습니다.
 	HERO: {"height": 1.25, "radius": 0.24, "scale": 1.25 / 0.85},
 	DOWON: {"height": 1.25, "radius": 0.24},
-	SEOJIN: {"height": 1.25, "radius": 0.25},
-	BLACK: {"height": 1.25, "radius": 0.25},
+	FOE_CHARGER: {"height": 1.25, "radius": 0.25},
+	FOE_THROWER: {"height": 1.25, "radius": 0.25},
 	# 새 주인공과 같은 사정입니다 - 원본이 0.715m 로 작게 나와, 게임 안에서
 	# 다른 아이들과 같은 키(1.25m)로 서도록 메시만 키웁니다. 규칙 값(충돌체·
 	# 사거리)은 height 를 그대로 쓰므로 여기만 고치면 됩니다.
-	BABY: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.715},
-	GIRL: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.728},
-	BOY: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.754},
-	TEACHER: {"height": 1.65, "radius": 0.30},
+	FOE_BLOCKER: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.715},
+	FOE_SHOUTER: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.728},
+	FOE_CLINGER: {"height": 1.25, "radius": 0.25, "scale": 1.25 / 0.754},
+	BOSS_TEACHER: {"height": 1.65, "radius": 0.30},
 	# 다른 아이들과 **화면에서 같은 키**(1.25m)로 세웁니다.
 	#
 	# 0.76 으로 적어 뒀다가 겉보기 1.59m 가 됐습니다(주인공 1.25). 0.76 은

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cdwhysdoyxm1"
-path="res://.godot/imported/witch.glb-7df1b70eec01763280e76a05cbe7094a.scn"
+uid="uid://dki5syg327fpx"
+path="res://.godot/imported/hero.glb-89fde4b524d8cf7fc58865a791925e99.scn"
 
 [deps]
 
-source_file="res://assets/models/witch.glb"
-dest_files=["res://.godot/imported/witch.glb-7df1b70eec01763280e76a05cbe7094a.scn"]
+source_file="res://assets/characters/hero.glb"
+dest_files=["res://.godot/imported/hero.glb-89fde4b524d8cf7fc58865a791925e99.scn"]
 
 [params]
 

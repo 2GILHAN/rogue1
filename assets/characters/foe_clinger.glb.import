@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://fcpvcx35ygma"
-path="res://.godot/imported/girl.glb-64eb8c1e14e2218bc2e32a043eea13b7.scn"
+uid="uid://cj1kykweo24dw"
+path="res://.godot/imported/foe_clinger.glb-6596a608cef3dc6a16903249a1c51a62.scn"
 
 [deps]
 
-source_file="res://assets/models/girl.glb"
-dest_files=["res://.godot/imported/girl.glb-64eb8c1e14e2218bc2e32a043eea13b7.scn"]
+source_file="res://assets/characters/foe_clinger.glb"
+dest_files=["res://.godot/imported/foe_clinger.glb-6596a608cef3dc6a16903249a1c51a62.scn"]
 
 [params]
 

@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ditinw23hxunw"
-path.s3tc="res://.godot/imported/girl_texture.png-03f62dd55cf7d031828262989b0a8c91.s3tc.ctex"
-path.etc2="res://.godot/imported/girl_texture.png-03f62dd55cf7d031828262989b0a8c91.etc2.ctex"
+uid="uid://cak3prxjjktrt"
+path.s3tc="res://.godot/imported/foe_clinger_texture.png-a3acab5de952c7f9ed353f2444c39747.s3tc.ctex"
+path.etc2="res://.godot/imported/foe_clinger_texture.png-a3acab5de952c7f9ed353f2444c39747.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "8796cd25910b68a515bd8804dbacc602"
+"md5": "7eb684be0abdab386ff949add1fdd9ee"
 }
 
 [deps]
 
-source_file="res://assets/models/girl_texture.png"
-dest_files=["res://.godot/imported/girl_texture.png-03f62dd55cf7d031828262989b0a8c91.s3tc.ctex", "res://.godot/imported/girl_texture.png-03f62dd55cf7d031828262989b0a8c91.etc2.ctex"]
+source_file="res://assets/characters/foe_clinger_texture.png"
+dest_files=["res://.godot/imported/foe_clinger_texture.png-a3acab5de952c7f9ed353f2444c39747.s3tc.ctex", "res://.godot/imported/foe_clinger_texture.png-a3acab5de952c7f9ed353f2444c39747.etc2.ctex"]
 
 [params]
 

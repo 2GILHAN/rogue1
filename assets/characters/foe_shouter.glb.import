@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://br62dx8ibto5b"
-path="res://.godot/imported/baby.glb-72caab23098438281335e3dbb6d78749.scn"
+uid="uid://fcpvcx35ygma"
+path="res://.godot/imported/foe_shouter.glb-040488c01188849b1a715043404ce4cd.scn"
 
 [deps]
 
-source_file="res://assets/models/baby.glb"
-dest_files=["res://.godot/imported/baby.glb-72caab23098438281335e3dbb6d78749.scn"]
+source_file="res://assets/characters/foe_shouter.glb"
+dest_files=["res://.godot/imported/foe_shouter.glb-040488c01188849b1a715043404ce4cd.scn"]
 
 [params]
 

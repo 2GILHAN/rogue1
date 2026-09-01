@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dki5syg327fpx"
-path="res://.godot/imported/dowon_b.glb-c1cb82d3e99fbbf7b811ebff497d4e30.scn"
+uid="uid://br62dx8ibto5b"
+path="res://.godot/imported/foe_blocker.glb-aee562789209c501db9aa559399403f6.scn"
 
 [deps]
 
-source_file="res://assets/models/dowon_b.glb"
-dest_files=["res://.godot/imported/dowon_b.glb-c1cb82d3e99fbbf7b811ebff497d4e30.scn"]
+source_file="res://assets/characters/foe_blocker.glb"
+dest_files=["res://.godot/imported/foe_blocker.glb-aee562789209c501db9aa559399403f6.scn"]
 
 [params]
 

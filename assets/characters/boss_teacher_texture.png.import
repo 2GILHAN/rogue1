@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cak3prxjjktrt"
-path.s3tc="res://.godot/imported/boy_texture.png-14f4556752e8da8be14cb494108c3393.s3tc.ctex"
-path.etc2="res://.godot/imported/boy_texture.png-14f4556752e8da8be14cb494108c3393.etc2.ctex"
+uid="uid://c1ogv6woqfc3v"
+path.s3tc="res://.godot/imported/boss_teacher_texture.png-bb4a3f0e948f89720279bddaa81705e1.s3tc.ctex"
+path.etc2="res://.godot/imported/boss_teacher_texture.png-bb4a3f0e948f89720279bddaa81705e1.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "7eb684be0abdab386ff949add1fdd9ee"
+"md5": "3fc954a9f063924f9936ea1b79741ddb"
 }
 
 [deps]
 
-source_file="res://assets/models/boy_texture.png"
-dest_files=["res://.godot/imported/boy_texture.png-14f4556752e8da8be14cb494108c3393.s3tc.ctex", "res://.godot/imported/boy_texture.png-14f4556752e8da8be14cb494108c3393.etc2.ctex"]
+source_file="res://assets/characters/boss_teacher_texture.png"
+dest_files=["res://.godot/imported/boss_teacher_texture.png-bb4a3f0e948f89720279bddaa81705e1.s3tc.ctex", "res://.godot/imported/boss_teacher_texture.png-bb4a3f0e948f89720279bddaa81705e1.etc2.ctex"]
 
 [params]
 

@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cs8jufh08p0nn"
-path.s3tc="res://.godot/imported/black_texture.png-1e2036aa7a5ed70f41a994e6e5a03b6c.s3tc.ctex"
-path.etc2="res://.godot/imported/black_texture.png-1e2036aa7a5ed70f41a994e6e5a03b6c.etc2.ctex"
+path.s3tc="res://.godot/imported/foe_thrower_texture.png-71401f31779b3a0672aaf476ba3ceaae.s3tc.ctex"
+path.etc2="res://.godot/imported/foe_thrower_texture.png-71401f31779b3a0672aaf476ba3ceaae.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -15,8 +15,8 @@ generator_parameters={
 
 [deps]
 
-source_file="res://assets/models/black_texture.png"
-dest_files=["res://.godot/imported/black_texture.png-1e2036aa7a5ed70f41a994e6e5a03b6c.s3tc.ctex", "res://.godot/imported/black_texture.png-1e2036aa7a5ed70f41a994e6e5a03b6c.etc2.ctex"]
+source_file="res://assets/characters/foe_thrower_texture.png"
+dest_files=["res://.godot/imported/foe_thrower_texture.png-71401f31779b3a0672aaf476ba3ceaae.s3tc.ctex", "res://.godot/imported/foe_thrower_texture.png-71401f31779b3a0672aaf476ba3ceaae.etc2.ctex"]
 
 [params]
 

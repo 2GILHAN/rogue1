@@ -125,7 +125,7 @@ const KINDS := {
 	"bookshelf": {"class": "fixed", "damage": 0.0, "stun": 0.0,
 		"wall": true, "read": true, "lure": "배움의 갈망"},
 
-	# ── assets/source 의 4면도에서 구운 보육원 가구·장난감 ──────────────
+	# ── art_src/source 의 4면도에서 구운 보육원 가구·장난감 ──────────────
 	#
 	# `tools/make_source_props.py` 가 test3 로 굽습니다. 가르는 기준은 하나
 	# 뿐입니다 - **가구는 못 움직이고, 장난감은 움직입니다.**

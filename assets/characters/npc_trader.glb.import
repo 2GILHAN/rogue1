@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://buj8h5aipw5de"
-path="res://.godot/imported/black.glb-4d3442b974ab9743b8d6e83d2bc9cd16.scn"
+uid="uid://cdwhysdoyxm1"
+path="res://.godot/imported/npc_trader.glb-d78dc5e9c4ff102bbc8a30487698c1d1.scn"
 
 [deps]
 
-source_file="res://assets/models/black.glb"
-dest_files=["res://.godot/imported/black.glb-4d3442b974ab9743b8d6e83d2bc9cd16.scn"]
+source_file="res://assets/characters/npc_trader.glb"
+dest_files=["res://.godot/imported/npc_trader.glb-d78dc5e9c4ff102bbc8a30487698c1d1.scn"]
 
 [params]
 

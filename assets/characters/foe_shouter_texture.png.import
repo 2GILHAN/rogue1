@@ -2,21 +2,21 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dng18sf0d4vdw"
-path.s3tc="res://.godot/imported/seojin_texture.png-43f3a381402f0e97f87e6365bd0ae4cb.s3tc.ctex"
-path.etc2="res://.godot/imported/seojin_texture.png-43f3a381402f0e97f87e6365bd0ae4cb.etc2.ctex"
+uid="uid://ditinw23hxunw"
+path.s3tc="res://.godot/imported/foe_shouter_texture.png-54d6e9ef371aa03a5cfc8b49df3708ec.s3tc.ctex"
+path.etc2="res://.godot/imported/foe_shouter_texture.png-54d6e9ef371aa03a5cfc8b49df3708ec.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 generator_parameters={
-"md5": "3c6007dc894d8fce38b2d9d006088c01"
+"md5": "8796cd25910b68a515bd8804dbacc602"
 }
 
 [deps]
 
-source_file="res://assets/models/seojin_texture.png"
-dest_files=["res://.godot/imported/seojin_texture.png-43f3a381402f0e97f87e6365bd0ae4cb.s3tc.ctex", "res://.godot/imported/seojin_texture.png-43f3a381402f0e97f87e6365bd0ae4cb.etc2.ctex"]
+source_file="res://assets/characters/foe_shouter_texture.png"
+dest_files=["res://.godot/imported/foe_shouter_texture.png-54d6e9ef371aa03a5cfc8b49df3708ec.s3tc.ctex", "res://.godot/imported/foe_shouter_texture.png-54d6e9ef371aa03a5cfc8b49df3708ec.etc2.ctex"]
 
 [params]
 
