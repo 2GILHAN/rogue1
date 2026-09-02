@@ -547,6 +547,9 @@ var _parry_run_to := Vector3.ZERO
 ## 도는 쪽(+1 / -1)과, 잔상을 떨군 뒤 지나온 거리.
 var _parry_spin := 1.0
 var _parry_trail := 0.0
+## 이번 프레임에 가고 싶은 속도. **자리를 직접 옮기지 않습니다** - 옮기면
+## 충돌을 아예 안 거쳐서 벽을 뚫고 방 밖으로 나갑니다(실제로 그랬습니다).
+var _parry_vel := Vector3.ZERO
 ## 뛰어오르기 전 자리. 앞발로 차면 여기보다 조금 **뒤로** 내려섭니다.
 var _parry_from := Vector3.ZERO
 ## 느려진 시간이 끝나는 **실제** 시각(ms).
@@ -718,9 +721,10 @@ func _physics_process(delta: float) -> void:
 	state.elapsed += delta
 
 	if _parry_air > 0.0:
-		# **받아 내고 떠 있는 동안은 떨어지지 않습니다.** 상대 머리 위에서
-		# 다음 누름을 기다리는 자리라, 중력이 끌어내리면 그 시간이 없습니다.
-		velocity = Vector3.ZERO
+		# **받아 내고 도는 동안의 걸음**입니다. `_tick_parry` 가 정해 둔
+		# 속도를 그대로 씁니다 - 자리를 직접 옮기지 않고 속도로 가야
+		# `move_and_slide` 가 벽에서 멈춰 줍니다.
+		velocity = _parry_vel
 	elif not is_on_floor():
 		velocity.y -= GRAVITY * delta
 	else:
@@ -4155,15 +4159,19 @@ func _tick_parry(delta: float) -> void:
 		# ② **상대를 돌아 등 뒤로 가는 마디.**
 		k = 1.0 - clampf(_parry_air / PARRY_TIME, 0.0, 1.0)
 		pos = _orbit_point(k * k * (3.0 - 2.0 * k))
-	pos.y = _parry_from.y
+	pos.y = global_position.y
 	# **가는 내내 잔상을 떨굽니다.** 거리마다입니다(구르기와 같은 규칙) -
-	# 좁히는 마디에서는 촘촘하고, 비켜서는 짧은 걸음에서는 두어 장입니다.
+	# 좁히는 마디에서는 촘촘하고, 도는 짧은 궤도에서는 두어 장입니다.
 	_parry_trail += pos.distance_to(global_position)
 	if _parry_trail >= PARRY_TRAIL_STEP:
 		_parry_trail = 0.0
 		_afterimage(false)
-	global_position = pos
-	velocity = Vector3.ZERO
+	# **자리를 직접 옮기지 않습니다.** 옮기면 충돌을 안 거쳐서 벽을 뚫고
+	# 방 밖으로 나갑니다 - 받아 내고 나면 벽 뒤에 서 있었습니다. 가고 싶은
+	# 만큼을 속도로 바꿔 두면 `move_and_slide` 가 벽에서 멈춰 줍니다.
+	var step := pos - global_position
+	step.y = 0.0
+	_parry_vel = step / maxf(delta, 0.0001)
 	# **지나가면서** 겁니다. 다 비켜선 뒤에 걸면 두 동작으로 보입니다.
 	if not _parry_hit and _parry_air <= PARRY_TIME and k >= PARRY_TRIP_AT:
 		_parry_trip()
@@ -4229,7 +4237,9 @@ func _end_parry() -> void:
 	## 비켜선 자리에 섭니다.
 	_parry_air = 0.0
 	_parry_foe = null
-	global_position = _parry_to
+	# **마지막에 자리를 맞추지 않습니다.** 맞추면 벽에 막혀 멈춰 선 몸이
+	# 끝나는 순간 벽 너머로 순간이동합니다 - 막힌 것이 헛일이 됩니다.
+	_parry_vel = Vector3.ZERO
 	velocity = Vector3.ZERO
 	if pivot != null:
 		pivot.rotation.x = 0.0

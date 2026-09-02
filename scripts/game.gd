@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.60"
+const VERSION := "v0.60.1"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -251,6 +251,8 @@ var _wedge_from := Vector3.ZERO
 var _probe_t0 := 0.0
 ## 값이 바뀐 프레임만 찍으려고 들고 있는 지난 값.
 var _probe_t1 := 0.0
+## 패링이 도는 동안 벽 안에 들어가 있던 프레임 수.
+var _probe_wall_frames := 0
 ## --pose=death 에서 마지막으로 죽인 프레임.
 var _death_at := 0
 ## --pose=foecost 에서 프레임을 모으는 자리.
@@ -2791,6 +2793,31 @@ func _drive_pose() -> void:
 				_probe_t0 = e.hp
 				Player.ghost_n = 0
 				state.breath = state.max_breath
+			# **벽을 등지고 받아 냅니다.**
+			#
+			# `--side=wall` 이면 적을 벽 쪽에 세웁니다. 돌아 들어가는 길이
+			# 벽을 지나므로, 자리를 직접 옮기면 그대로 뚫고 방 밖에 섭니다 -
+			# 실제로 그랬습니다.
+			if _frames == 24 and _probe_arg == "wall" and is_instance_valid(_probe_foe):
+				# **벽을 찾아 그 바로 앞에 주인공을 옮기고**, 적을 벽 쪽
+				# 2.0m 에 세웁니다. 적이 사거리(2.6m) 안이어야 되받아치고,
+				# 도는 길이 벽을 지나야 벽 검사가 됩니다 - 처음에는 적이
+				# 3.9m 에 서서 사거리 밖이라 아무것도 안 재졌습니다.
+				for i in range(1, 14):
+					var try_at: Vector3 = player.global_position + Vector3(0, 0, -0.75 * float(i))
+					var cc := dungeon.world_to_cell(try_at)
+					if dungeon.is_solid(cc.x, cc.y):
+						var wall_at: Vector3 = player.global_position 							+ Vector3(0, 0, -0.75 * float(i))
+						# **적을 벽에 딱 붙입니다.** 0.9m 를 띄웠더니 도는
+						# 궤도가 벽을 0.15m 밖에 안 파고들어 칸 검사에
+						# 안 걸렸습니다 - 뚫는지 보려면 확실히 파고들어야
+						# 합니다.
+						player.global_position = wall_at + Vector3(0, 0, 2.2)
+						_probe_foe.global_position = wall_at + Vector3(0, 0, 0.25)
+						_wedge_from = player.global_position
+						break
+				print("[패링] 벽 앞: 적과 %.2fm  (벽을 찾았나 = 적이 2.0m 안)" % [
+					player.global_position.distance_to(_probe_foe.global_position)])
 			if _frames == 40:
 				player.attack()
 			if _frames == 46 and is_instance_valid(_probe_foe):
@@ -2824,6 +2851,14 @@ func _drive_pose() -> void:
 				var flip := -1.0
 				if was.length_squared() > 0.0001 and now.length_squared() > 0.0001:
 					flip = was.normalized().dot(now.normalized())
+				# **끝난 자리만 보면 못 잡습니다.** 벽을 뚫고 지나갔다가
+				# 다시 방으로 들어와 끝날 수 있습니다 - 도는 **내내** 봐야
+				# 합니다(아래 매 프레임 검사).
+				print("[패링] %-4s 방 안에 있나=%s" % [
+					_probe_arg if _probe_arg != "" else "맞붙",
+					str(not dungeon.is_solid(
+						dungeon.world_to_cell(player.global_position).x,
+						dungeon.world_to_cell(player.global_position).y))])
 				print("[패링] %-4s 끝: 움직인 %.2fm  적과 %.2fm  피해 %.0f  처음 쪽과의 내적 %+.2f(-1 이면 정반대=등 뒤)" % [
 					_probe_arg if _probe_arg != "" else "맞붙",
 					_wedge_from.distance_to(player.global_position),
@@ -5058,6 +5093,15 @@ func _process(delta: float) -> void:
 
 	# **단계와 상관없이** 도는 확인. 창이 떠 있는 동안(PLAYING 이 아님)을
 	# 보려면 아래 `_drive_pose` 안에 둘 수 없습니다.
+	# **패링이 도는 내내 벽 안에 들어간 적이 있나.** 끝난 자리만 보면 뚫고
+	# 지나갔다가 돌아온 것을 못 잡습니다.
+	if _pose == "parry" and is_instance_valid(player) and player._parry_air > 0.0:
+		var pc := dungeon.world_to_cell(player.global_position)
+		if dungeon.is_solid(pc.x, pc.y):
+			_probe_wall_frames += 1
+	if _pose == "parry" and _frames == 120:
+		print("[패링] 벽 안에 있던 프레임 %d개 (0 이어야 맞음)" % _probe_wall_frames)
+
 	# **창이 열린 뒤는 `_drive_pose` 가 안 돕니다**(그쪽은 PLAYING 에서만
 	# 돕니다). 사는 것도 보는 것도 여기서 합니다.
 	if _pose == "buyfx" and _frames == 40:
