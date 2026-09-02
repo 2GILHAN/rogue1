@@ -92,10 +92,14 @@ const WALL_TOP_COLOR_TEX := ""
 ##   나무반   따뜻한 나무
 ##   햇님반   노란빛
 ##   달님반   푸른빛      어두워지기 시작합니다
+##
+## 달님반의 푸른빛은 처음에 (0.76, 0.88, 1.28) 이었습니다. 나무 바닥은 따뜻해서
+## (R>G>B) 푸르게 곱하면 **회색을 지나갑니다** - 채도가 0.534 로 혼자 뚝
+## 떨어졌습니다. 덜 밀어 (0.88, 0.96, 1.18) 로 두면 서늘하면서 색이 남습니다.
 ##   원장실   잿빛        해가 안 드는 방
 const FLOOR_TINTS := [
-	Color(0.92, 1.14, 0.90), Color(1.16, 0.94, 0.74),
-	Color(1.30, 1.10, 0.66), Color(0.76, 0.88, 1.28),
+	Color(0.94, 1.08, 0.92), Color(1.16, 0.94, 0.74),
+	Color(1.30, 1.10, 0.66), Color(0.88, 0.96, 1.18),
 	Color(0.78, 0.72, 0.84),
 ]
 
@@ -104,6 +108,58 @@ static func floor_tint(n: int) -> Color:
 	if n >= 1 and n <= FLOOR_TINTS.size():
 		return FLOOR_TINTS[n - 1]
 	return Color(1, 1, 1)
+
+
+## **색을 곱하면 옅어집니다.** 다시 진하게 만드는 값입니다.
+##
+## 반 색을 곱했더니 베개싸움 방(색을 안 거는 시험 방)보다 색이 **묽어
+## 보였습니다.** 재 보니 그대로였습니다.
+##
+## ```
+##            채도
+## 베개싸움   0.724      <- 안 건 것
+## 씨앗반     0.660
+## 나무반     0.686
+## 원장실     0.650
+## ```
+##
+## 곱하기는 세 채널을 서로 가깝게 만듭니다 - 나무 바닥의 R>G>B 차이가
+## 줄어들면서 갈색이 회색 쪽으로 갑니다. 그래서 곱한 뒤 **자기 밝기에서
+## 멀어지게** 한 번 더 밀어 줍니다.
+const RICH := 1.55
+
+
+## **바닥은 벽만큼 물들이지 않습니다.**
+##
+## 바닥 그림은 나무라 따뜻하고(R>G>B), 거기에 푸른색을 곱하면 **회색을
+## 지나갑니다** - 달님반의 채도가 혼자 0.534 로 떨어졌습니다. 나무를 파랗게
+## 칠하는 것은 원래 안 되는 일입니다.
+##
+## 그래서 **벽이 방의 색을 집니다.** 벽 그림은 옅은 회벽이라 어느 색으로
+## 물들여도 그 색이 그대로 남습니다. 바닥은 절반만 따라갑니다 - 나무는 나무로
+## 남고, 방의 분위기는 벽에서 옵니다.
+const FLOOR_MIX := 0.25
+
+
+static func floor_shade() -> Color:
+	return Color(1, 1, 1).lerp(_dummy_tint(), FLOOR_MIX)
+
+
+static func _dummy_tint() -> Color:
+	## `floor_shade` 가 정적이라 인스턴스 변수를 못 봅니다. 실제 값은
+	## `_build_geometry` 가 `tint_now` 로 직접 섞습니다 - 이 함수는 규약을
+	## 적어 두는 자리입니다.
+	return Color(1, 1, 1)
+
+
+static func rich(c: Color) -> Color:
+	## 밝기는 그대로 두고 색만 진하게. 밝기를 같이 올리면 반마다 정한 밝고
+	## 어두움(원장실은 어두워야 합니다)이 무너집니다.
+	var lum := (c.r + c.g + c.b) / 3.0
+	return Color(
+		clampf(lum + (c.r - lum) * RICH, 0.0, 2.0),
+		clampf(lum + (c.g - lum) * RICH, 0.0, 2.0),
+		clampf(lum + (c.b - lum) * RICH, 0.0, 2.0), c.a)
 
 
 ## 지금 층의 색. `generate` 가 정하고 `_build_geometry` 가 씁니다.
@@ -407,11 +463,13 @@ func _build_geometry() -> void:
 	#
 	# 밋밋함은 **걸레받이**가 대신 풉니다 - 무늬 없이 벽에 두께와 경계를
 	# 주는 방법입니다.
-	var wall_top_mat := _wall_material(WALL_TOP_COLOR_TEX, WALL_TOP_TINT * tint_now)
-	var wall_side_mat := _wall_material(WALL_TEXTURE, WALL_TEX_TINT * tint_now)
+	# **바닥은 절반만 물듭니다**(FLOOR_MIX). 나무를 파랗게 칠하면 회색이 됩니다.
+	var soft := Color(1, 1, 1).lerp(tint_now, FLOOR_MIX)
+	var wall_top_mat := _wall_material(WALL_TOP_COLOR_TEX, rich(WALL_TOP_TINT * tint_now))
+	var wall_side_mat := _wall_material(WALL_TEXTURE, rich(WALL_TEX_TINT * tint_now))
 	# 걸레받이는 바닥과 같은 나무입니다. **벽 셰이더**를 씁니다 - 바닥 재질을
 	# 그대로 쓰면 벽이 걷힐 때 걸레받이만 남아 공중에 뜹니다.
-	var base_mat := _wall_material(FLOOR_TEXTURE, Color(0.88, 0.82, 0.72) * tint_now)
+	var base_mat := _wall_material(FLOOR_TEXTURE, rich(Color(0.88, 0.82, 0.72) * soft))
 
 	var fst := SurfaceTool.new()
 	fst.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -523,7 +581,8 @@ func _textured(path: String, tint: Color, rough: float) -> StandardMaterial3D:
 		# **반의 색은 여기서도 곱합니다.** 그림이 있을 때 이 줄이 색을 통째로
 		# 무시하고 있어서, 반마다 다른 색을 넘겨도 바닥이 다섯 반 모두
 		# 같았습니다(실측: 2~5층 평균색 차이 0.5~2.8).
-		mat.albedo_color = Color(0.88, 0.82, 0.72) * tint_now
+		mat.albedo_color = rich(Color(0.88, 0.82, 0.72)
+			* Color(1, 1, 1).lerp(tint_now, FLOOR_MIX))
 	else:
 		mat.albedo_color = tint
 	return mat
