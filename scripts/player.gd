@@ -68,13 +68,34 @@ const PARRY_TIME := 0.42
 ## 그 시간 중 **발이 걸리는 지점**(0~1). 다 비켜선 뒤가 아니라 지나가면서
 ## 겁니다 - 끝에 두면 비키기와 걸기가 두 동작으로 보입니다.
 const PARRY_TRIP_AT := 0.55
-## 걸어 넘어뜨릴 때의 피해 배수 · 미는 힘 · 못 일어나는 시간.
+## 걸어 넘어뜨릴 때의 피해 배수와 못 일어나는 시간.
 ##
-## 미는 힘이 작습니다(5). **넘어뜨리는 것**이지 날려 보내는 것이 아닙니다 -
-## 멀리 보내면 정리해 놓고 쫓아가야 합니다.
+## **미는 힘은 밀기와 같은 값을 씁니다**(`SHOVE_KNOCK` + 스킬). 여기에 따로
+## 숫자를 적어 두면 밀기를 키워도 발 걸기만 옛 세기로 남아서, 같은 손이
+## 하는 두 가지가 다르게 자랍니다.
 const PARRY_TRIP_MULT := 1.2
-const PARRY_TRIP_KNOCK := 5.0
 const PARRY_TRIP_STUN := 1.6
+
+## **멀리서 쏜 것을 받아 냈을 때** 쫓아가 걸 수 있는 거리.
+##
+## 밀기가 닿는 거리와 같습니다 - 「받아 냈으면 밀 수 있다」 가 되려면 두
+## 거리가 하나여야 합니다. 이 밖이면 피해만 지우고 끝입니다: 방 저편에서 쏜
+## 것을 받아 냈다고 거기까지 날아가면, 받아 내기가 순간이동이 됩니다.
+const PARRY_REACH := LUNGE_RANGE
+## **때린 자리가 내 코앞이면 날아온 것**입니다.
+##
+## 맞붙어서 때리는 것은 때린 자리로 **적의 자리**를 넘깁니다(1~2.6m 밖).
+## 날아온 것은 **탄이 터진 자리**를 넘기는데 그건 내 몸입니다. 이 거리 하나로
+## 둘이 갈립니다.
+##
+## 처음에는 「때린 자리 근처에 적이 있나」 로 갈랐는데, 가까이서 쏜 아이가
+## 그 안에 들어와 **원거리인데 맞붙기로 잡혔습니다.**
+const PARRY_HIT_NEAR := 0.9
+## 반원을 다 돌았을 때 상대 곁에 서는 거리(m).
+const PARRY_BESIDE := 0.95
+## 반원을 도는 동안 잔상을 떨구는 간격(m). 구르기와 같은 규칙 - **거리마다**
+## 떨굽니다. 시간으로 떨구면 멀리서 돌 때 성기고 코앞에서 돌 때 뭉칩니다.
+const PARRY_TRAIL_STEP := 0.22
 ## 발을 거는 동안 몸을 내리는 깊이(m). 다리를 뻗으면 발이 뜹니다.
 const PARRY_CROUCH := 0.14
 const ACCEL := 55.0
@@ -142,6 +163,12 @@ const GRAB_ARC_FREE := deg_to_rad(150.0)
 ## 벌어진 적은 1.05m 더 먼 것으로 칩니다.
 const GRAB_ANGLE_COST := 1.0
 const SHOVE_MULT := 1.7
+## **고함의 피해는 밀기의 절반**입니다. 앞을 통째로 쓸고(132°) 값도 싸므로
+## (숨 10), 밀기와 같이 아프면 밀기를 쓸 이유가 없어집니다.
+##
+## 밀기 배수에 곱해서 뽑습니다 - 밀기를 손보면 고함이 따라옵니다. 여기 숫자를
+## 따로 적어 두면 둘이 반드시 갈라집니다.
+const SHOUT_MULT := SHOVE_MULT * 0.5
 ## 달려드는 속도와 시간.
 ##
 ## 배율 1.0 = **평소 달리는 속도 그대로**입니다. 예전에는 2.4배(7.4m/s)로
@@ -506,6 +533,11 @@ var _parry_foe: Node3D = null
 ## 비켜서서 설 자리. 받아 낸 순간 정해 둡니다 - 가는 동안 상대가 밀려나므로,
 ## 그때 가서 뽑으면 설 자리가 상대를 따라 흔들립니다.
 var _parry_to := Vector3.ZERO
+## 반원을 그리며 다가가는 중인가(멀리서 쏜 것을 받아 냈을 때).
+var _parry_arc := false
+## 도는 쪽(+1 / -1)과, 잔상을 떨군 뒤 지나온 거리.
+var _parry_spin := 1.0
+var _parry_trail := 0.0
 ## 뛰어오르기 전 자리. 앞발로 차면 여기보다 조금 **뒤로** 내려섭니다.
 var _parry_from := Vector3.ZERO
 ## 느려진 시간이 끝나는 **실제** 시각(ms).
@@ -3668,17 +3700,17 @@ func _resolve_swing() -> void:
 		# 범위가 넓고 굳히기까지 하는데 피해까지 있으면 다른 기술을 쓸 이유가
 		# 없어집니다 - 실제로 그렇게 굴러가고 있었습니다. 지금 이 기술이 파는
 		# 것은 **판을 정리하는 것**이고, 정리한 뒤 때리는 일은 밀기가 합니다.
-		var roll: Array = [0.0, false]
-		# **Lv3 의 피해는 끝까지 모았을 때만** 들어갑니다.
+		# **고함은 처음부터 아픕니다. 밀기의 절반입니다.**
 		#
-		# 계통을 다 판 뒤에는 살짝 눌러도 아팠습니다. 그러면 고함이 "짧게
-		# 자주 지르는 것" 이 가장 좋은 기술이 되고, 모으는 일이 손해가 됩니다 -
-		# 모으기를 넣은 이유가 통째로 사라집니다.
+		# 한동안 Lv3 전까지 피해가 0 이었습니다. 「범위와 경직만으로 판을
+		# 정리하는 기술」이라는 뜻이었는데, 손에는 **안 아픈 버튼**으로만
+		# 남았습니다 - 눌러도 적이 그대로 서 있으면 무엇을 한 것인지 알 수
+		# 없습니다.
 		#
-		# 끝까지 모아야만 아프면 **0.5초를 서 있을 값어치**가 생깁니다. 그 사이
-		# 발은 0.2배로 묶이므로, 언제 그 값을 치를지가 선택이 됩니다.
-		if state.has_shout_damage() and _shout_fired >= SHOUT_FULL:
-			roll = state.roll_damage(rng)
+		# 절반인 이유: 고함은 앞을 통째로 쓸고(132°) 값도 쌉니다(숨 10).
+		# 밀기와 같이 아프면 밀기를 쓸 이유가 없어집니다.
+		var roll: Array = state.roll_damage(rng)
+		roll[0] = float(roll[0]) * SHOUT_MULT
 		if state.family_level("shout") >= 3:
 			# 계통을 끝까지 판 고함은 맞은 자리에서 한 번 더 터집니다.
 			Fx.orbs(get_parent(), enemy.global_position + Vector3(0, 0.5, 0),
@@ -3984,29 +4016,59 @@ func _try_parry(from: Vector3) -> bool:
 	## **맞기 직전에 고함을 눌러 뒀나.** 눌러 뒀으면 그 한 대를 받아 냅니다.
 	if _parry_ready <= 0.0 or _dead or _parry_air > 0.0:
 		return false
-	# 때린 쪽을 찾습니다. `from` 은 때린 자리라 그 근처의 적이 임자입니다 -
-	# 가장 가까운 적을 그냥 집으면, 뒤에서 온 것을 받아 내고 엉뚱한 아이
-	# 머리 위로 올라갑니다.
-	var foe: Node3D = null
-	var near := 3.2
-	for node in get_tree().get_nodes_in_group("enemies"):
-		var e := node as Node3D
-		if not is_instance_valid(e):
-			continue
-		var d: float = e.global_position.distance_to(from)
-		if d < near:
-			near = d
-			foe = e
-	if foe == null:
-		foe = _nearest_enemy(4.0)
-	if foe == null:
-		return false
-	_begin_parry(foe)
+	# **때린 쪽을 찾습니다.** `from` 은 때린 자리라 그 근처의 적이 임자입니다 -
+	# 가장 가까운 적을 그냥 집으면, 뒤에서 온 것을 받아 내고 엉뚱한 아이에게
+	# 발을 겁니다.
+	if from.distance_to(global_position) > PARRY_HIT_NEAR:
+		# **맞붙어서 맞았습니다.** 때린 자리가 곧 적의 자리입니다.
+		var foe: Node3D = null
+		var near := 3.2
+		for node in get_tree().get_nodes_in_group("enemies"):
+			var e := node as Node3D
+			if not is_instance_valid(e):
+				continue
+			var d: float = e.global_position.distance_to(from)
+			if d < near:
+				near = d
+				foe = e
+		if foe != null:
+			_begin_parry(foe, false)
+			return true
+	# **날아온 것을 받아 냈습니다.**
+	#
+	# 쏜 쪽을 찾아 **밀기가 닿는 거리 안이면** 반원을 그리며 다가가 겁니다.
+	var shooter := _nearest_enemy(PARRY_REACH
+		+ 0.6)          # 몸 반지름 몫
+	if shooter != null:
+		_begin_parry(shooter, true)
+		return true
+	# 닿지 않는 데서 쏜 것입니다. **피해만 지우고 끝입니다** - 방 저편까지
+	# 날아가면 받아 내기가 순간이동이 됩니다.
+	_parry_ignore()
 	return true
 
 
-func _begin_parry(foe: Node3D) -> void:
-	## 받아 냈습니다. **옆으로 비켜서면서 발을 걸어 넘어뜨립니다.**
+func _parry_ignore() -> void:
+	## 받아 내기는 됐지만 **되받아칠 상대가 없습니다.** 날아온 것을 쳐낸
+	## 것까지만입니다.
+	_parry_ready = 0.0
+	_guard_held = false
+	state.breath = maxf(0.0, state.breath - BREATH_PARRY)
+	_invuln = maxf(_invuln, 0.25)
+	_guard_pose = maxf(_guard_pose, GUARD_POSE_MIN)
+	Sfx.play(Sfx.GRAB, -4.0, 0.0)
+	Sfx.play_at(Sfx.PICK, 1.4, -5.0)
+	Game.shake(0.14, 0.10)
+	Fx.burst(get_parent(), global_position + Vector3(0, 0.9, 0),
+		Color(1.0, 0.95, 0.8), 8, 2.6)
+	parried.emit()
+
+
+func _begin_parry(foe: Node3D, arc: bool) -> void:
+	## 받아 냈습니다. **발을 걸어 넘어뜨립니다.**
+	##
+	## `arc` 면 **반원을 그리며 다가갑니다**(멀리서 쏜 것을 받아 냈을 때).
+	## 아니면 옆으로 반걸음 비켜서면서 겁니다(맞붙어서 맞았을 때).
 	##
 	## 후속 누름이 없습니다. 받아 내면 이 한 동작이 끝까지 돕니다 - 받아 낸
 	## 그 순간에 무엇을 눌러야 하는지 배울 자리가 없으면 손이 굳습니다.
@@ -4041,8 +4103,24 @@ func _begin_parry(foe: Node3D) -> void:
 	var wish := _wish_dir
 	if wish.length_squared() > 0.04 and wish.dot(side) < 0.0:
 		side = -side
-	_parry_to = _parry_from + side * PARRY_STEP
+	_parry_arc = arc
+	_parry_spin = 1.0 if side.dot(Vector3(-dir.z, 0.0, dir.x)) >= 0.0 else -1.0
+	if arc:
+		# **설 자리는 반원이 끝나는 그 점**이어야 합니다.
+		#
+		# 처음에는 「상대의 옆」으로 따로 잡아 뒀는데, 그러면 곡선을 다 돌고
+		# 나서 마지막에 딴 자리로 순간이동합니다. 곡선을 그리는 식
+		# (`_arc_point`)에 t=1 을 넣어 뽑으면 둘이 어긋날 수가 없습니다.
+		var c: Vector3 = foe.global_position
+		c.y = _parry_from.y
+		var v0: Vector3 = _parry_from - c
+		v0.y = 0.0
+		var a1 := atan2(v0.z, v0.x) + PI * _parry_spin
+		_parry_to = c + Vector3(cos(a1), 0.0, sin(a1)) * PARRY_BESIDE
+	else:
+		_parry_to = _parry_from + side * PARRY_STEP
 	_parry_to.y = _parry_from.y
+	_parry_trail = 0.0
 
 	Sfx.play(Sfx.GRAB, -2.0, 0.0)
 	Sfx.play_at(Sfx.PICK, 1.4, -3.0)
@@ -4063,10 +4141,21 @@ func _tick_parry(delta: float) -> void:
 		return
 	_parry_air -= delta
 	var k := 1.0 - clampf(_parry_air / PARRY_TIME, 0.0, 1.0)
-	# **바닥에 붙어 옆으로 미끄러집니다.** 뜨지 않습니다 - 이 동작의 요점이
-	# 「작게 비켜서는 것」이라, 조금이라도 뜨면 다시 큰 동작이 됩니다.
-	var pos := _parry_from.lerp(_parry_to, k * k * (3.0 - 2.0 * k))
+	# **바닥에 붙어 갑니다.** 뜨지 않습니다 - 이 동작의 요점이 「작게」 라,
+	# 조금이라도 뜨면 다시 큰 동작이 됩니다.
+	var e := k * k * (3.0 - 2.0 * k)
+	var pos: Vector3
+	if _parry_arc and is_instance_valid(_parry_foe):
+		pos = _arc_point(e)
+	else:
+		pos = _parry_from.lerp(_parry_to, e)
 	pos.y = _parry_from.y
+	# **반원을 도는 동안 잔상을 떨굽니다.** 거리마다입니다(구르기와 같은 규칙).
+	if _parry_arc:
+		_parry_trail += pos.distance_to(global_position)
+		if _parry_trail >= PARRY_TRAIL_STEP:
+			_parry_trail = 0.0
+			_afterimage(false)
 	global_position = pos
 	velocity = Vector3.ZERO
 	# **지나가면서** 겁니다. 다 비켜선 뒤에 걸면 두 동작으로 보입니다.
@@ -4080,6 +4169,24 @@ func _tick_parry(delta: float) -> void:
 			aim = to.normalized()
 	if _parry_air <= 0.0:
 		_end_parry()
+
+
+func _arc_point(t: float) -> Vector3:
+	## **상대를 중심으로 반원을 그립니다.** 각도와 반지름을 같이 좁히므로,
+	## 돌면서 다가가는 한 줄기 곡선이 됩니다.
+	##
+	## 곧장 가면 「달려든 것」이고, 그건 밀기가 이미 하는 일입니다. 받아 낸
+	## 뒤의 이 한 번은 **돌아 들어가는 것**이라야 밀기와 구분됩니다.
+	var c: Vector3 = _parry_foe.global_position
+	c.y = _parry_from.y
+	var v0: Vector3 = _parry_from - c
+	v0.y = 0.0
+	var r0 := maxf(v0.length(), 0.05)
+	var a0 := atan2(v0.z, v0.x)
+	# 끝 각도는 시작에서 **반 바퀴**입니다. 도는 쪽은 비키는 쪽을 따릅니다.
+	var a := a0 + PI * _parry_spin * t
+	var r := lerpf(r0, PARRY_BESIDE, t)
+	return c + Vector3(cos(a) * r, 0.0, sin(a) * r)
 
 
 func _parry_trip() -> void:
@@ -4100,8 +4207,10 @@ func _parry_trip() -> void:
 	var go: Vector3 = _parry_from - foe.global_position
 	go.y = 0.0
 	go = go.normalized() if go.length_squared() > 0.0001 else aim
+	# **미는 세기는 밀기와 같은 값**입니다. 여기에 숫자를 따로 적어 두면
+	# 밀기를 키워도 발 걸기만 옛 세기로 남습니다.
 	if foe.has_method("knock_back"):
-		foe.call("knock_back", go * PARRY_TRIP_KNOCK)
+		foe.call("knock_back", go * (SHOVE_KNOCK + state.shove_knock))
 	Sfx.play(Sfx.PUSH, -3.0, 0.0)
 	Game.shake(0.24, 0.14)
 	Fx.burst(get_parent(), foe.global_position + Vector3(0, 0.25, 0),

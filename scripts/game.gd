@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.58.1"
+const VERSION := "v0.59"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2773,7 +2773,15 @@ func _drive_pose() -> void:
 				e.speed = 0.0
 				e.max_hp = 9999.0
 				e.hp = e.max_hp
-				e.global_position = player.global_position + Vector3(0, 0, -1.5)
+				# `--side=near` 는 **밀기 사거리 안에서 쏜 것**,
+				# `--side=far` 는 **그 밖에서 쏜 것**입니다. 빈칸이면 맞붙어서
+				# 맞은 것(옆으로 비켜서며 걸기)입니다.
+				var away := 1.5
+				if _probe_arg == "near":
+					away = 2.2
+				elif _probe_arg == "far":
+					away = 6.0
+				e.global_position = player.global_position + Vector3(0, 0, -away)
 				e.died.connect(_on_enemy_died)
 				_probe_foe = e
 				_alive += 1
@@ -2783,7 +2791,12 @@ func _drive_pose() -> void:
 			if _frames == 40:
 				player.attack()
 			if _frames == 46 and is_instance_valid(_probe_foe):
-				player.take_damage(20.0, _probe_foe.global_position, 8.0)
+				# **날아온 것은 내 앞에서 터집니다.** 때린 자리를 적이 아니라
+				# 코앞으로 주는 것이 곧 「원거리」 라는 뜻입니다.
+				var hit_at: Vector3 = _probe_foe.global_position
+				if _probe_arg != "":
+					hit_at = player.global_position + Vector3(0, 0, -0.5)
+				player.take_damage(20.0, hit_at, 8.0)
 			if _frames == 48:
 				print("[패링] 받아 냄: 체력 %.0f/%.0f  숨 %.0f/%.0f  배속 %.2f(1.00 이어야 맞음)" % [
 					state.hp, state.max_hp, state.breath, state.max_breath,
@@ -2796,10 +2809,11 @@ func _drive_pose() -> void:
 					_probe_foe.hp,
 					Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()])
 			if _frames == 120 and is_instance_valid(_probe_foe):
-				print("[패링] 끝: 옆으로 %.2fm(비키는 거리 %.2f)  높이 %+.2fm  배속 %.2f  적이 받은 피해 %.0f" % [
-					_wedge_from.distance_to(player.global_position), Player.PARRY_STEP,
-					player.global_position.y - _wedge_from.y, Engine.time_scale,
-					_probe_t0 - _probe_foe.hp])
+				print("[패링] %-4s 끝: 움직인 거리 %.2fm  적과의 거리 %.2fm  적이 받은 피해 %.0f  적 체력 %.0f" % [
+					_probe_arg if _probe_arg != "" else "맞붙",
+					_wedge_from.distance_to(player.global_position),
+					player.global_position.distance_to(_probe_foe.global_position),
+					_probe_t0 - _probe_foe.hp, _probe_foe.hp])
 				print("[패링] 걸음 %.2fm/s  밀림 한도 %.2fm/s (걸음의 %.1f배)" % [
 					state.move_speed, state.move_speed * Enemy.KNOCK_SPEED_MULT,
 					Enemy.KNOCK_SPEED_MULT])
@@ -3628,6 +3642,7 @@ func _drive_pose() -> void:
 				debug_aim = Vector3(1, 0, 0)
 			if _frames == 426 and is_instance_valid(_probe_foe):
 				print("[균형] 고함 누르기 전 적 굳음=%.2f" % _probe_foe._stagger)
+				_probe_t0 = _probe_foe.hp
 				player.shout_press()
 			if _frames == 432 and is_instance_valid(_probe_foe):
 				print("[균형] 모으는 중 모은=%.2f 굳음=%.2f 거리=%.2f 사거리=%.2f 조준%s" % [
@@ -3637,28 +3652,22 @@ func _drive_pose() -> void:
 					str(player.aim.round())])
 			if _frames == 440 and is_instance_valid(_probe_foe):
 				player.shout_release()
+			# **고함은 처음부터 아픕니다.** 밀기의 절반이라, 두 값을 나란히
+			# 놓고 봐야 「절반」 이 지켜졌는지 알 수 있습니다.
 			if _frames == 470 and is_instance_valid(_probe_foe):
-				print("[균형] 고함 Lv1 뒤 적 체력 %.0f / %.0f  (안 깎여야 맞음)" % [
-					_probe_foe.hp, _probe_foe.max_hp])
-				state.skill_lv["shout"] = 3
-				state._recompute()
-				player.state.breath = 100.0
-				# **끝까지 모아 지릅니다.** `attack()` 은 최소로 지르는데,
-				# 그때 사거리가 ×0.14(0.80m)라 1.0m 앞의 적에게도 안 닿습니다 -
-				# 안 닿은 것을 "피해가 없다" 로 잘못 읽을 뻔했습니다.
-				player.shout_press()
-			if _frames == 494 and is_instance_valid(_probe_foe):
-				# **살짝 지른 것은 Lv3 이어도 안 아파야 합니다.**
-				var before2: float = _probe_foe.hp
-				player.attack()
-				print("[균형] 고함 Lv3 **살짝** 지름: 체력 %.0f -> %.0f (안 깎여야 맞음)" % [
-					before2, _probe_foe.hp])
-			if _frames == 504 and is_instance_valid(_probe_foe):
-				player.shout_release()
-			if _frames == 524 and is_instance_valid(_probe_foe):
-				print("[균형] 고함 Lv3 뒤 적 체력 %.0f / %.0f  (깎여야 맞음)" % [
-					_probe_foe.hp, _probe_foe.max_hp])
-			if _frames == 570:
+				var after_shout: float = _probe_foe.hp
+				print("[균형] 고함 Lv1 한 번: 체력 %.0f -> %.0f  (%.0f 들어감)" % [
+					_probe_t0, after_shout, _probe_t0 - after_shout])
+				# **「절반」은 재지 않습니다. 어긋날 수가 없습니다.**
+				#
+				# `SHOUT_MULT := SHOVE_MULT * 0.5` 라 밀기를 손보면 고함이
+				# 따라옵니다. 여기서 굳이 밀기를 한 번 더 재려다 프로브가
+				# 달려들기(0.85초)를 못 기다려 "밀기 0 피해" 를 두 번 찍었고,
+				# 그건 코드가 아니라 프로브가 틀린 것이었습니다.
+				print("[균형] 배수 밀기 %.2f  고함 %.2f (밀기의 %.0f%%)" % [
+					Player.SHOVE_MULT, Player.SHOUT_MULT,
+					Player.SHOUT_MULT / Player.SHOVE_MULT * 100.0])
+			if _frames == 600:
 				# 문은 적이 다 죽어야 열립니다. 여기서는 **들어간 것으로**
 				# 치고 부릅니다 - 보려는 것은 5층 뒤에 무엇이 오는가입니다.
 				print("[균형] 출구 전 층=%d" % state.floor_num)
