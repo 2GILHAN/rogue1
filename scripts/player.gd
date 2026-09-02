@@ -724,7 +724,14 @@ func _physics_process(delta: float) -> void:
 	# 높이를 쓰는 동안에는 건드리지 않습니다.
 	if _guard_pose <= 0.0 and _roll_time <= 0.0 and _parry_air <= 0.0 			and body != null and not is_equal_approx(body.position.y, HIP):
 		body.position.y = HIP
+	# **잔상 열두 장은 층이 시작될 때 미리 짓습니다.**
+	#
+	# 첫 구르기에서 지으면 그 프레임이 통째로 값입니다(실측 10.3ms). 층
+	# 시작은 어차피 한 번 걸리는 자리라 여기 얹는 편이 낫습니다.
+	if _ghost_pool.is_empty():
+		_build_ghost_pool()
 	_tick_parry(delta)
+	_drive_ghosts(delta)
 	state.elapsed += delta
 
 	if _parry_air > 0.0:
@@ -2053,63 +2060,111 @@ static var ghost_add := 0
 static var ghost_tail := 0
 
 
+## **잔상을 미리 만들어 두고 돌려 씁니다.**
+##
+## 예전에는 한 장마다 몸을 복제해서 붙이고, 0.3초 뒤에 버렸습니다. 데스크톱
+## 에서는 0.89ms 라 괜찮아 보였는데 **폰에서는 한 장에 40~50ms** 였습니다
+## (기록에서 스크립트 92~108ms 인 프레임에 「잔상」 표시가 줄줄이 붙었습니다).
+## 리그가 달린 몸을 복제하고 버리는 일은 폰에서 그만큼 비쌉니다.
+##
+## 만들지도 버리지도 않습니다. 판을 시작할 때 열두 장을 만들어 두고, 쓸 때는
+## **뼈 자세만 베껴** 옵니다(62개 대입). 다 쓰면 감췄다가 다시 씁니다.
+const GHOST_POOL := 12
+var _ghost_pool: Array[Node3D] = []
+var _ghost_mat: Array[StandardMaterial3D] = []
+## 각 장이 언제까지 보이나(0 이면 비어 있음)와 그 장의 총 수명.
+var _ghost_left: PackedFloat32Array = PackedFloat32Array()
+var _ghost_life: PackedFloat32Array = PackedFloat32Array()
+## 다음에 꺼내 볼 자리. 빈 것이 없으면 **가장 오래된 것**을 뺏습니다 -
+## 그러지 않으면 빨리 움직일 때 잔상이 뚝 끊깁니다.
+var _ghost_next := 0
+
+
+func _build_ghost_pool() -> void:
+	## 열두 장을 한 번에 만들어 둡니다. **판을 시작할 때** 부릅니다 - 첫
+	## 구르기에서 만들면 그 프레임이 통째로 값입니다.
+	if not _ghost_pool.is_empty() or body == null:
+		return
+	_ghost_left.resize(GHOST_POOL)
+	_ghost_life.resize(GHOST_POOL)
+	for i in GHOST_POOL:
+		var g := body.duplicate(DUPLICATE_USE_INSTANTIATION) as Node3D
+		if g == null:
+			return
+		# 애니메이션과 자세 층을 떼어냅니다. **`queue_free()` 로는 안
+		# 됩니다** - 그건 프레임 끝에 도는데 그 전에 `add_child` 가 돌아
+		# 층들이 트리에 들어가고, 물리뼈 층이 뼈를 못 찾는다며 오류를 뼈
+		# 수만큼 냅니다. 오류 한 줄마다 백트레이스가 붙어 그것만으로 한
+		# 장에 100ms 였습니다.
+		for node in _all_nodes(g):
+			if is_instance_valid(node) and (node is AnimationPlayer
+					or node is SkeletonModifier3D):
+				if node.get_parent() != null:
+					node.get_parent().remove_child(node)
+				node.free()
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		for node in _all_nodes(g):
+			if node is MeshInstance3D:
+				var mi := node as MeshInstance3D
+				mi.material_override = mat
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				# 카툰 외곽선이 잔상마다 검은 테두리를 두르면 그림자 떼가
+				# 됩니다.
+				mi.set_meta("flat", true)
+		g.visible = false
+		get_parent().add_child(g)
+		_ghost_pool.append(g)
+		_ghost_mat.append(mat)
+
+
 func _afterimage(strong: bool) -> void:
-	## 지금 자세 그대로의 **파란 잔상** 한 장.
+	## 지금 자세 그대로의 **파란 잔상** 한 장. 미리 만들어 둔 것을 씁니다.
 	if body == null:
 		return
-	# **마디마다 시간을 챙깁니다**(`--pose=pushcost` 가 읽습니다). 잔상은
-	# 구르기와 밀기가 같이 쓰는 자리라, 무거워지면 두 기술이 함께 끊깁니다.
 	var _t0 := Time.get_ticks_usec()
-	var ghost := body.duplicate(DUPLICATE_USE_INSTANTIATION) as Node3D
-	if ghost == null:
+	_build_ghost_pool()
+	if _ghost_pool.is_empty():
+		return
+	# 빈 자리를 찾습니다. 없으면 가장 오래된 것을 뺏습니다.
+	var slot := -1
+	for i in GHOST_POOL:
+		var k := (_ghost_next + i) % GHOST_POOL
+		if _ghost_left[k] <= 0.0:
+			slot = k
+			break
+	if slot < 0:
+		slot = _ghost_next
+	_ghost_next = (slot + 1) % GHOST_POOL
+	var g: Node3D = _ghost_pool[slot]
+	if not is_instance_valid(g):
 		return
 	var _t1 := Time.get_ticks_usec()
-	# 애니메이션과 자세 층을 떼어냅니다. 두면 잔상이 살아 움직입니다.
-	#
-	# **`queue_free()` 로는 안 됩니다.** 그건 프레임 끝에 도는데, 그 전에
-	# 아래 `add_child` 가 돌아 층들이 트리에 **들어갑니다.** 그중 물리뼈
-	# 층(`PhysicalBoneSimulator3D`)이 트리에 들어가면 뼈를 못 찾는다면서
-	# 오류를 뼈 수만큼 냅니다. 오류 한 줄마다 GDScript 백트레이스가 붙어서,
-	# **잔상 한 장이 100ms** 를 먹고 있었습니다(재서 찾았습니다 - 복제는
-	# 1.02ms 인데 붙이기가 100ms 였습니다).
-	#
-	# 아직 트리 밖이라 `free()` 를 바로 불러도 됩니다. 부모를 먼저 지우면
-	# 자식이 같이 사라지므로 `is_instance_valid` 로 한 번 거릅니다.
-	for node in _all_nodes(ghost):
-		if is_instance_valid(node) and (node is AnimationPlayer
-				or node is SkeletonModifier3D):
-			if node.get_parent() != null:
-				node.get_parent().remove_child(node)
-			node.free()
+	# **뼈 자세만 베낍니다.** 복제하지 않습니다.
+	var src := Models.find_skeleton(body)
+	var dst := Models.find_skeleton(g)
+	if src != null and dst != null:
+		for b in mini(src.get_bone_count(), dst.get_bone_count()):
+			dst.set_bone_pose_position(b, src.get_bone_pose_position(b))
+			dst.set_bone_pose_rotation(b, src.get_bone_pose_rotation(b))
+			dst.set_bone_pose_scale(b, src.get_bone_pose_scale(b))
 	var _t2 := Time.get_ticks_usec()
-
 	var tone := Color(0.28, 0.60, 1.0) if not strong else Color(0.40, 0.80, 1.0)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(tone.r, tone.g, tone.b, 0.45 if not strong else 0.65)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	for node in _all_nodes(ghost):
-		if node is MeshInstance3D:
-			var mi := node as MeshInstance3D
-			mi.material_override = mat
-			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			# 카툰 외곽선이 잔상마다 검은 테두리를 두르면 그림자 떼가 됩니다.
-			mi.set_meta("flat", true)
-
+	var a0 := 0.45 if not strong else 0.65
+	_ghost_mat[slot].albedo_color = Color(tone.r, tone.g, tone.b, a0)
 	var _t3 := Time.get_ticks_usec()
-	get_parent().add_child(ghost)
+	g.global_transform = body.global_transform
+	g.visible = true
+	var _t4 := Time.get_ticks_usec()
+	_ghost_life[slot] = 0.30 if not strong else 0.45
+	_ghost_left[slot] = _ghost_life[slot]
 	# **잔상도 표시를 답니다.** 구르기·밀기 누름과는 다른 자리입니다 - 누른
 	# 프레임이 아니라 **가는 동안** 몇 장씩 떨어지므로, 누름 표시만 보면
 	# "구르기 옆에서 끊긴다" 까지만 알고 그게 누름인지 잔상인지 모릅니다.
 	Trace.mark("잔상")
-	var _t4 := Time.get_ticks_usec()
-	ghost.global_transform = body.global_transform
-	var life := 0.30 if not strong else 0.45
-	var tw := ghost.create_tween()
-	tw.tween_property(mat, "albedo_color:a", 0.0, life)
-	tw.tween_callback(ghost.queue_free)
 	var _t5 := Time.get_ticks_usec()
 	ghost_n += 1
 	ghost_dup += _t1 - _t0
@@ -2117,6 +2172,30 @@ func _afterimage(strong: bool) -> void:
 	ghost_mat += _t3 - _t2
 	ghost_add += _t4 - _t3
 	ghost_tail += _t5 - _t4
+
+
+func _drive_ghosts(delta: float) -> void:
+	## 떠 있는 잔상을 흐리게 하고, 다 되면 감춥니다.
+	##
+	## **트윈을 안 씁니다.** 장마다 트윈을 만들면 그것도 만들고 버리는
+	## 값이고, 열두 장이면 열두 개가 매 프레임 돕니다. 숫자 하나씩 줄이는
+	## 편이 쌉니다.
+	for i in _ghost_left.size():
+		if _ghost_left[i] <= 0.0:
+			continue
+		_ghost_left[i] -= delta
+		var g: Node3D = _ghost_pool[i]
+		if _ghost_left[i] <= 0.0:
+			if is_instance_valid(g):
+				g.visible = false
+			continue
+		var k := clampf(_ghost_left[i] / maxf(_ghost_life[i], 0.0001), 0.0, 1.0)
+		# 처음 진하기는 수명이 말해 줍니다(0.45 짜리는 0.30초, 밝은 것은
+		# 0.45초) - 장마다 따로 들고 있을 값이 아닙니다.
+		var full := 0.45 if _ghost_life[i] < 0.40 else 0.65
+		var c: Color = _ghost_mat[i].albedo_color
+		c.a = full * k
+		_ghost_mat[i].albedo_color = c
 
 
 func _all_nodes(root: Node) -> Array:
