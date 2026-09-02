@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.63"
+const VERSION := "v0.63.1"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2889,6 +2889,51 @@ func _drive_pose() -> void:
 						_probe_foe._windup, d.scale.x,
 						_probe_foe._slam_radius(float(_probe_foe.stats["range"]) + 0.4) * d.scale.x,
 						(d.material_override as StandardMaterial3D).albedo_color.a])
+		"parrywindow":
+			# **판정 창이 실제로 몇 프레임인가.**
+			#
+			# 누른 뒤 N 프레임 뒤에 맞아 보면서, 받아 내는 N 의 범위를
+			# 찾습니다. `--side=N` 으로 하나씩 시험합니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				debug_aim = Vector3(0, 0, -1)
+				# 계통을 안 판 상태(창 0.16초)로 봅니다 - 가장 좁은 창이
+				# 손에 어떻게 느껴지는지가 문제의 자리입니다.
+				_boon_names = state.skill_summary()
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("grunt", 1, dungeon, player)
+				e.speed = 0.0
+				# **스스로 때리지 못하게 합니다.** 안 끄면 이 아이가 먼저
+				# 때려서 그 한 대에 패링이 걸리고, 내가 때린 것은 이미
+				# 무적 안이라 아무것도 안 재집니다 - 실제로 그렇게 열두
+				# 프레임 뒤에도 "받아 냈다" 가 나왔습니다.
+				e.set_physics_process(false)
+				e.max_hp = 9999.0
+				e.hp = e.max_hp
+				e.global_position = player.global_position + Vector3(0, 0, -1.5)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+				state.hp = state.max_hp
+				state.breath = state.max_breath
+				print("[창] 고함 Lv%d  적힌 판정창 %.2f초 (=%.1f프레임)" % [
+					state.family_level("shout"), state.parry_window,
+					state.parry_window * 60.0])
+			if _frames == 60:
+				player.parry_press()
+			# `--side=N` 프레임 뒤에 맞습니다.
+			if _frames == 60 + (0 if _probe_arg == "" else int(_probe_arg)) 					and is_instance_valid(_probe_foe):
+				_probe_t0 = state.hp
+				_probe_t1 = player._parry_ready
+				print("[창] 맞기 직전: 남은 창 %.3f  무적 %.3f  막는중=%s  패링중=%s  숨 %.0f" % [
+					player._parry_ready, player._invuln, str(player.guarding()),
+					str(player._parry_air > 0.0), state.breath])
+				player.take_damage(20.0, _probe_foe.global_position, 8.0)
+			if _frames == 100:
+				print("[창] 누르고 %2s프레임 뒤: 맞을 때 남은 창 %.3f초  체력 %.0f -> %.0f  받아 냄=%s" % [
+					_probe_arg if _probe_arg != "" else "0", _probe_t1,
+					_probe_t0, state.hp, str(is_equal_approx(_probe_t0, state.hp))])
 		"carryspeed":
 			# **무거운 아이를 잡고 걸을 때 빨라지는가.**
 			#
