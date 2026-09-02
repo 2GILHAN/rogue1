@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.49.1"
+const VERSION := "v0.50"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -861,6 +861,7 @@ func build_floor() -> void:
 	world.add_child(player)
 	player.setup(state, rng)
 	player.breath_empty.connect(_on_breath_empty)
+	player.parried.connect(_on_parried)
 	player.ultimate_changed.connect(_on_ultimate)
 	player.bot_active = _bot
 	# 폰에서는 마우스가 없으니 가장 가까운 적을 자동으로 겨눕니다.
@@ -1759,8 +1760,8 @@ func _drive_pose() -> void:
 				print("  밀기   넉백=%.1f 피해=%.2f -> 달려드는 잔상(Lv3 부터, 밝게=%s)" % [
 					st.shove_knock, st.shove_damage,
 					str(st.shove_damage >= 0.5)])
-				print("  고함   굳힘=%.1f초 -> 하던 동작을 끊음(구슬=%s)" % [
-					st.shout_stun, str(st.shout_stun > 0.0)])
+				print("  고함   패링창=%.2f초 -> 맞는 순간에 누르면 받아 냄(구슬=%s)" % [
+					st.parry_window, str(st.family_level("shout") >= 3)])
 				print("  구르기 뚫기=%.0f -> 밝은 잔상=%s" % [
 					st.roll_pierce, str(st.roll_pierce > 0.0)])
 			player.bot_active = true
@@ -2309,6 +2310,66 @@ func _drive_pose() -> void:
 				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
 				_foe_n += 1
+		"parry":
+			# **패링 한 바퀴.** 받아 내는지, 시간이 느려지는지, 상대 머리 위에
+			# 서는지, 그리고 세 후속 동작이 각각 어디로 내려서는지를 봅니다.
+			#
+			# `--side=` 로 후속 동작을 고릅니다: 0=아무것도 안 누름,
+			# 1=밀기(뒷발) · 2=구르기(뒤로) · 3=고함(앞발).
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				for _i in 3:
+					state.apply_family("shout", rng)
+				_boon_names = state.skill_summary()
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("grunt", 1, dungeon, player)
+				e.speed = 0.0
+				e.set_physics_process(false)
+				e.max_hp = 9999.0
+				e.hp = e.max_hp
+				e.global_position = player.global_position + Vector3(0, 0, -1.5)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+				_wedge_from = player.global_position
+				print("[패링] 고함 Lv%d  판정창 %.2f초" % [
+					state.family_level("shout"), state.parry_window])
+			# 누르고 → 맞습니다. 창(0.34초 = 20프레임) 안입니다.
+			if _frames == 40:
+				player.attack()
+			if _frames == 46 and is_instance_valid(_probe_foe):
+				player.take_damage(20.0, _probe_foe.global_position, 8.0)
+			if _frames == 48 and is_instance_valid(_probe_foe):
+				var head: float = float(_probe_foe.get_meta("body_height", 1.2))
+				print("[패링] 받아 낸 뒤: 체력 %.0f/%.0f  배속 %.2f  높이 %.2fm(상대 머리 %.2fm)  적과의 수평거리 %.2fm" % [
+					state.hp, state.max_hp, Engine.time_scale,
+					player.global_position.y - _probe_foe.global_position.y, head,
+					Vector2(player.global_position.x - _probe_foe.global_position.x,
+						player.global_position.z - _probe_foe.global_position.z).length()])
+			if _frames == 52:
+				var pick := 0 if _probe_arg == "" else int(_probe_arg)
+				match pick:
+					1: player.grab_press()
+					2: player._try_dash()
+					3: player.attack()
+			if _frames == 58 and is_instance_valid(_probe_foe):
+				var to_foe: Vector3 = _probe_foe.global_position - player.global_position
+				to_foe.y = 0.0
+				print("[패링] 후속 %s: 높이 %.2fm  처음 자리에서 %.2fm  적 체력 %.0f  적을 보는 각 %.0f도" % [
+					["안 누름", "밀기(뒷발)", "구르기(뒤로)", "고함(앞발)"][
+						0 if _probe_arg == "" else int(_probe_arg)],
+					player.global_position.y - _wedge_from.y,
+					player.global_position.distance_to(_wedge_from),
+					_probe_foe.hp,
+					rad_to_deg(acos(clampf(player.aim.dot(to_foe.normalized()), -1.0, 1.0)))])
+			# 아무것도 안 누르면 **제자리에 내려섭니다**(1.25초). 시간이
+			# 느려져 있으므로 실제로는 더 걸립니다 - 넉넉히 두고 봅니다.
+			if _frames == 260:
+				print("[패링] 배속 %.2f  높이 %.2fm  처음 자리에서 %.2fm" % [
+					Engine.time_scale,
+					player.global_position.y - _wedge_from.y,
+					player.global_position.distance_to(_wedge_from)])
 		"slamdisc":
 			# **내려치기 예고가 칠해지는가.** 베개 아이를 세워 두고 예고가
 			# 도는 동안 원이 자라는지를 봅니다(`--shot=` 으로 같이 찍습니다).
@@ -2331,73 +2392,6 @@ func _drive_pose() -> void:
 						_probe_foe._windup, d.scale.x,
 						_probe_foe._slam_radius(float(_probe_foe.stats["range"]) + 0.4) * d.scale.x,
 						(d.material_override as StandardMaterial3D).albedo_color.a])
-		"shoutstop":
-			# **고함이 달려오는 적을 멈추는가.**
-			#
-			# 밀어내지 않고 끊는 것이 요점이라, 두 가지를 같이 봅니다:
-			# 달리던 것이 멈췄나(속도), 그리고 **제자리에 있나**(움직인
-			# 거리). 밀어냈다면 멈추긴 해도 멀리 가 있습니다.
-			if _frames == 20 and is_instance_valid(player):
-				player.bot_active = false
-				for _i in 3:
-					state.apply_family("shout", rng)
-				_boon_names = state.skill_summary()
-				var e := Enemy.new()
-				world.add_child(e)
-				e.setup("brute", 3, dungeon, player)
-				e.max_hp = 99999.0
-				e.hp = e.max_hp
-				# 돌진 사거리 안에 세웁니다. 그래야 달려옵니다.
-				e.global_position = player.global_position + Vector3(0, 0, -5.0)
-				e.died.connect(_on_enemy_died)
-				_probe_foe = e
-				_alive += 1
-				print("[고함끊기] 고함 Lv%d  굳힘 %.1f초" % [
-					state.family_level("shout"), state.shout_stun])
-			# **적을 보고 질러야 합니다.** 고함은 정면 부채꼴이라 엉뚱한 쪽으로
-			# 지르면 안 맞습니다. `player.aim` 에 직접 넣으면 다음 프레임에
-			# 덮어써집니다(조준은 매 프레임 다시 정합니다) - 처음에 그렇게
-			# 넣어 놓고 "끊기가 안 먹는다" 로 볼 뻔했습니다. **`debug_aim`**
-			# 이 그 자리를 위해 있는 통로입니다.
-			if _frames > 22 and is_instance_valid(_probe_foe):
-				var to_f: Vector3 = _probe_foe.global_position - player.global_position
-				to_f.y = 0.0
-				if to_f.length_squared() > 0.0001:
-					debug_aim = to_f.normalized()
-			# 달리기 시작할 때까지 둡니다.
-			if _frames > 30 and _frames < 200 and is_instance_valid(_probe_foe) 					and _probe_foe._charge > 0.0 and _probe_t0 <= 0.0:
-				_probe_t0 = 1.0
-				_wedge_from = _probe_foe.global_position
-				var v := Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()
-				print("[고함끊기] 달리는 중: 속도 %.2fm/s  남은 돌진 %.2f초" % [
-					v, _probe_foe._charge])
-				# **적을 보고 질러야 합니다.** 고함은 정면 부채꼴(110도)이라,
-				# 봇을 끈 채로 그냥 지르면 엉뚱한 쪽으로 나갑니다 - 처음에
-				# 이걸 빠뜨리고 "끊기가 안 먹는다" 로 볼 뻔했습니다.
-				player.attack()
-				print("[고함끊기] 지른 뒤: 휘두름 %.2f  모음 %.2f  숨 %.0f" % [
-					player._swing_time, player._shout_fired, state.breath])
-			if _probe_t0 > 0.0 and is_instance_valid(_probe_foe):
-				_probe_t0 += 1.0
-				if int(_probe_t0) == 10:
-					var to_f: Vector3 = _probe_foe.global_position - player.global_position
-					to_f.y = 0.0
-					print("[고함끊기] 판정 시점: 휘두름 %.2f  이미판정=%s  거리 %.2f  사거리 %.2f  각 %.0f도  겨눔각 %.0f도" % [
-						player._swing_time, str(player._swing_hit), to_f.length(),
-						player.shout_reach(player._shout_fired)
-							+ float(_probe_foe.get_meta("body_radius", 0.4)),
-						player.shout_arc(player._shout_fired),
-						rad_to_deg(acos(clampf(player.aim.dot(to_f.normalized()), -1.0, 1.0)))])
-				if int(_probe_t0) == 20:
-					var v2 := Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()
-					print("[고함끊기] 고함 뒤 0.33초: 속도 %.2fm/s  움직인 거리 %.2fm  남은 돌진 %.2f초  굳음 %.2f  대기 %.2f  막힘=%s" % [
-						v2, _probe_foe.global_position.distance_to(_wedge_from),
-						_probe_foe._charge, _probe_foe._stagger, _probe_foe._cooldown,
-						str(_probe_foe.call("guard_blocks", player.global_position))])
-				if int(_probe_t0) == 70:
-					print("[고함끊기] 고함 뒤 1.15초: 움직인 거리 %.2fm  다시 예고=%s" % [
-						_probe_foe.global_position.distance_to(_wedge_from),
-						str(_probe_foe._windup >= 0.0)])
 		"pushcost":
 			# **밀기 이펙트가 무거운가.** 계통 Lv 를 바꿔 가며 같은 밀기를
 			# 반복하고, 그 사이의 값을 평균 냅니다.
@@ -4446,6 +4440,13 @@ func _on_breath_empty() -> void:
 	ui.toast("숨이 찼습니다", UiTheme.DIM)
 
 
+func _on_parried() -> void:
+	## **받아 냈다**는 것을 말로도 알립니다. 화면에서는 시간이 늦춰지고 몸이
+	## 솟구치는데, 그것만으로는 "무슨 일이 났다" 까지만 전해집니다 - 다음에
+	## 무엇을 누를지 알려면 이 순간이 무엇인지 이름이 있어야 합니다.
+	ui.toast("받아 냈다!  밀기 · 구르기 · 고함", UiTheme.GOOD)
+
+
 func _on_touch_grab() -> void:
 	if phase == Phase.PLAYING and is_instance_valid(player):
 		player.grab_press()
@@ -4601,6 +4602,14 @@ func _process(delta: float) -> void:
 			if String(_shop_items[i]["id"]) == "heal":
 				_on_shop_bought(i)
 				break
+	# **멈춘 동안 배속이 묶이면 안 됩니다.**
+	#
+	# 패링이 세상을 0.34 배로 늦춰 놓는데, 그 사이에 창이 뜨면(스킬 고르기·
+	# 물물교환·일시정지) 주인공이 안 돌아서 되돌릴 사람이 없어집니다 - 창을
+	# 닫고 나면 판 전체가 영영 느린 채로 굴러갑니다. Game 은 멈춰도 도는
+	# 노드라(PROCESS_MODE_ALWAYS) 여기서 지킵니다.
+	if phase != Phase.PLAYING and not is_equal_approx(Engine.time_scale, 1.0):
+		Engine.time_scale = 1.0
 	if _pose == "buyfx" and _frames >= 39 and _frames <= 100 and _frames % 6 == 0:
 		print("[교환효과] f=%d  막대=%.1f  글=%s  올림=%d" % [
 			_frames, ui.probe_hp_bar(), ui.probe_hp_text(), ui.probe_lift()])
