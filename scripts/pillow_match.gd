@@ -7,11 +7,12 @@ extends Node
 ##
 ## 재미없으면 버릴 것이기 때문입니다. `game.gd` 안에 규칙을 섞어 두면 버릴 때
 ## 무엇이 이 판의 것이고 무엇이 원래 게임의 것인지 갈라내야 합니다. 이 파일과
-## `Game.pillow_mode` 몇 줄만 지우면 흔적이 없어야 합니다.
+## `scripts/pillow_rig.gd`, `Game.pillow_mode` 몇 줄만 지우면 흔적이 없어야
+## 합니다.
 ##
 ## # 규칙
 ##
-## 둘 다 베개를 듭니다.
+## 둘 다 베개를 듭니다. **한쪽 끝을 두 손으로 쥐고 늘어뜨린 채** 걷습니다.
 ##
 ##   막고 있으면          튕깁니다
 ##   안 막고 맞으면       **베개를 놓칩니다** (바닥에 떨어집니다)
@@ -53,20 +54,42 @@ const SWING_RECOVER := 0.30
 ## 휘두르는 동안의 걸음 배율. 0 으로 묶지 않은 이유는 고함 때와 같습니다 -
 ## 아예 못 움직이면 예고를 보고 피하는 것과 겨룰 수가 없습니다.
 const SWING_MOVE := 0.30
-const SWING_ARC := 120.0
-const SWING_REACH := 1.9
 const SWING_DAMAGE := 9.0
 const SWING_BREATH := 25.0
 
-## ── 베개를 드는 자세 ────────────────────────────────────────
+## ── 베개가 지나는 길 ────────────────────────────────────────
 ##
-## **한 귀퉁이를 잡고 늘어뜨립니다.** 앞으로 반듯이 들면 방패로 보이고, 그러면
-## 휘두르는 물건이라는 게 안 읽힙니다.
-const HANG_POS := Vector3(0.26, 0.44, -0.06)
-const HANG_ROT := Vector3(18.0, 0.0, 64.0)
-## 감았을 때와 지나간 뒤. 몸을 축으로 도는 각입니다.
-const SWING_BACK := 78.0
-const SWING_THROUGH := -86.0
+## **각도표가 아니라 길입니다.** 어깨와 팔꿈치는 `PillowRig` 의 IK 가 풀고,
+## 여기서는 두 손이 쥔 자리(그립)가 몸 둘레 어디를 지나는지만 적습니다.
+##
+##   쉼    오른쪽 옆에 늘어뜨림          걸을 때 베개가 발치에서 흔들립니다
+##   감기  오른쪽 뒤로, 조금 올림        "지금 친다" 가 보여야 피할 수 있습니다
+##   지남  왼쪽으로 가로질러, 팔을 폄    이때만 팔 + 베개가 한 선이 됩니다
+##   되돌림 다시 오른쪽 옆으로           후딜. 여기서 맞으면 못 막습니다
+##
+## 양수가 오른쪽입니다. **오른쪽으로 감았다가 왼쪽으로** 지나갑니다.
+const REST_YAW := 26.0
+const WIND_YAW := 62.0
+const THROUGH_YAW := -74.0
+## 그립의 높이(어깨에서). 늘어뜨렸을 때는 배 높이, 칠 때는 가슴 높이입니다.
+##
+## -0.30 으로 뒀다가 물렀습니다. 이 아이의 팔이 0.33m 라 어깨에서 30cm 아래는
+## **팔을 다 쓴 자리**여서 두 손이 몸에 붙어 버리고, 거기서 0.70m 짜리 베개를
+## 늘어뜨리면 **끝이 바닥 아래로 15cm 들어갑니다.**
+const REST_LIFT := -0.16
+const WIND_LIFT := -0.08
+const HIT_LIFT := -0.02
+## 팔을 얼마나 펴는가. **칠 때만 1.0** 입니다 - 그 순간에만 사거리가 다 납니다.
+const REST_EXTEND := 0.55
+const WIND_EXTEND := 0.72
+## 쉴 때 베개가 늘어지는 각. 0 이면 똑바로 아래인데, 그러면 이 아이 키(1.25m)
+## 에 0.70m 짜리 베개라 **끝이 바닥을 뚫습니다.** 0.30 이면 63도쯤 기울어
+## 끝이 바닥을 스칩니다 - 질질 끄는 그림이 이 판에 맞습니다.
+const REST_HANG := 0.30
+
+## 베개의 두께·폭 몫. 판정은 **손에서 베개 끝까지의 선분**과 상대 몸의 거리로
+## 보는데, 베개는 선이 아니라 두께가 있는 물건이라 그만큼 더 줍니다.
+const PILLOW_HALF := 0.12
 
 ## ── 상대의 패턴 ────────────────────────────────────────────
 ##
@@ -80,15 +103,24 @@ const SWING_THROUGH := -86.0
 ##   달려들기  바닥에 띠            -> 옆으로 구른다
 ##
 ## 셋이 같은 답을 가지면 패턴이 여럿인 뜻이 없습니다.
+##
+## **사거리는 여기 안 적혀 있습니다.** 상대도 주인공과 같은 규칙을 씁니다 -
+## 팔 길이 + 베개 길이이고, 그것은 뼈에서 잰 값입니다(`_set_range`).
 const PATTERNS := [
-	{"name": "내려치기", "attack": "slam", "range": 2.1,
-		"windup": 0.72, "cooldown": 1.9},
-	{"name": "후려치기", "attack": "melee", "range": 1.7,
-		"windup": 0.42, "cooldown": 1.4},
-	{"name": "달려들기", "attack": "charge", "range": 5.2,
-		"windup": 0.58, "cooldown": 2.3,
-		"charge_dist": 5.0, "charge_turn": 150.0},
+	{"name": "내려치기", "attack": "slam", "windup": 0.72, "cooldown": 1.9},
+	{"name": "후려치기", "attack": "melee", "windup": 0.42, "cooldown": 1.4},
+	{"name": "달려들기", "attack": "charge", "windup": 0.58, "cooldown": 2.3,
+		"range": 5.2, "charge_dist": 5.0, "charge_turn": 150.0},
 ]
+
+## 패턴을 다시 고르기까지. **때린 직후가 아니라 조금 뒤**입니다.
+##
+## 예전에는 예고가 끝나는 순간 갈았는데, 내려치기의 뒷동작(`_slam_time` 0.28초)
+## 과 후려치기의 follow-through 가 아직 도는 중이었습니다 - 베개를 내리꽂는
+## 그림이 나오기도 전에 이미 다음 패턴의 몸이 되어 있었습니다.
+const REPICK_AFTER := 0.45
+## 후려친 뒤 베개가 끝까지 지나가는 시간.
+const FOLLOW_TIME := 0.26
 
 ## 떨어진 베개로 쓰는 소품. `soft` 이라 던져도 안 아픕니다 - 베개는 주우러
 ## 가는 물건이지 무기가 아닙니다(무기 노릇은 손에 든 동안 합니다).
@@ -134,7 +166,11 @@ var foe_has := true
 var over := false
 var winner := ""
 
-var _player_pillow: Node3D = null
+## 두 손과 베개. 주인공과 상대가 **같은 리그**를 씁니다 - 사거리 규칙이 둘
+## 다 「팔 + 베개」 이려면 같은 코드에서 나와야 합니다.
+var rig: PillowRig = null
+var foe_rig: PillowRig = null
+
 var _drop: Node3D = null
 var _drop_lock := 0.0
 ## 지난 프레임의 체력. 줄었으면 맞은 것입니다.
@@ -145,8 +181,10 @@ var _foe_guard_arc := 0.0
 ## 휘두르기가 시작된 뒤 지난 시간. 음수면 안 휘두르는 중입니다.
 var _swing := -1.0
 var _swing_hit := false
-## 지난 프레임의 적 예고 상태. 공격이 끝나는 순간을 잡아 다음 패턴을 고릅니다.
+## 지난 프레임의 적 예고 상태. 공격이 끝나는 순간을 잡습니다.
 var _foe_was_winding := false
+var _foe_follow := 0.0
+var _repick := 0.0
 var _pattern := ""
 
 
@@ -170,9 +208,28 @@ func setup(g: Node, p: Node3D, f: Node3D) -> void:
 	_last_player_hp = MATCH_HP
 	_last_foe_hp = MATCH_HP
 
-	_player_pillow = _build_pillow()
-	player.pivot.add_child(_player_pillow)
-	_rest_pillow()
+	rig = PillowRig.attach(player, player.body, player.body)
+	foe_rig = PillowRig.attach(foe, foe.get("_pivot"), foe.get("_pivot"))
+	# 몸이 얼마나 틀었나는 **쉴 때 각에서부터** 셉니다.
+	rig.rest_yaw = REST_YAW
+	foe_rig.rest_yaw = REST_YAW
+
+	# **상대가 원래 들고 있던 베개를 치웁니다.**
+	#
+	# 그 베개는 `_pivot` 좌표로 옮겨 다니는 것이라(`Enemy._drive_pillow`) 손과
+	# 상관없이 놓입니다. 두 손으로 쥐는 판에서는 손이 정하는 자리에 있어야
+	# 하므로 리그가 만든 것 하나만 씁니다.
+	#
+	# **몸(충돌체)도 끕니다.** 탐험에서는 베개가 몸을 막아 "뚫고 들어가지
+	# 마라" 를 말했는데, 여기서는 둘 다 베개를 휘두릅니다 - 휘두르는 상자가
+	# 상대를 밀어내면 겨루기가 패턴 읽기가 아니라 몸싸움이 됩니다. 앞이
+	# 막혀 있다는 규칙은 각도(`guard_blocks`)가 그대로 지킵니다.
+	var old = foe.get("_pillow")
+	if old != null:
+		(old as Node3D).visible = false
+	var shape = foe.get("_pillow_shape")
+	if shape != null:
+		(shape as CollisionShape3D).disabled = true
 
 	# **입력을 가로챕니다.** 이 고리가 걸린 동안에만 공격 버튼이 휘두르기가
 	# 됩니다(`player.gd` 의 `attack_hook`).
@@ -180,13 +237,7 @@ func setup(g: Node, p: Node3D, f: Node3D) -> void:
 	_next_pattern()
 
 
-func _rest_pillow() -> void:
-	## 한 귀퉁이를 잡고 늘어뜨린 자리로 되돌립니다.
-	if _player_pillow == null:
-		return
-	_player_pillow.position = HANG_POS
-	_player_pillow.rotation_degrees = HANG_ROT
-
+## ── 주인공의 휘두르기 ───────────────────────────────────────
 
 func swing() -> void:
 	## 공격 버튼. **되돌릴 수 없는 한 동작**입니다.
@@ -209,55 +260,195 @@ func swing() -> void:
 	Sfx.play(Sfx.PUSH, -3.0, 0.0)
 
 
+func busy() -> bool:
+	## 휘두르는 중인가. `player.gd` 의 구르기가 물어봅니다 - **되돌릴 수 없다**
+	## 는 것이 이 판의 규칙이라, 구르기로 후딜을 지울 수 있으면 안 됩니다.
+	return _swing >= 0.0
+
+
 func _drive_swing(delta: float) -> void:
+	if rig == null:
+		return
 	if _swing < 0.0:
 		player.ext_move_scale = 1.0
+		# 이미 비어 있으면 그대로 둡니다. 매 프레임 새 사전을 만들면 판 내내
+		# 쓰레기가 쌓입니다.
+		if not player.ext_pose.is_empty():
+			player.ext_pose = {}
+		if player_has:
+			rig.aim(REST_YAW, REST_LIFT, REST_EXTEND, REST_HANG, 12.0, delta)
 		return
 	_swing += delta
 	player.ext_move_scale = SWING_MOVE
 
 	var total := SWING_WINDUP + SWING_ACTIVE + SWING_RECOVER
-	# 베개가 실제로 호를 그립니다. **판정과 같은 시계**를 봅니다 - 따로 두면
+	# **베개가 실제로 호를 그립니다.** 판정도 같은 시계를 봅니다 - 따로 두면
 	# 보이는 것과 맞는 것이 갈립니다.
-	var yaw := 0.0
+	var yaw := REST_YAW
+	var lift := REST_LIFT
+	var extend := REST_EXTEND
+	var hang := REST_HANG
 	if _swing < SWING_WINDUP:
-		yaw = lerpf(0.0, SWING_BACK, _swing / SWING_WINDUP)
+		# 감기. 뒤로 갈수록 느려집니다(끝에서 한 박자 멈춰야 "온다" 가 보입니다).
+		var t := _swing / SWING_WINDUP
+		var e := 1.0 - (1.0 - t) * (1.0 - t)
+		yaw = lerpf(REST_YAW, WIND_YAW, e)
+		lift = lerpf(REST_LIFT, WIND_LIFT, e)
+		extend = lerpf(REST_EXTEND, WIND_EXTEND, e)
+		hang = lerpf(REST_HANG, 0.45, e)
 	elif _swing < SWING_WINDUP + SWING_ACTIVE:
-		yaw = lerpf(SWING_BACK, SWING_THROUGH,
-			(_swing - SWING_WINDUP) / SWING_ACTIVE)
+		# 지나가기. **가속합니다** - 등속으로 돌면 미는 것으로 보입니다.
+		var t := (_swing - SWING_WINDUP) / SWING_ACTIVE
+		var e := t * t * (3.0 - 2.0 * t)
+		yaw = lerpf(WIND_YAW, THROUGH_YAW, e)
+		lift = lerpf(WIND_LIFT, HIT_LIFT, e)
+		extend = lerpf(WIND_EXTEND, 1.0, minf(t * 2.5, 1.0))
+		# 베개는 **먼저 펴지고** 몸이 따라옵니다. 늘어진 채로 도는 것이 아니라
+		# 원심력으로 펴져 나가는 그림입니다.
+		hang = lerpf(0.45, 1.0, minf(t * 3.0, 1.0))
 	else:
-		yaw = lerpf(SWING_THROUGH, 0.0,
-			(_swing - SWING_WINDUP - SWING_ACTIVE) / SWING_RECOVER)
-	if _player_pillow != null:
-		_player_pillow.rotation_degrees = HANG_ROT + Vector3(0, yaw, 0)
-		# 감을 때 뒤로, 지나갈 때 앞으로 나갑니다.
-		_player_pillow.position = HANG_POS + Vector3(
-			-sin(deg_to_rad(yaw)) * 0.34, 0, -cos(deg_to_rad(yaw)) * 0.18 + 0.18)
+		var t := (_swing - SWING_WINDUP - SWING_ACTIVE) / SWING_RECOVER
+		yaw = lerpf(THROUGH_YAW, REST_YAW, t)
+		lift = lerpf(HIT_LIFT, REST_LIFT, t)
+		extend = lerpf(1.0, REST_EXTEND, t)
+		hang = lerpf(1.0, REST_HANG, t)
+	rig.aim(yaw, lift, extend, hang)
+	# **허리와 골반이 같이 틉니다.** 앞으로 숙이는 몫은 지나가는 구간에서만
+	# 줍니다 - 감을 때 숙이면 이미 친 것으로 보입니다.
+	player.ext_pose = rig.lean(10.0 * clampf(hang, 0.0, 1.0))
 
-	# 판정은 **지나가는 0.10초에 한 번**입니다.
-	if not _swing_hit and _swing >= SWING_WINDUP 			and _swing < SWING_WINDUP + SWING_ACTIVE:
-		_swing_hit = true
-		_resolve_swing()
+	# 판정은 **지나가는 0.10초 동안 매 프레임** 봅니다. 한 번만 보면 그
+	# 프레임에 어디 있었느냐가 전부라, 베개가 훑고 지나간 자리는 안 세어집니다.
+	if not _swing_hit and _swing >= SWING_WINDUP \
+			and _swing < SWING_WINDUP + SWING_ACTIVE:
+		if is_instance_valid(foe) and _pillow_hits(rig, foe):
+			_swing_hit = true
+			# `from_pos` 를 줍니다. 안 주면 앞을 막는 상대도 못 막습니다.
+			foe.take_damage(SWING_DAMAGE, false, Vector3.ZERO, 0.0,
+				player.global_position)
 
 	if _swing >= total:
 		_swing = -1.0
 		player.ext_move_scale = 1.0
-		_rest_pillow()
+		player.ext_pose = {}
 
 
-func _resolve_swing() -> void:
-	if not is_instance_valid(foe):
+func _pillow_hits(from: PillowRig, other: Node3D) -> bool:
+	## **손에서 베개 끝까지의 선분**이 상대 몸에 닿았나.
+	##
+	## 부채꼴이 아닙니다. 부채꼴은 「앞쪽 몇 도 안」 이라는 규칙이라 늘어뜨리고
+	## 있든 다 편 뒤든 같은 값이 나오는데, 여기서는 **베개가 지금 어디 있는지**
+	## 가 곧 사거리입니다 - 늘어뜨린 베개는 발치에 있어 아무에게도 안 닿습니다.
+	var a := from.hands()
+	var b := from.tip()
+	a.y = 0.0
+	b.y = 0.0
+	var p := other.global_position
+	p.y = 0.0
+	var ab := b - a
+	var t := 0.0
+	if ab.length_squared() > 0.0001:
+		t = clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
+	var pad: float = float(other.get_meta("body_radius", 0.4)) + PILLOW_HALF
+	return (a + ab * t).distance_to(p) <= pad
+
+
+## ── 상대 ────────────────────────────────────────────────────
+
+func _drive_foe_rig(delta: float) -> void:
+	## **상대의 베개도 손이 정합니다.** 패턴 셋이 각각 다른 길을 그립니다 -
+	## 그림이 다르면 대처도 다르다는 것이 몸으로 읽혀야 합니다.
+	if foe_rig == null:
 		return
-	var face: Vector3 = -player.pivot.global_transform.basis.z
-	var to: Vector3 = foe.global_position - player.global_position
-	to.y = 0.0
-	var reach: float = SWING_REACH + float(foe.get_meta("body_radius", 0.4))
-	if to.length() > reach:
+	if not foe_has:
+		# **빈손이면 팔을 풀어 줍니다.** 이 적은 늘 막는 자세(`GUARD`)라 팔이
+		# 가슴 앞에 모여 있는데, 베개가 없어진 뒤에도 그대로 두면 **없는 것을
+		# 안고 있는** 그림이 됩니다. 주인공 쪽과 같은 규칙입니다.
+		var empty = foe.get("_pose")
+		if empty != null and float(foe.get("_flinch_time")) <= 0.0 				and float(foe.get("_windup")) < 0.0:
+			empty.weight = 0.0
 		return
-	if to.normalized().dot(face) < cos(deg_to_rad(SWING_ARC) * 0.5):
-		return
-	# `from_pos` 를 줍니다. 안 주면 앞을 막는 상대도 못 막습니다.
-	foe.take_damage(SWING_DAMAGE, false, Vector3.ZERO, 0.0, player.global_position)
+	var mode: String = foe.stats.get("attack", "melee")
+	var wind := float(foe.get("_windup"))
+	var total: float = maxf(float(foe.stats.get("windup", 0.5)), 0.01)
+	var slam_t := float(foe.get("_slam_time"))
+	var charge := float(foe.get("_charge"))
+
+	var yaw := REST_YAW
+	var lift := REST_LIFT
+	var extend := REST_EXTEND
+	var hang := REST_HANG
+	var rate := 14.0
+
+	if wind >= 0.0 and mode == "melee":
+		# 후려치기. 감았다가 **예고가 끝나는 순간 정면을 지납니다** - 판정이
+		# 그때 나므로(`Enemy._strike`), 베개도 그때 거기 있어야 합니다.
+		var t := clampf(1.0 - wind / total, 0.0, 1.0)
+		if t < 0.70:
+			var e := t / 0.70
+			yaw = lerpf(REST_YAW, WIND_YAW, e)
+			lift = lerpf(REST_LIFT, WIND_LIFT, e)
+			extend = lerpf(REST_EXTEND, WIND_EXTEND, e)
+			hang = lerpf(REST_HANG, 0.45, e)
+		else:
+			var e := (t - 0.70) / 0.30
+			yaw = lerpf(WIND_YAW, -24.0, e * e * (3.0 - 2.0 * e))
+			lift = lerpf(WIND_LIFT, HIT_LIFT, e)
+			extend = lerpf(WIND_EXTEND, 1.0, minf(e * 2.0, 1.0))
+			hang = lerpf(0.45, 1.0, minf(e * 2.5, 1.0))
+		rate = 0.0
+	elif wind >= 0.0 and mode == "slam":
+		# 내려치기. **머리 위로 세웁니다**(hang 2 면 베개가 위를 봅니다).
+		var t := clampf(1.0 - wind / total, 0.0, 1.0)
+		yaw = lerpf(REST_YAW, 0.0, t)
+		lift = lerpf(REST_LIFT, 0.30, t)
+		extend = lerpf(REST_EXTEND, 0.34, t)
+		hang = lerpf(REST_HANG, 1.85, t)
+		rate = 0.0
+	elif slam_t > 0.0:
+		# 내리꽂은 자리. 앞 아래로 눌러 놓습니다 - 바닥에 그린 원이 그 자리입니다.
+		yaw = 0.0
+		lift = -0.34
+		extend = 1.0
+		hang = 1.0
+		rate = 26.0
+	elif wind >= 0.0 and mode == "charge":
+		# 달려들기 예고. 뒤로 조금 감고 몸을 낮춥니다.
+		yaw = 20.0
+		lift = -0.18
+		extend = 0.60
+		hang = 0.40
+	elif charge > 0.0:
+		# 달리는 중. **베개를 앞으로 내밀고** 옵니다.
+		yaw = 0.0
+		lift = -0.12
+		extend = 1.0
+		hang = 1.0
+		rate = 24.0
+	elif _foe_follow > 0.0:
+		# 후려친 뒤. 끝까지 지나가고 나서 돌아옵니다.
+		var t := 1.0 - _foe_follow / FOLLOW_TIME
+		if t < 0.4:
+			yaw = lerpf(-24.0, THROUGH_YAW, t / 0.4)
+			extend = 1.0
+			lift = HIT_LIFT
+			hang = 1.0
+		else:
+			var e := (t - 0.4) / 0.6
+			yaw = lerpf(THROUGH_YAW, REST_YAW, e)
+			lift = lerpf(HIT_LIFT, REST_LIFT, e)
+			extend = lerpf(1.0, REST_EXTEND, e)
+			hang = lerpf(1.0, REST_HANG, e)
+		rate = 0.0
+
+	foe_rig.aim(yaw, lift, extend, hang, rate, delta)
+
+	# 상체. **들썩임(맞은 자세)이 돌 때는 비켜 줍니다** - 하나의 층에 둘이
+	# 같이 쓰면 나중에 쓴 쪽이 앞의 것을 지웁니다.
+	var layer = foe.get("_pose")
+	if layer != null and float(foe.get("_flinch_time")) <= 0.0:
+		layer.pose = foe_rig.lean(10.0 * clampf(hang, 0.0, 1.0))
+		layer.weight = 1.0
 
 
 func _next_pattern() -> void:
@@ -275,40 +466,54 @@ func _next_pattern() -> void:
 		if k == "name":
 			continue
 		foe.stats[k] = pick[k]
+	_set_range(String(pick["attack"]))
 
 
-func _build_pillow() -> Node3D:
-	## 주인공이 드는 베개. **적의 것과 같은 크기·같은 색**입니다
-	## (`Enemy._build_pillow`). 둘이 다르게 생기면 뺏고 뺏기는 것이 같은
-	## 물건이라는 게 안 읽힙니다.
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(0.70, 0.46, 0.20)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.96, 0.97, 1.0)
-	mat.roughness = 1.0
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	mi.material_override = mat
-	# 카툰 외곽선이 이 판을 검게 두르면 베개가 아니라 상자로 보입니다.
-	mi.set_meta("flat", true)
-	var root := Node3D.new()
-	root.name = "PlayerPillow"
-	root.add_child(mi)
-	return root
+func _set_range(attack: String) -> void:
+	## **상대의 사거리도 잰 값입니다.** 주인공과 같은 규칙이라, 팔이 긴 쪽이
+	## 실제로 더 멀리서 때립니다(상대가 주인공보다 팔이 깁니다).
+	##
+	## `Enemy` 는 `range` 를 그대로 쓰지 않고 공격마다 조금씩 더합니다. 그래서
+	## **닿는 거리에서 거꾸로** 풉니다 - 여기서 어림하면 그려지는 예고와 맞는
+	## 자리가 갈라집니다.
+	##
+	##   후려치기  판정 = range + 0.4
+	##   내려치기  원의 바깥 끝 = (range + 0.4) x 1.05   (중심 0.55 + 반지름 0.5)
+	if foe_rig == null:
+		return
+	var hit: float = foe_rig.full_reach(HIT_LIFT) + float(player.get("_body_radius"))
+	match attack:
+		"melee":
+			foe.stats["range"] = maxf(hit - 0.4, 0.4)
+		"slam":
+			foe.stats["range"] = maxf(hit / 1.05 - 0.4, 0.4)
+		_:
+			pass          # 달려들기는 방 크기가 정합니다(패턴 표의 5.2m)
 
+
+## ── 판 ──────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
 	if over or not is_instance_valid(player) or not is_instance_valid(foe):
 		return
 	_drop_lock = maxf(0.0, _drop_lock - delta)
+	_foe_follow = maxf(0.0, _foe_follow - delta)
 	_drive_swing(delta)
+	_drive_foe_rig(delta)
 
-	# **상대의 공격이 끝나면 다음 패턴을 고릅니다.** 공격이 시작될 때 갈면
-	# 이미 `stats` 를 읽은 뒤라(`_begin_attack`) 예고와 판정이 갈립니다.
+	# **공격이 끝나면 뒷동작을 걸고, 조금 뒤에 다음 패턴을 고릅니다.**
+	# 예고가 끝나는 순간 갈면 이미 `stats` 를 읽은 뒤라(`_begin_attack`)
+	# 뒷동작이 다음 패턴의 몸으로 나옵니다.
 	var winding := float(foe.get("_windup")) >= 0.0
 	if _foe_was_winding and not winding:
-		_next_pattern()
+		if foe.stats.get("attack", "melee") == "melee":
+			_foe_follow = FOLLOW_TIME
+		_repick = REPICK_AFTER
 	_foe_was_winding = winding
+	if _repick > 0.0:
+		_repick = maxf(0.0, _repick - delta)
+		if _repick <= 0.0:
+			_next_pattern()
 
 	var st = player.state
 	# 맞았나. **체력이 줄었으면** 판정이 뚫린 것입니다(막는 각·사거리는 이미
@@ -341,26 +546,29 @@ func _got_hit(is_player: bool) -> void:
 	# 공격 버튼이 이 판의 휘두르기로 남습니다.
 	player.attack_hook = null
 	player.ext_move_scale = 1.0
+	player.ext_pose = {}
 	if game != null and game.has_method("on_pillow_over"):
 		game.on_pillow_over(winner)
 
 
 func _drop_pillow(is_player: bool) -> void:
-	## 맞은 쪽이 베개를 놓칩니다.
+	## 맞은 쪽이 베개를 놓칩니다. **팔도 같이 풀립니다** - 빈손인데 두 손이
+	## 모여 있으면 아직 들고 있는 것으로 보입니다.
 	var who: Node3D = player if is_player else foe
 	if is_player:
 		player_has = false
 		_swing = -1.0
 		player.ext_move_scale = 1.0
-		if _player_pillow != null:
-			_player_pillow.visible = false
+		player.ext_pose = {}
+		if rig != null:
+			rig.active(false)
 	else:
 		foe_has = false
 		# **막는 각을 0 으로 만듭니다.** 베개가 없으면 막을 것이 없습니다 -
 		# 그림만 지우고 판정을 남기면 "왜 안 맞지" 가 됩니다.
 		foe.stats["guard_arc"] = 0.0
-		if foe.get("_pillow") != null:
-			(foe.get("_pillow") as Node3D).visible = false
+		if foe_rig != null:
+			foe_rig.active(false)
 
 	# 이미 떨어진 것이 있으면 그것을 옮깁니다. 판 위의 베개는 늘 하나여야
 	# 줍는 경쟁이 성립합니다.
@@ -385,11 +593,12 @@ func _drive_pickup() -> void:
 
 	# **다가가면 줍습니다.** 휘두르는 도중에는 안 줍습니다 - 그러면 감았다가
 	# 지나가는 사이에 저절로 손이 차서, 되돌릴 수 없다는 규칙이 무너집니다.
-	if not player_has and _swing < 0.0 			and player.global_position.distance_to(_drop.global_position) < PICKUP_NEAR:
+	if not player_has and _swing < 0.0 \
+			and player.global_position.distance_to(_drop.global_position) < PICKUP_NEAR:
 		player_has = true
-		if _player_pillow != null:
-			_player_pillow.visible = true
-			_rest_pillow()
+		if rig != null:
+			rig.active(true)
+			rig.aim(REST_YAW, REST_LIFT, REST_EXTEND, REST_HANG)
 		_drop.visible = false
 		Sfx.play(Sfx.PICK, -2.0, 0.0)
 		return
@@ -398,6 +607,6 @@ func _drive_pickup() -> void:
 	if not foe_has and foe.global_position.distance_to(_drop.global_position) < FOE_PICKUP:
 		foe_has = true
 		foe.stats["guard_arc"] = _foe_guard_arc
-		if foe.get("_pillow") != null:
-			(foe.get("_pillow") as Node3D).visible = true
+		if foe_rig != null:
+			foe_rig.active(true)
 		_drop.visible = false

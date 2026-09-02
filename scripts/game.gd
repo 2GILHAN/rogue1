@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.68"
+const VERSION := "v0.69"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -315,6 +315,8 @@ var test_mode := false
 ## `pillow_` 로 시작하는 몇 줄만 지우면 흔적이 없습니다.
 var pillow_mode := false
 var pillow: PillowMatch = null
+## 도는 중인 시련. 없으면 null 입니다.
+var trial: Trial = null
 var _test_kind := ""
 var _test_timer := 0.0
 ## 실험용 방에서 한 번에 두는 적 수와 다시 내보내는 간격(초).
@@ -735,6 +737,7 @@ func start_run() -> void:
 			ui.toast("녹화를 시작하지 못했습니다", UiTheme.BAD)
 	test_mode = false
 	pillow_mode = false
+	_clear_trial()
 	_test_kind = ""
 	state = RunState.new()
 	_boon_names.clear()
@@ -764,6 +767,67 @@ func _all_children(root: Node) -> Array:
 		out.append(c)
 		out.append_array(_all_children(c))
 	return out
+
+
+func _probe_shoulder_yaw() -> float:
+	## 두 어깨를 잇는 선의 각(도). 쉴 때가 0 이고, **그립과 같은 부호**로
+	## 움직여야 몸과 베개가 같이 도는 것입니다.
+	if _probe_seen.size() < 4:
+		return 0.0
+	var l: Vector3 = player.pivot.to_local((_probe_seen[2] as Node3D).global_position)
+	var r: Vector3 = player.pivot.to_local((_probe_seen[3] as Node3D).global_position)
+	var v := l - r
+	return rad_to_deg(atan2(-v.z, v.x))
+
+
+func _probe_swept() -> void:
+	## **베개가 상대를 얼마나 스쳐 갔나.** 판정이 안 났을 때 「멀어서」인지
+	## 「각이 안 맞아서」인지가 이 숫자로 갈립니다.
+	if pillow == null or pillow.rig == null or not is_instance_valid(_probe_foe):
+		return
+	# **매 프레임 제자리에 붙듭니다.** 걸음을 0 으로 해도 달려들기가 걸려
+	# 있으면 몸이 밀려나고, 그러면 재는 것이 휘두르기가 아니라 상대의 발이
+	# 됩니다(실제로 패턴이 달려들기로 뽑힌 판에서 1.2~2.4m 로 벌어졌습니다).
+	_probe_foe.velocity = Vector3.ZERO
+	_probe_foe.global_position = player.global_position 		- player.pivot.global_transform.basis.z * 1.15
+	var a: Vector3 = pillow.rig.hands()
+	var b: Vector3 = pillow.rig.tip()
+	a.y = 0.0
+	b.y = 0.0
+	var q: Vector3 = _probe_foe.global_position
+	q.y = 0.0
+	var ab := b - a
+	var u := clampf((q - a).dot(ab) / maxf(ab.length_squared(), 0.0001), 0.0, 1.0)
+	print("[리그] %d프레임 베개선과 상대 사이 %.3f (몸 %.2f + 두께 0.12 안이면 맞음)" % [
+		_frames, (a + ab * u).distance_to(q),
+		float(_probe_foe.get_meta("body_radius", 0.4))])
+
+
+func _probe_hand_err(when: String) -> void:
+	## 손이 그립에 **닿았나.** IK 는 못 닿으면 조용히 팔만 펴고 멈추므로,
+	## 각도표와 달리 「걸렸다」 만으로는 모자랍니다.
+	if pillow == null or pillow.rig == null or _probe_seen.size() < 2:
+		return
+	var r: PillowRig = pillow.rig
+	var lt: Vector3 = r.grip.to_global(Vector3(-PillowRig.GRIP_HALF, 0, 0))
+	var rt: Vector3 = r.grip.to_global(Vector3(PillowRig.GRIP_HALF, 0, 0))
+	var lh: Vector3 = (_probe_seen[0] as Node3D).global_position
+	var rh: Vector3 = (_probe_seen[1] as Node3D).global_position
+	# **어깨에서 그립까지가 팔보다 멀면** IK 가 못 닿는 것이 당연합니다. 오차만
+	# 보면 "IK 가 안 먹었다" 로 읽히므로 둘을 같이 찍습니다.
+	var ls: Vector3 = (_probe_seen[2] as Node3D).global_position
+	var rs: Vector3 = (_probe_seen[3] as Node3D).global_position
+	print("[리그] %-12s 손오차 %.3f / %.3f   어깨→그립 %.3f / %.3f (팔 %.3f)" % [
+		when, lh.distance_to(lt), rh.distance_to(rt),
+		ls.distance_to(lt), rs.distance_to(rt), r.arm])
+
+
+func _count_pickups() -> int:
+	var n := 0
+	for c in world.get_children():
+		if c is Pickup:
+			n += 1
+	return n
 
 
 func _first_foe() -> Node3D:
@@ -963,6 +1027,10 @@ func _drive_test_spawns(delta: float) -> void:
 
 
 func build_floor() -> void:
+	# **층을 새로 지으면 도는 시련을 먼저 걷습니다.** 안 걷으면 울타리와
+	# 떨어지는 공이 다음 층까지 따라오고, 그 울타리가 없는 방 한가운데를
+	# 가둡니다.
+	_clear_trial()
 	# **마디마디 잽니다.** `--floortime` 으로 켭니다 - 층을 만드는 한 프레임이
 	# 데스크톱에서도 86ms 였고, 그 안에서 무엇이 값을 치르는지 봐야 합니다.
 	#
@@ -2426,6 +2494,75 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"openbox":
+			# **가구를 열면 셋 중 하나가 나오는가**, 그리고 **적이 1.5배 아픈가.**
+			if _frames == 30:
+				var foe := _first_foe()
+				if is_instance_valid(foe):
+					print("[가구] 적 %s 피해 %.1f (표 %.1f, 배율 %.1f)" % [
+						foe.kind, foe.damage, float(foe.stats["damage"]),
+						Enemy.DAMAGE_SCALE])
+				var got := {"candy": 0, "nothing": 0, "trial": 0}
+				for _i in 100:
+					got[String(OPEN_ROLL[rng.randi_range(0, OPEN_ROLL.size() - 1)])] += 1
+				var kinds := 0
+				for n in get_tree().get_nodes_in_group("props"):
+					if (n as Prop).can_open():
+						kinds += 1
+				print("[가구] 백 번 열면 %s   이 층에 열 수 있는 것 %d개" % [str(got), kinds])
+			elif _frames == 40:
+				for n in get_tree().get_nodes_in_group("props"):
+					var box := n as Prop
+					if box.can_open():
+						player.global_position = box.global_position + Vector3(0.8, 0, 0)
+						_probe_prop = box
+						break
+			elif _frames == 44 and is_instance_valid(_probe_prop):
+				_probe_t0 = float(_count_pickups())
+				var ok := try_interact()
+				print("[가구] 눌렀을 때: 열렸나 %s  다시 열리나 %s  사탕 %+d개  시련 %s" % [
+					str(ok), str(_probe_prop.can_open()),
+					_count_pickups() - int(_probe_t0), str(trial != null)])
+				get_tree().quit()
+		"trial":
+			# **시련 셋이 도는가.** `--side=` 로 종류를 고릅니다.
+			#   ① 울타리가 서고 방 밖으로 못 나간다
+			#   ② 버티기: 적이 다시 나오고 공이 떨어진다
+			#   ③ 모으기: 사탕을 다 주우면 그 자리에서 끝난다
+			#   ④ 무결점: 한 대 맞으면 그 자리에서 진다
+			if _frames == 30:
+				var want := _probe_arg if _probe_arg != "" else "hold"
+				var room := _room_of(player.global_position)
+				trial = Trial.new()
+				trial.name = "Trial"
+				add_child(trial)
+				trial.finished.connect(_on_trial_done)
+				trial.finished.connect(func(won: bool, k: String) -> void:
+					print("[시련] %s 끝: 이겼나 %s" % [k, str(won)]))
+				trial.start(self, player, room, want)
+				_probe_t0 = float(get_tree().get_nodes_in_group("enemies").size())
+				print("[시련] %s 시작: 울타리 %s  남은 %.0f초  적 %.0f  사탕 %d" % [
+					want, str(trial._fence != null), trial.left, _probe_t0,
+					get_tree().get_nodes_in_group("trial_candy").size()])
+			elif _frames == 36 and trial != null and trial.running:
+				# 방 밖으로 밀어 봅니다. 되밀려야 맞습니다.
+				player.global_position = trial._center + Vector3(60, 0, 60)
+			elif _frames == 38 and trial != null:
+				var d: float = player.global_position.distance_to(trial._center)
+				print("[시련] 방 밖으로 60m 밀었을 때 가운데와의 거리 %.2fm (울타리 %.2f)" % [
+					d, trial._half.length()])
+			elif _frames == 200 and trial != null and trial.running:
+				print("[시련] 3초 뒤: 적 %d (처음 %.0f)  떨군 공 %d개  남은 %.0f초" % [
+					get_tree().get_nodes_in_group("enemies").size(), _probe_t0,
+					trial.balls_dropped, trial.left])
+				if trial.kind == "gather":
+					for n in get_tree().get_nodes_in_group("trial_candy"):
+						(n as Node).queue_free()
+				elif trial.kind == "flawless":
+					player.take_damage(9.0, player.global_position + Vector3(0, 0, 2))
+			elif _frames == 240:
+				print("[시련] 마지막: 도는 중 %s" % str(trial != null and trial.running))
+				get_tree().quit()
 		"whoeats":
 			# **스크립트 시간을 누가 쓰는가.** game.gd 자신은 0.13ms 뿐이고
 			# 나머지 노드가 7~9ms 를 씁니다 - 적·소품·UI 중 누구인지 가릅니다.
@@ -2485,6 +2622,115 @@ func _drive_pose() -> void:
 				print("[줍기] 잠금 풀린 뒤 밟음: 나 %s  떨어진 것 %s" % [
 					str(pillow.player_has), str(pillow._drop != null and pillow._drop.visible)])
 				get_tree().quit()
+		"pillowshot":
+			# 화면을 찍기 위해 상대를 세우고 휘두릅니다.
+			if pillow == null:
+				pass
+			elif _frames == 26:
+				if _probe_arg == "low":
+					# 팔이 보이도록 눈높이로 내립니다. 쿼터뷰(48도)에서는
+					# 머리가 어깨를 덮어 두 손이 안 보입니다.
+					set_cam_pitch(16.0)
+				_probe_foe = _first_foe()
+				if is_instance_valid(_probe_foe):
+					_probe_foe.speed = 0.0
+					_probe_foe.set("_cooldown", 99.0)
+					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.15
+				pillow.swing()
+			elif is_instance_valid(_probe_foe):
+				_probe_foe.velocity = Vector3.ZERO
+		"pillowrig":
+			# **팔이 실제로 베개를 잡고 있는가.**
+			#
+			# 이 판의 동작은 각도표가 아니라 IK 입니다. 그러면 검사할 것이
+			# 하나 생깁니다 - **손이 정말 그 자리에 갔나.** 각도표는 적은
+			# 대로 들어가지만 IK 는 못 닿으면 조용히 팔만 펴고 멈춥니다.
+			#
+			#   ① 잰 팔 길이와 그것이 만든 사거리
+			#   ② 손과 그립 사이의 오차 (닿았으면 0 에 가깝습니다)
+			#   ③ 늘어뜨렸을 때와 칠 때의 사거리 차이
+			#   ④ 허리가 트는 쪽 (양수 yaw 가 오른쪽이어야 맞습니다)
+			if pillow == null or pillow.rig == null:
+				pass
+			elif _frames == 20:
+				var r: PillowRig = pillow.rig
+				var fr: PillowRig = pillow.foe_rig
+				print("[리그] 나   팔 %.3f  어깨옆 %.3f  뻗는거리 %.3f  사거리 %.2f" % [
+					r.arm, r.shoulder_x, r.span, r.full_reach()])
+				print("[리그] 상대 팔 %.3f  어깨옆 %.3f  뻗는거리 %.3f  사거리 %.2f" % [
+					fr.arm, fr.shoulder_x, fr.span, fr.full_reach()])
+				print("[리그] 상대 사거리표: 후려치기 판정 %.2f  내려치기 원 바깥 %.2f" % [
+					float(fr.full_reach()) + float(player.get("_body_radius")),
+					float(fr.full_reach()) + float(player.get("_body_radius"))])
+				# 손 앵커를 답니다(자세 층이 적용된 **뒤**의 자리를 읽습니다).
+				# **앵커로 읽습니다.** `get_bone_global_pose()` 는 자세 층과 IK 가
+				# 손대기 **전**의 자리를 돌려주므로, 그걸로 재면 팔을 뻗어 놓고도
+				# 손이 몸 옆에 있는 것으로 계산됩니다(models.gd 의 add_anchor).
+				_probe_seen.clear()
+				for b in ["LeftHand", "RightHand", "LeftArm", "RightArm", "Chest"]:
+					var a := BoneAttachment3D.new()
+					a.bone_name = b
+					r.skel.add_child(a)
+					_probe_seen.append(a)
+			elif _frames == 30:
+				_probe_hand_err("늘어뜨림")
+				print("[리그] 늘어뜨림: 사거리 %.2fm  베개끝 높이 %.2f (바닥 0 위여야 맞음)" % [
+					pillow.rig.reach(), pillow.rig.tip().y])
+				_probe_foe = _first_foe()
+				if is_instance_valid(_probe_foe):
+					# **때리지도 걷지도 못하게 붙들어 둡니다.** 안 그러면 상대가
+					# 달려들어 자리를 옮겨 버려서, 재는 것이 휘두르기의 사거리가
+					# 아니라 상대의 발이 됩니다.
+					_probe_foe.speed = 0.0
+					_probe_foe.set("_cooldown", 99.0)
+					_probe_foe.set("_windup", -1.0)
+					_probe_foe.set("_charge", 0.0)
+					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.15
+					_probe_t0 = float(_probe_foe.hp)
+				pillow.swing()
+			elif _frames == 45:
+				# 선딜 0.26초 = 15.6프레임. 여기가 감은 끝입니다.
+				_probe_hand_err("감은 끝")
+			elif _frames == 48:
+				_probe_hand_err("지나가는 중")
+				print("[리그] 칠 때 사거리 %.2fm  베개끝 높이 %.2f" % [
+					pillow.rig.reach(), pillow.rig.tip().y])
+				_probe_swept()
+			elif _frames > 45 and _frames < 53 and is_instance_valid(_probe_foe):
+				_probe_swept()
+
+			elif _frames == 66:
+				# **휘두르는 중에는 구르기가 안 나가야 합니다.**
+				pillow.swing()
+				_probe_t0 = float(player.get("_roll_time"))
+			elif _frames == 68:
+				var before := float(player.get("_roll_time"))
+				player._try_dash()
+				print("[리그] 휘두르는 중 구르기: 전 %.2f 후 %.2f (안 늘어야 맞음)" % [
+					before, float(player.get("_roll_time"))])
+			elif _frames == 70:
+				print("[리그] 맞았나 %s (사거리 1.15m 안이면 맞아야 함)" % [
+					str(float(_probe_foe.hp) < _probe_t0 or pillow._swing_hit)])
+				# **허리가 트는 쪽.** 그립을 오른쪽으로 보내면 가슴도 오른쪽으로
+				# 가야 맞습니다. 반대면 몸과 베개가 서로 반대로 도는 그림입니다.
+				# **판을 멈추고 잽니다.** 안 그러면 `_drive_swing` 이 매 프레임
+				# 자세를 비워서, 걸어 놓은 상체 각도가 바로 지워집니다.
+				pillow.over = true
+				# **두 어깨를 잇는 선이 몇 도 돌았나.**
+				#
+				# 어깨 하나의 x 로 재려다 틀렸습니다 - 몸을 세로축으로 틀면
+				# 어깨는 주로 **앞뒤로(z)** 움직이고 x 는 코사인만큼만 줄어서,
+				# 다 맞게 돌고 있어도 "거의 안 움직였다" 로 읽힙니다.
+				_probe_t1 = _probe_shoulder_yaw()
+				pillow.rig.aim(pillow.rig.rest_yaw + 40.0,
+					PillowMatch.REST_LIFT, PillowMatch.REST_EXTEND, PillowMatch.REST_HANG)
+				player.ext_pose = pillow.rig.lean(0.0)
+				player._pose.pose = player.ext_pose
+				player._pose.weight = 1.0
+			elif _frames == 76:
+				print("[리그] 그립을 오른쪽 40도로 보낼 때 어깨선 %+.1f도 (그립과 같은 쪽이어야 맞음)" % [
+					_probe_shoulder_yaw() - _probe_t1])
+				get_tree().quit()
 		"souls":
 			# **소울라이크 규칙 넷이 도는가.**
 			#   ① 휘두르기에 선딜·판정·후딜이 있고 그동안 발이 묶인다
@@ -2497,18 +2743,26 @@ func _drive_pose() -> void:
 				# 화면을 찍을 때는 상대를 사거리 안에 세우고 휘두릅니다.
 				_probe_foe = _first_foe()
 				if is_instance_valid(_probe_foe):
-					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.6
+					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.1
 					_probe_foe.speed = 0.0
 				pillow.swing()
 			elif _frames == 24:
-				print("[소울] 카메라 %.0f도  베개 자리 %.2f,%.2f,%.2f" % [
-					cam_pitch, pillow._player_pillow.position.x,
-					pillow._player_pillow.position.y, pillow._player_pillow.position.z])
+				print("[소울] 카메라 %.0f도  베개 끝까지 %.2fm" % [
+					cam_pitch, pillow.rig.reach()])
 				_probe_foe = _first_foe()
 				if is_instance_valid(_probe_foe):
-					# 사거리 안, 정면에 세웁니다.
-					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.4
+					# **사거리 안**, 정면에 세웁니다. 1.4m 였다가 좁혔습니다 -
+					# 사거리가 「팔 + 베개」 로 바뀌면서 2.25m 에서 1.32m 가
+					# 됐고, 1.4m 는 이제 밖입니다.
+					#
+					# **때리지도 못하게 붙듭니다.** 걸음만 0 으로 하면 달려들기가
+					# 뽑힌 판에서 상대가 밀려나, 재는 것이 휘두르기가 아니라
+					# 상대의 발이 됩니다(그래서 한 번 걸러 실패했습니다).
 					_probe_foe.speed = 0.0
+					_probe_foe.set("_cooldown", 99.0)
+					_probe_foe.set("_windup", -1.0)
+					_probe_foe.set("_charge", 0.0)
+					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.1
 					_probe_t0 = float(_probe_foe.hp)
 				pillow.swing()
 			elif _frames == 26:
@@ -2537,6 +2791,12 @@ func _drive_pose() -> void:
 					kinds[n] = int(kinds.get(n, 0)) + 1
 				print("[소울] 패턴 30번: %s  이어 나온 횟수 %.0f" % [str(kinds), _probe_t1])
 				get_tree().quit()
+			elif _frames > 24 and _frames < 45 and is_instance_valid(_probe_foe):
+				# **재는 동안 제자리에 붙듭니다.** 이 줄은 사슬의 **맨 뒤**에
+				# 있어야 합니다 - 앞에 두면 26·42프레임의 확인을 통째로
+				# 삼켜서, 아무 소리 없이 검사가 사라집니다(그렇게 한 번 놓쳤습니다).
+				_probe_foe.velocity = Vector3.ZERO
+				_probe_foe.global_position = player.global_position 					- player.pivot.global_transform.basis.z * 1.1
 		"device":
 			# **기기 줄이 제대로 나오는가.**
 			#
@@ -2576,11 +2836,18 @@ func _drive_pose() -> void:
 				print("[베개] 등 뒤로 한 대: 상대 %s  떨어진 것 %s  상대 막는각 %.0f" % [
 					str(pillow.foe_has), str(pillow._drop != null and pillow._drop.visible),
 					float(_probe_foe_arc())])
-			elif _frames == 120 and is_instance_valid(_probe_foe):
+			elif _frames == 90 and is_instance_valid(_probe_foe):
 				# 이번엔 **정면**입니다. 베개가 없으니 막히면 안 됩니다.
+				#
+				# 120프레임에 때리다가 옮겼습니다. 못 줍는 시간(0.8초 = 48프레임)이
+				# 그때쯤 풀려서, 상대가 **떨어진 베개를 도로 주워 든 뒤**에
+				# 때리는 일이 생겼습니다 - 그러면 규칙 ④ 가 아니라 ② 가 한 번
+				# 더 도는 것이라 판이 안 끝납니다.
+				print("[베개] 두 번째 한 대 직전: 상대가 든 것 %s (false 여야 맞음)" % [
+					str(pillow.foe_has)])
 				_probe_foe.take_damage(9.0, false, Vector3.ZERO, 0.0,
 					_probe_foe.global_position + _probe_foe.facing() * 2.0)
-			elif _frames == 150:
+			elif _frames == 120:
 				# 여기까지 왔으면 ④가 안 걸린 것입니다.
 				print("[베개] 베개 없이 정면 한 대: 끝났나 false  ← 안 걸림")
 				get_tree().quit()
@@ -5290,7 +5557,142 @@ func try_interact() -> bool:
 	if shelf != null:
 		_read_shelf(shelf)
 		return true
+	var box := _openable_near()
+	if box != null:
+		_open_furniture(box)
+		return true
 	return false
+
+
+func _clear_trial() -> void:
+	## 도는 시련을 걷습니다. 층을 넘기거나 다시 시작할 때 부릅니다 - 안 걷으면
+	## 울타리와 떨어지는 공이 다음 층까지 따라옵니다.
+	if trial != null:
+		if trial.running:
+			trial._end(false)
+		trial.queue_free()
+		trial = null
+
+
+func _openable_near() -> Prop:
+	## 열어 볼 수 있는 가구. 책장을 찾는 것과 **같은 방식**입니다.
+	if not is_instance_valid(player):
+		return null
+	var best: Prop = null
+	var closest := READ_RANGE
+	for node in get_tree().get_nodes_in_group("props"):
+		var prop := node as Prop
+		if prop == null or not is_instance_valid(prop) or not prop.can_open():
+			continue
+		var to: Vector3 = prop.global_position - player.global_position
+		to.y = 0.0
+		if to.length() < closest:
+			closest = to.length()
+			best = prop
+	return best
+
+
+## 가구를 열었을 때 나오는 것. **사탕 반, 꽝 넷 중 하나, 시련 넷 중 하나**
+## 입니다.
+##
+## 꽝을 남겨 둔 이유: 다 열어 볼 이유는 있는데 **다 좋으면 도박이 아닙니다.**
+## 열 때마다 무언가 나오면 그건 그냥 늦게 주는 사탕입니다.
+##
+## 시련이 4분의 1인 이유: 층마다 여는 가구가 서넛이라 한 층에 한 번쯤
+## 걸립니다. 절반이면 층마다 두세 번이라 판이 시련으로만 채워집니다.
+const OPEN_ROLL := ["candy", "candy", "nothing", "trial"]
+
+
+func _open_furniture(box: Prop) -> void:
+	box.was_opened = true
+	Sfx.play(Sfx.PICK, -2.0, 0.0)
+	match String(OPEN_ROLL[rng.randi_range(0, OPEN_ROLL.size() - 1)]):
+		"candy":
+			var n := rng.randi_range(3, 7)
+			for _i in n:
+				var coin := Pickup.new()
+				world.add_child(coin)
+				coin.setup(rng.randi_range(2, 5), box.global_position)
+			ui.toast("사탕이 쏟아졌다", UiTheme.GOOD)
+		"nothing":
+			ui.toast("텅 비었다", UiTheme.TEXT)
+			Fx.burst(world, box.global_position + Vector3(0, 0.8, 0),
+				Color(0.7, 0.68, 0.64), 8, 1.6)
+		"trial":
+			_begin_trial(box)
+
+
+func _begin_trial(box: Prop) -> void:
+	## 시련이 시작됩니다. **주인공이 선 방**을 닫습니다.
+	if trial != null and trial.running:
+		return
+	var room := _room_of(player.global_position)
+	if room.size.x <= 0:
+		# 방을 못 찾으면 시련 대신 사탕입니다. 복도 한가운데를 닫으면 나갈
+		# 자리가 없어 버티기가 아니라 갇히기가 됩니다.
+		ui.toast("사탕이 쏟아졌다", UiTheme.GOOD)
+		for _i in 5:
+			var coin := Pickup.new()
+			world.add_child(coin)
+			coin.setup(3, box.global_position)
+		return
+	var kinds: Array = Trial.KINDS.keys()
+	var kind := String(kinds[rng.randi_range(0, kinds.size() - 1)])
+	trial = Trial.new()
+	trial.name = "Trial"
+	add_child(trial)
+	trial.finished.connect(_on_trial_done)
+	trial.start(self, player, room, kind)
+	ui.toast("시련 — %s   %s" % [
+		Trial.KINDS[kind]["label"], Trial.KINDS[kind]["note"]], UiTheme.BAD)
+
+
+func _room_of(at: Vector3) -> Rect2i:
+	## 이 자리가 어느 방인가. 없으면 크기 0 을 돌려줍니다.
+	var c: Vector2i = dungeon.world_to_cell(at)
+	for r in dungeon.rooms:
+		var rect: Rect2i = r
+		if rect.has_point(c):
+			return rect
+	return Rect2i()
+
+
+func spawn_trial_foe(at: Vector3) -> void:
+	## 시련이 부르는 적. **층에 맞는 종류**로 세웁니다 - 1층에서 5층 적이
+	## 나오면 시련이 아니라 사고입니다.
+	var pool := _kind_pool()
+	var foe := Enemy.new()
+	world.add_child(foe)
+	foe.setup(String(pool[rng.randi_range(0, pool.size() - 1)]),
+		state.floor_num, dungeon, player)
+	foe.global_position = at
+	foe.add_to_group("enemies")
+	foe.died.connect(_on_enemy_died)
+	_alive += 1
+	Fx.burst(world, at + Vector3(0, 0.6, 0), Color(0.9, 0.4, 0.4), 10, 2.2)
+
+
+func _on_trial_done(won: bool, kind: String) -> void:
+	## 시련이 끝났습니다. **이기면 기술**, 지면 그걸로 끝입니다.
+	##
+	## 지는 벌은 따로 두지 않았습니다 - 시련 동안 맞은 것이 이미 벌이고,
+	## 거기에 더 얹으면 가구를 아예 안 여는 것이 답이 됩니다.
+	if trial != null:
+		trial.queue_free()
+		trial = null
+	if not won:
+		ui.toast("시련 실패 — %s" % Trial.KINDS[kind]["label"], UiTheme.BAD)
+		return
+	ui.toast("시련을 이겨 냈다 — %s" % Trial.KINDS[kind]["label"], UiTheme.GOOD)
+	if phase != Phase.PLAYING:
+		return
+	# 고르는 화면은 책장·층 넘기기와 **같은 것**을 씁니다.
+	_boon_options = _label_boons(state.offer_boons(rng))
+	_boon_from_shelf = true
+	phase = Phase.BOON
+	get_tree().paused = true
+	ui.show_boons(_boon_options, "시련을 이겨 냈다",
+		"「%s」   버텨 낸 몫으로 무엇을 할까?" % Trial.KINDS[kind]["label"])
 
 
 ## 풀장에서 말이 닿는 거리. 풀장 반지름(1.85)에 한 걸음 더.
@@ -5547,6 +5949,14 @@ func _process(delta: float) -> void:
 			Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0,
 			Performance.get_monitor(Performance.RENDER_TEXTURE_MEM_USED) / 1048576.0,
 			Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0])
+	if trial != null and trial.running and phase == Phase.PLAYING:
+		# **이름을 먼저 꺼냅니다.** `tick` 안에서 시련이 끝나면 `_on_trial_done`
+		# 이 `trial` 을 null 로 만들어, 그 뒤에 읽으면 Nil 을 칩니다.
+		var label := "%s  %.0f초" % [
+			Trial.KINDS[trial.kind]["label"], maxf(trial.left, 0.0)]
+		trial.tick(delta)
+		if trial != null and trial.running:
+			ui.set_prompt(label)
 	_drive_skill_hud()
 	_drive_test_spawns(delta)
 	# 읽는 동안 바깥부터 어두워집니다. 켜고 끄는 것이 아니라 **옮겨** 갑니다 -

@@ -322,9 +322,12 @@ func setup(enemy_kind: String, floor_num: int, level: Dungeon, player: Node3D) -
 	# 한 마리가 세지면 **한 마리를 어떻게 처리할지**가 생깁니다. 여럿이면
 	# 밀기 한 번에 무리가 정리되는 것이 늘 답이었습니다.
 	var f := float(floor_num - 1)
+	# **아프기는 한 곳에서 정합니다.** 종류마다 표의 값을 고치면 균형을 다시
+	# 잡을 때마다 일곱 줄을 손대야 하고, 그러다 하나를 빼먹으면 그 적만
+	# 예전 세기로 남습니다.
 	max_hp = float(stats["hp"]) * FOE_POWER * (1.0 + f * 0.42)
 	hp = max_hp
-	damage = float(stats["damage"]) * FOE_POWER * (1.0 + f * 0.26)
+	damage = float(stats["damage"]) * FOE_POWER * DAMAGE_SCALE * (1.0 + f * 0.26)
 	speed = float(stats["speed"]) * (1.0 + f * 0.03)
 	gold = int(round(float(stats["gold"]) * (1.0 + f * 0.18)))
 
@@ -669,6 +672,13 @@ func release_pose() -> void:
 ## 여섯 배를 날아가서, 같은 손에서 나온 두 기술이 아니라 아예 다른 기술로
 ## 보였습니다. 지금은 둘이 비슷하게 밀리고, 던지기가 더 나은 점은 거리가
 ## 아니라 **잡고 있는 동안 방패가 된다는 것과 메다꽂기**입니다.
+## 적이 아프게 하는 정도를 통째로 올리고 내리는 값.
+##
+## 1.5 로 올렸습니다. 그 전에는 다섯 층을 거의 안 맞고 내려갈 수 있어서,
+## 막기·구르기·패링을 만들어 두고도 **쓸 이유가 없었습니다** - 규칙이 있는데
+## 손이 안 쓰면 없는 것과 같습니다.
+const DAMAGE_SCALE := 1.5
+
 const THROW_PUSH := 1.11
 ## 던져져 밀리는 동안의 감속. 밀기(8)보다 조금 더 걸립니다.
 const THROW_BRAKE := 9.0

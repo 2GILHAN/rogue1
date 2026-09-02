@@ -141,9 +141,12 @@ const KINDS := {
 
 	# 서 있는 가구. 벽에 등을 붙입니다 - 방 한가운데 선 옷장은 가구가 아니라
 	# 기둥입니다(책장과 같은 규칙).
-	"wardrobe":  {"class": "fixed", "damage": 0.0, "stun": 0.0, "wall": true, "scale": 1.47},
-	"toyshelf":  {"class": "fixed", "damage": 0.0, "stun": 0.0, "wall": true, "scale": 1.47},
-	"kidcloset": {"class": "fixed", "damage": 0.0, "stun": 0.0, "wall": true, "scale": 1.47},
+	# **열어 볼 수 있는 가구 셋.** 사탕이거나, 아무것도 없거나, 시련입니다.
+	# 책장(`read`)은 늘 기술을 주는데 이쪽은 도박이라, 방을 도는 이유가
+	# 하나 늘어납니다.
+	"wardrobe":  {"class": "fixed", "damage": 0.0, "stun": 0.0, "wall": true, "scale": 1.47, "open": true},
+	"toyshelf":  {"class": "fixed", "damage": 0.0, "stun": 0.0, "wall": true, "scale": 1.47, "open": true},
+	"kidcloset": {"class": "fixed", "damage": 0.0, "stun": 0.0, "wall": true, "scale": 1.47, "open": true},
 	# 미끄럼틀만 방 안에 섭니다. 벽에 붙이면 타고 내려올 앞이 벽이라,
 	# 이 물건이 무엇인지가 화면에서 사라집니다.
 	"slide": {"class": "fixed", "damage": 0.0, "stun": 0.0, "scale": 1.47},
@@ -526,6 +529,15 @@ func can_read() -> bool:
 	return bool(stats.get("read", false)) and not was_read
 
 
+## 한 번 열면 다시 안 열립니다. 책장과 같은 사정입니다 - 계속 누르면 방을
+## 도는 것이 아니라 한 자리에 서 있는 것이 답이 됩니다.
+var was_opened := false
+
+
+func can_open() -> bool:
+	return bool(stats.get("open", false)) and not was_opened
+
+
 ## 캐릭터를 가릴 때 비치는 재질들. 매 프레임 두 점을 넣어 줍니다.
 var _fade_mats: Array[ShaderMaterial] = []
 
@@ -801,6 +813,8 @@ func _lure_active() -> bool:
 		return false
 	if bool(stats.get("read", false)):
 		return can_read()
+	if bool(stats.get("open", false)):
+		return can_open()
 	return true
 
 

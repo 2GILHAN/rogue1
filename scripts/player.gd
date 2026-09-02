@@ -544,12 +544,16 @@ var _struggle_show := 0.0
 var _attack_cd := 0.0
 var _swing_time := 0.0
 
-## **실험 중인 베개싸움이 거는 고리 둘.** 평소에는 `null` 과 `1.0` 이라
+## **실험 중인 베개싸움이 거는 고리 셋.** 평소에는 `null` · `1.0` · 빈 것이라
 ## 아무 일도 안 합니다 - 어린이집 탐험의 동작은 한 톨도 안 바뀝니다.
 ##
-## 걷어낼 때는 이 둘과 아래 두 자리(공격 입력 · 걸음 배율)만 지우면 됩니다.
+## 걷어낼 때는 이 셋과 아래 세 자리(공격 입력 · 걸음 배율 · 자세 층)만 지우면
+## 됩니다.
 var attack_hook: Object = null
 var ext_move_scale := 1.0
+## 밖에서 걸어 주는 상체 자세. 베개를 휘두를 때 **허리와 골반이 같이 트는**
+## 몫이 여기로 들어옵니다(팔은 IK 가 맡으므로 안 들어 있습니다).
+var ext_pose: Dictionary = {}
 ## 지금 눌러 둔 패링 판정 창. 0 보다 크면 오는 한 대를 받아 냅니다.
 var _parry_ready := 0.0
 ## 받아 내고 비켜서는 동안의 남은 시간. 0 보다 크면 조작을 안 받습니다.
@@ -1767,6 +1771,11 @@ func _drive_pose_layer(delta: float) -> void:
 		want = 1.0
 	elif _lunge_time > 0.0 and _lunge_at != null:
 		pass          # 위에서 이미 정했습니다
+	elif not ext_pose.is_empty():
+		# **베개싸움이 거는 자리.** 맞은 자세보다는 뒤, 나머지보다는 앞입니다 -
+		# 휘두르는 도중에 막기나 고함의 자세가 끼면 몸과 베개가 따로 놉니다.
+		_pose.pose = ext_pose
+		want = 1.0
 	elif _parry_air > 0.0:
 		# **받아 내는 동안이 가장 앞입니다.** 그 사이에 다른 자세가 끼면
 		# 발을 거는 그림이 통째로 안 보입니다.
@@ -1828,7 +1837,7 @@ func _drive_pose_layer(delta: float) -> void:
 		want = 1.0
 	# 맞은 자세만 훨씬 빨리 들어갑니다. 0.32초 만에 끝나는 동작이라 보통
 	# 속도(16)로 섞으면 가장 웅크린 모양이 나오기 전에 풀려 버립니다.
-	var rate := 45.0 if _hurt_time > 0.0 else 16.0
+	var rate := 45.0 if (_hurt_time > 0.0 or not ext_pose.is_empty()) else 16.0
 	_pose.weight = lerpf(_pose.weight, want, 1.0 - exp(-rate * delta))
 
 
@@ -3767,6 +3776,11 @@ func _try_dash() -> void:
 	# 끌고 있으면 못 구릅니다. 사람을 잡은 채로 앞구르기를 하면 잡은 손이
 	# 어디로 가야 할지 정할 수가 없습니다.
 	if _joy_time > 0.0 or _dash_cd > 0.0 or _carrying_enemy() or _throw_time > 0.0 or _read_time > 0.0:
+		return
+	# **베개싸움: 휘두르는 도중에는 못 구릅니다.** 되돌릴 수 없다는 것이 그
+	# 판의 규칙인데, 구르기로 후딜을 지울 수 있으면 규칙이 없어집니다.
+	# 고리가 안 걸려 있으면(탐험) 이 줄은 없는 것과 같습니다.
+	if attack_hook != null and bool(attack_hook.call("busy")):
 		return
 	var roll_cost := breath_cost("roll", BREATH_ROLL) * state.roll_cost_mult()
 	if not _has_breath(roll_cost):
