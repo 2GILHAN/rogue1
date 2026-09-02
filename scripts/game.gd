@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.51"
+const VERSION := "v0.52"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2310,6 +2310,57 @@ func _drive_pose() -> void:
 				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
 				_foe_n += 1
+		"buttons":
+			# **한 버튼이 둘로 갈리는가.** 공격 버튼은 이동 입력으로 밀기와
+			# 고함을 가릅니다 - 눌러 보기 전에 무엇이 나올지 알 수 있어야
+			# 하므로, 갈리는 자리가 확실한지 잽니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = true
+				player.bot_move = Vector2.ZERO
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("grunt", 1, dungeon, player)
+				e.speed = 0.0
+				e.max_hp = 9999.0
+				e.hp = e.max_hp
+				e.global_position = player.global_position + Vector3(0, 0, -2.0)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+			# ① 제자리에서 공격 → 고함
+			if _frames == 40:
+				player.bot_move = Vector2.ZERO
+				player.grab_press()
+			if _frames == 42:
+				print("[버튼] 제자리 공격: 고함=%s  달려듦=%s  숨 %.0f" % [
+					str(player._swing_time > 0.0),
+					str(player._push_time > 0.0 or player._lunge_time > 0.0),
+					state.breath])
+			# ② 방향을 준 채 공격 → 밀기
+			if _frames == 80:
+				state.breath = state.max_breath
+				player.bot_move = Vector2(0, -1)
+				player.grab_press()
+			if _frames == 82:
+				print("[버튼] 방향 공격: 고함=%s  달려듦=%s  숨 %.0f" % [
+					str(player._swing_time > 0.0),
+					str(player._push_time > 0.0 or player._lunge_time > 0.0),
+					state.breath])
+			# ③ 막기 → 판정 창만 열리고 공격은 안 나감
+			if _frames == 140:
+				state.breath = state.max_breath
+				player.bot_move = Vector2.ZERO
+				player.attack()
+			if _frames == 142:
+				print("[버튼] 막기: 판정창 %.2f초  고함=%s  숨 %.0f  대기 %.2f" % [
+					player._parry_ready, str(player._swing_time > 0.0),
+					state.breath, player._parry_cd])
+			# ④ 대기가 도는 동안에는 다시 안 열림
+			if _frames == 150:
+				player.attack()
+			if _frames == 152:
+				print("[버튼] 대기 중 다시 막기: 판정창 %.2f초 (안 열려야 맞음)" % [
+					player._parry_ready])
 		"parry":
 			# **패링 한 바퀴.** 받아 내는지, 시간이 느려지는지, 머리를 밟는지,
 			# 원래 자리보다 뒤에 내려서는지를 봅니다. 후속 누름은 없습니다 -
@@ -4785,12 +4836,23 @@ func _bot_think(delta: float) -> void:
 			elif _frames % 300 == 120:
 				player.grab_press()          # 두 번째 누름 = 던지기
 			return
-		# 소리와 잡기를 번갈아 씁니다. 한 가지만 쓰면 나머지 경로가 검사되지
-		# 않습니다 - 소품 집기·던지기가 여기서만 지나갑니다.
-		player.attack()
-		# 붙어 있고 든 것이 없을 때 누르면 밀기입니다.
+		# **네 길을 번갈아 지나갑니다.** 한 가지만 쓰면 나머지가 소크에서
+		# 통째로 안 검사됩니다.
+		#
+		# 공격 버튼은 **이동 입력으로 갈립니다**(제자리=고함, 방향=밀기).
+		# 봇도 사람과 같은 길을 지나가야 하므로, 고함을 쓸 때는 `bot_move`
+		# 를 실제로 0 으로 두고 누릅니다 - 함수를 직접 부르면 갈리는 그
+		# 자리가 검사되지 않습니다.
+		if _frames % 120 < 30:
+			player.bot_move = Vector2.ZERO
+			if _frames % 120 == 0:
+				player.grab_press()          # 제자리 = 고함
+			return
+		if _frames % 120 == 60:
+			player.attack()                  # 막기
+			return
 		if _frames % 90 == 0:
-			player.grab_press()
+			player.grab_press()              # 방향을 준 채 = 밀기
 		return
 
 	# 지나가다 소품을 집고, 잠시 뒤 방향을 준 채 다시 누릅니다 = 던지기.

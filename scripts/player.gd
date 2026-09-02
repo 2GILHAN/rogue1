@@ -24,6 +24,10 @@ const GRAVITY := 22.0
 
 ## 받아 낸 순간 세상이 느려지는 배속과, 그 시간(**실제 시간**입니다 - 느린
 ## 시간으로 재면 배속을 바꿀 때마다 길이가 같이 흔들립니다).
+## 막기를 연달아 누르지 못하게 하는 대기. **숨은 안 씁니다** - 숨으로 막으면
+## 숨이 빈 순간 방어가 통째로 사라져서, 가장 위험할 때 가장 못 막습니다.
+## 대기로 막으면 「연타로 뭉개기」만 막힙니다.
+const PARRY_COOLDOWN := 0.50
 const PARRY_SLOW := 0.34
 const PARRY_SLOW_TIME := 0.42
 ## 상대 **머리 위** 어디까지 솟구치는가. 머리끝에서 이만큼 더 올라갑니다.
@@ -473,6 +477,7 @@ var _parry_to := Vector3.ZERO
 var _parry_from := Vector3.ZERO
 ## 느려진 시간이 끝나는 **실제** 시각(ms).
 var _parry_slow_until := 0
+var _parry_cd := 0.0
 ## 구르고 나온 직후의 질주가 남은 시간(「이속」 Lv2).
 var _roll_burst := 0.0
 ## 지난 프레임에 구르는 중이었나. 끝나는 **그 프레임**을 잡으려는 값입니다.
@@ -616,6 +621,7 @@ func _physics_process(delta: float) -> void:
 	_grab_cd = maxf(0.0, _grab_cd - delta)
 	_invuln = maxf(0.0, _invuln - delta)
 	_parry_ready = maxf(0.0, _parry_ready - delta)
+	_parry_cd = maxf(0.0, _parry_cd - delta)
 	_tick_parry(delta)
 	state.elapsed += delta
 
@@ -1721,9 +1727,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _dead:
 		return
 	if event.is_action_pressed("attack"):
-		_begin_shout()
-	elif event.is_action_released("attack"):
-		shout_release()
+		# 이 액션 이름은 그대로 두었습니다(좌클릭 / J). **하는 일이
+		# 막기로 바뀐 것**이라, 액션 이름까지 고치면 키 설정이 통째로
+		# 어긋납니다.
+		parry_press()
 	elif event.is_action_pressed("dash"):
 		_try_dash()
 	elif event.is_action_pressed("grab"):
@@ -1733,9 +1740,27 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func attack() -> void:
-	## 한 번 지릅니다. 누르는 것과 **같습니다** - 모으기가 없어져서 누르기와
-	## 떼기가 갈릴 일이 없습니다.
-	_begin_shout()
+	## **막기입니다.** 예전에는 이 자리가 고함이었는데, 고함이 공격 버튼으로
+	## 넘어가면서 이 버튼이 비었습니다.
+	parry_press()
+
+
+func parry_press() -> void:
+	## 판정 창을 엽니다. 이 안에 맞으면 그 한 대를 받아 냅니다.
+	##
+	## **공격은 안 나갑니다.** 순수한 방어입니다 - 누르면 뭐라도 나가는
+	## 기술이면 계속 누르는 것이 답이 되어, 타이밍을 맞출 이유가 없습니다.
+	if _dead or _parry_air > 0.0 or _parry_cd > 0.0:
+		return
+	if _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
+		return
+	_parry_cd = PARRY_COOLDOWN
+	_parry_ready = state.parry_window
+	# **연 것이 보여야 합니다.** 판정 창은 0.16~0.34초라, 아무 표시도 없으면
+	# 눌렀는지 안 눌렀는지조차 모릅니다.
+	Sfx.play_at(Sfx.PICK, 0.8, -8.0)
+	Fx.ring(get_parent(), global_position, Color(0.62, 0.80, 1.0, 0.5),
+		1.05, state.parry_window)
 
 
 func shout_press() -> void:
@@ -1955,6 +1980,21 @@ func grab_press() -> void:
 		# **받아 내고 도는 동안에는 아무것도 안 받습니다.**
 		return
 	if _mash():
+		return
+	# **제자리에서 누르면 고함입니다.**
+	#
+	# 밀기와 고함을 한 버튼에 묶었습니다. 둘은 사거리가 2.6 대 2.7 로 거의
+	# 같아서 **상황만으로는 못 가릅니다** - 같은 자리에서 둘 다 쓸 수 있으니
+	# 사람이 골라야 하는데, 숨겨 놓고 알아서 고르면 눌러 보기 전에는 무엇이
+	# 나올지 모릅니다. 그건 규칙이 아니라 운입니다.
+	#
+	# 이미 주고 있는 **이동 입력**으로 가릅니다. 두 기술의 성격이 그대로입니다:
+	# 밀기는 **가는** 기술이고 고함은 **여기를 쓰는** 기술입니다.
+	#
+	# 손에 든 것이 있으면 방향과 상관없이 던집니다 - 던지기는 「누르는 동작
+	# 하나」로 통일해 둔 자리라, 여기서 다시 가르면 그 규칙이 깨집니다.
+	if _held == null and _move_input().length_squared() < 0.04:
+		_begin_shout()
 		return
 	if ultimate_press("grab"):
 		return
@@ -3163,8 +3203,6 @@ func _try_attack() -> void:
 	_swing_time = SWING_TIME
 	_shout_hold = SHOUT_POSE_TIME
 	_swing_hit = false
-	# **누른 순간 패링 창이 열립니다.** 이 안에 맞으면 그 한 대를 받아 냅니다.
-	_parry_ready = state.parry_window
 	_show_swing()
 	# 고함 계통 Lv3 부터 **파란 구슬**이 함께 퍼집니다(Lv5 는 더 크게).
 	# 파문(고리)은 사거리를 가르치는 그림이라 그대로 두고, 그 위에 얹습니다.

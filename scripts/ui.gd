@@ -288,8 +288,8 @@ func _build_hud() -> void:
 	# 폰에서는 키 안내가 거짓말입니다. 조작 방법이 화면에 이미 그려져 있으니
 	# 대신 자동 조준을 알려 줍니다 - 안 알려 주면 "왜 조준이 안 되지" 가 됩니다.
 	var hint := UiTheme.label(
-		"왼쪽을 끌어 이동   고함으로 앞을 쓸고   풀장·책장 앞에서는 밀기로 말을 겁니다" if TouchControls.wanted()
-		else "이동 WASD   고함 좌클릭   밀기(잡기) F   구르기 Space   도움말 F1",
+		"왼쪽을 끌어 이동   제자리에서 공격하면 고함   맞기 직전에 막기" if TouchControls.wanted()
+		else "이동 WASD   공격 F   막기 좌클릭   구르기 Space   도움말 F1",
 		14, UiTheme.DIM)
 	hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1315,7 +1315,7 @@ func show_title() -> void:
 		+ "죽으면 처음부터입니다 - 대신 매번 다른 던전, 다른 축복을 만납니다.")
 	_sub("왼쪽 아래를 끌어 이동 · 밀기(잡기)는 앞이면 밀고 등 뒤면 잡습니다"
 		if TouchControls.wanted()
-		else "이동 WASD · 조준 마우스 · 고함 좌클릭 · 밀기(잡기) F · 구르기 Space(무적) · 일시정지 Esc",
+		else "이동 WASD · 조준 마우스 · 공격 F(제자리면 고함) · 막기 좌클릭 · 구르기 Space(무적) · 일시정지 Esc",
 		UiTheme.TEXT)
 	_sub("캐릭터 세 종류는 test3 카탈로그가 원화 한 장씩에서 만든 것을 그대로 씁니다.")
 	# **세로로 놓습니다.** 가로로 늘어놓으면 버튼이 늘어날 때마다 화면 밖으로
