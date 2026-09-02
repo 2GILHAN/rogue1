@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.57.1"
+const VERSION := "v0.58"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2785,17 +2785,17 @@ func _drive_pose() -> void:
 			if _frames == 46 and is_instance_valid(_probe_foe):
 				player.take_damage(20.0, _probe_foe.global_position, 8.0)
 			if _frames == 48:
-				print("[패링] 받아 냄: 체력 %.0f/%.0f  숨 %.0f/%.0f  배속 %.2f" % [
+				print("[패링] 받아 냄: 체력 %.0f/%.0f  숨 %.0f/%.0f  배속 %.2f(1.00 이어야 맞음)" % [
 					state.hp, state.max_hp, state.breath, state.max_breath,
 					Engine.time_scale])
-			# 느린 시간이라 프레임으로는 길게 걸립니다.
-			if _frames in [70, 110, 160] and is_instance_valid(_probe_foe):
+			# 0.42초 = 25프레임입니다(늦추기를 뺐으므로 실제 시간 그대로).
+			if _frames in [52, 60, 68] and is_instance_valid(_probe_foe):
 				print("[패링] f=%3d  옆으로 %.2fm  높이 %+.2fm  적 체력 %.0f  적 빠르기 %.2fm/s" % [
 					_frames, _wedge_from.distance_to(player.global_position),
 					player.global_position.y - _wedge_from.y,
 					_probe_foe.hp,
 					Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()])
-			if _frames == 220 and is_instance_valid(_probe_foe):
+			if _frames == 120 and is_instance_valid(_probe_foe):
 				print("[패링] 끝: 옆으로 %.2fm(비키는 거리 %.2f)  높이 %+.2fm  배속 %.2f  적이 받은 피해 %.0f" % [
 					_wedge_from.distance_to(player.global_position), Player.PARRY_STEP,
 					player.global_position.y - _wedge_from.y, Engine.time_scale,
@@ -5041,14 +5041,12 @@ func _process(delta: float) -> void:
 			if String(_shop_items[i]["id"]) == "heal":
 				_on_shop_bought(i)
 				break
-	# **멈춘 동안 배속이 묶이면 안 됩니다.**
+	# **배속을 건드리는 것이 하나도 없습니다.**
 	#
-	# 패링이 세상을 0.34 배로 늦춰 놓는데, 그 사이에 창이 뜨면(스킬 고르기·
-	# 물물교환·일시정지) 주인공이 안 돌아서 되돌릴 사람이 없어집니다 - 창을
-	# 닫고 나면 판 전체가 영영 느린 채로 굴러갑니다. Game 은 멈춰도 도는
-	# 노드라(PROCESS_MODE_ALWAYS) 여기서 지킵니다.
-	if phase != Phase.PLAYING and not is_equal_approx(Engine.time_scale, 1.0):
-		Engine.time_scale = 1.0
+	# 패링이 세상을 0.34 배로 늦추던 시절에는 여기서 지켜야 했습니다 - 늦춰
+	# 놓은 사이에 창이 뜨면 주인공이 안 돌아 되돌릴 사람이 없어지고, 판
+	# 전체가 영영 느린 채로 굴러갔습니다. 늦추기를 뺐으니 이 지킴이도
+	# 뺍니다. **없는 규칙을 지키는 코드는 다음 사람에게 거짓말입니다.**
 	if _pose == "buyfx" and _frames >= 39 and _frames <= 100 and _frames % 6 == 0:
 		print("[교환효과] f=%d  막대=%.1f  글=%s  올림=%d" % [
 			_frames, ui.probe_hp_bar(), ui.probe_hp_text(), ui.probe_lift()])

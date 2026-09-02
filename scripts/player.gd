@@ -55,8 +55,6 @@ const GUARD_LEAK := 0.30
 ## **앞쪽 이만큼만 막습니다.** 뒤는 그대로 맞습니다 - 등을 조심할 이유가
 ## 없어지면 막기가 자세가 아니라 스위치가 됩니다(베개 아이와 같은 규칙).
 const GUARD_ARC := 180.0
-const PARRY_SLOW := 0.34
-const PARRY_SLOW_TIME := 0.42
 ## **비켜서며 다리를 겁니다.**
 ##
 ## 예전에는 상대 머리 위로 솟구쳐 밟고 공중재비를 돌았습니다. 한 대 받아
@@ -511,7 +509,6 @@ var _parry_to := Vector3.ZERO
 ## 뛰어오르기 전 자리. 앞발로 차면 여기보다 조금 **뒤로** 내려섭니다.
 var _parry_from := Vector3.ZERO
 ## 느려진 시간이 끝나는 **실제** 시각(ms).
-var _parry_slow_until := 0
 var _parry_cd := 0.0
 ## 막는 자세가 남는 시간. 판정 창(0.16~0.34초)보다 조금 길게 둡니다 - 창과
 ## 똑같이 두면 자세가 들어가기도 전에 풀려서, 눌렀는데 아무 그림도 안 납니다.
@@ -4042,7 +4039,6 @@ func _begin_parry(foe: Node3D) -> void:
 	_parry_to = _parry_from + side * PARRY_STEP
 	_parry_to.y = _parry_from.y
 
-	_slow_world()
 	Sfx.play(Sfx.GRAB, -2.0, 0.0)
 	Sfx.play_at(Sfx.PICK, 1.4, -3.0)
 	Game.shake(0.18, 0.12)
@@ -4051,26 +4047,13 @@ func _begin_parry(foe: Node3D) -> void:
 	parried.emit()
 
 
-func _slow_world() -> void:
-	## **살짝 느려집니다.** 받아 낸 것이 눈에 보이려면 그 순간이 늘어나야
-	## 합니다 - 멈추면(필살기처럼) 다른 기술이 되고, 안 늘리면 아무 일도
-	## 없었던 것처럼 지나갑니다.
-	##
-	## 길이는 **실제 시간**으로 잽니다. 느려진 시간으로 재면 배속을 바꿀
-	## 때마다 길이가 같이 흔들려서, 0.42 초가 0.42 초가 아니게 됩니다.
-	Engine.time_scale = PARRY_SLOW
-	_parry_slow_until = Time.get_ticks_msec() + int(PARRY_SLOW_TIME * 1000.0)
-
-
-func _restore_time() -> void:
-	Engine.time_scale = 1.0
-	_parry_slow_until = 0
-
-
 func _tick_parry(delta: float) -> void:
-	## 느려진 시간을 되돌리고, 비켜서며 발을 거는 한 동작을 굴립니다.
-	if _parry_slow_until > 0 and Time.get_ticks_msec() >= _parry_slow_until:
-		_restore_time()
+	## 비켜서며 발을 거는 한 동작을 굴립니다.
+	##
+	## **세상을 늦추지 않습니다.** 받아 낼 때마다 0.34배로 0.42초를 늦춰
+	## 봤는데, 동작이 작아지고 나니 그 늦춤이 동작보다 크게 느껴졌습니다 -
+	## 손에 붙는 기술일수록 자주 나오고, 자주 나오는 것이 매번 판을 끊으면
+	## 그건 상이 아니라 방해입니다.
 	if _parry_air <= 0.0:
 		return
 	_parry_air -= delta
@@ -4125,7 +4108,6 @@ func _end_parry() -> void:
 	## 비켜선 자리에 섭니다.
 	_parry_air = 0.0
 	_parry_foe = null
-	_restore_time()
 	global_position = _parry_to
 	velocity = Vector3.ZERO
 	if pivot != null:
