@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.64"
+const VERSION := "v0.65"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2282,6 +2282,90 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"alloc":
+			# **판을 하는 동안 재질과 메시를 몇 벌이나 새로 짓는가.**
+			#
+			# 처음 그리는 한 번이 비싸다는 것은 `Fx.warm_up` 주석이 이미
+			# 적어 둔 것입니다. 그런데 그 함수는 고함 선만 데웁니다. 예고
+			# 부채꼴·띠·원은 적마다 처음 쓸 때 짓습니다 - 몇 번인지 셉니다.
+			if _frames % 900 == 0 and _frames > 0:
+				print("[짓기] f=%5d  예고재질 %3d벌  부채꼴 %3d개  띠 %3d개  적 %d  층 %d" % [
+					_frames, Fx.n_fan_mat, Fx.n_fan_mesh, Fx.n_lane_mesh,
+					get_tree().get_nodes_in_group("enemies").size(), state.floor_num])
+		"firsthit":
+			# **적이 처음 공격할 때 값을 치르는가.**
+			#
+			# 폰 기록의 나쁜 프레임은 "나머지"(엔진)가 100ms 넘는데 콜은 41~78,
+			# 자원은 0 이었습니다. 양이 아니라 **한 번 멈추는** 것입니다.
+			# 예고 메시 넷은 적마다 **처음 쓸 때** 만들어지고, 그때 재질과
+			# 메시를 새로 짓습니다(`Fx.fan_material` · `fan_mesh` 는 캐시가
+			# 없습니다). 그 첫 번째와 두 번째를 나란히 잽니다.
+			if _frames == 20 and is_instance_valid(player):
+				for n in get_tree().get_nodes_in_group("enemies"):
+					(n as Node3D).queue_free()
+				_alive = 0
+			if _frames == 40:
+				for kind in ["grunt", "brute", "screamer", "pillow"]:
+					var e := Enemy.new()
+					world.add_child(e)
+					e.setup(kind, state.floor_num, dungeon, player)
+					e.speed = 0.0
+					e.global_position = player.global_position + Vector3(2.0, 0, 0)
+					e.add_to_group("enemies")
+					# 같은 함수를 두 번 부릅니다. 첫 번째는 짓고, 두 번째는
+					# 이미 있는 것을 고쳐 씁니다.
+					var names := ["_show_melee_fan", "_show_charge_lane",
+						"_show_shout_fan", "_show_slam_disc"]
+					for fn in names:
+						if not e.has_method(fn):
+							continue
+						# 그 적이 안 쓰는 예고는 건너뜁니다 - 부르면 없는 값을
+						# 읽어 오류가 나고, 그 오류 처리 값이 잰 값에 섞입니다.
+						if fn == "_show_charge_lane" and not e.stats.has("charge_dist"):
+							continue
+						var t0 := Time.get_ticks_usec()
+						e.call(fn)
+						var t1 := Time.get_ticks_usec()
+						e.call(fn)
+						var t2 := Time.get_ticks_usec()
+						print("[첫공격] %-9s %-18s 처음 %6.3fms  두번째 %6.3fms" % [
+							kind, fn, (t1 - t0) / 1000.0, (t2 - t1) / 1000.0])
+			if _frames == 90:
+				get_tree().quit()
+		"army":
+			# **부대 규모가 되면 얼마나 무거운가.** `foecost` 는 여덟까지만
+			# 재고 적을 세워 뒀습니다. 전략물·타워디펜스는 **수십이 동시에
+			# 걷고 길을 찾는** 것이라 그 값이 따로입니다.
+			#
+			# 여덟씩 늘리며 잽니다. 적은 **속도를 그대로 두어** 길찾기와
+			# 걸음이 실제로 돌게 합니다 - 서 있으면 그리기값만 나옵니다.
+			if _frames == 20 and is_instance_valid(player):
+				for n in get_tree().get_nodes_in_group("enemies"):
+					(n as Node3D).queue_free()
+				for n in get_tree().get_nodes_in_group("props"):
+					(n as Node3D).queue_free()
+				_alive = 0
+			if _frames >= 60 and _frames <= 500 and (_frames - 60) % 60 == 0:
+				var k := int(get_tree().get_nodes_in_group("enemies").size())
+				if k > 0:
+					print("[부대] %2d마리  스크립트 %5.2fms  물리 %5.2fms  콜 %3d  삼각형 %.0f천  노드 %d" % [
+						k,
+						Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+						Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+						Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+						Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0,
+						Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
+				for i in 8:
+					var e := Enemy.new()
+					world.add_child(e)
+					e.setup("grunt", state.floor_num, dungeon, player)
+					var ang := TAU * float(k + i) / 12.0
+					var rad := 3.0 + 0.9 * float((k + i) / 12)
+					e.global_position = player.global_position + Vector3(
+						cos(ang) * rad, 0, sin(ang) * rad)
+					e.add_to_group("enemies")
+			if _frames == 520:
+				get_tree().quit()
 		"foecost":
 			# **적이 몇이면 얼마나 무거운가.** 하나씩 늘려 가며 잽니다.
 			#

@@ -191,6 +191,21 @@ static func warm_up(parent: Node3D) -> void:
 	drive_shout_rays(warm, Vector3(0, -40, 0), Vector3.FORWARD, 1.0, 1.0, 60.0, 1.0, 0.0)
 	warm.create_tween().tween_callback(warm.queue_free).set_delay(0.1)
 
+	# **바닥 예고도 같이 데웁니다.** 적의 예고(부채꼴·띠·원)와 주인공의 고함
+	# 미리보기가 전부 `fan_material` 을 씁니다 - 색만 저마다 다르고 셰이더
+	# 변형은 하나이므로, 여기서 한 번 그려 두면 그 값을 층 만들 때 치릅니다.
+	#
+	# 이것이 없으면 첫 예고가 뜨는 프레임에 값이 옵니다. 폰 기록에서
+	# "스크립트 3~5ms 인데 나머지가 100ms" 였던 그 자리입니다.
+	var fan := MeshInstance3D.new()
+	fan.mesh = fan_mesh(1.0, 90.0)
+	fan.material_override = fan_material()
+	fan.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	fan.set_meta("flat", true)
+	fan.position = Vector3(0, -40, 0)
+	parent.add_child(fan)
+	fan.create_tween().tween_callback(fan.queue_free).set_delay(0.1)
+
 
 static func arm_streak(parent: Node3D, hands: Vector3, dir: Vector3,
 		strong: bool = false) -> void:
@@ -819,6 +834,10 @@ static func lane_mesh(length: float, width: float) -> ArrayMesh:
 	##
 	## 부채꼴(`fan_mesh`)과 같은 규약입니다 - 앞은 -Z 이고, 부르는 쪽에서
 	## yaw 만 맞추면 됩니다. 시작은 원점(적의 발밑)입니다.
+	var key := "l%.2f_%.2f" % [length, width]
+	if Fx._shape_cache.has(key):
+		return Fx._shape_cache[key]
+	Fx.n_lane_mesh += 1
 	var hw := width * 0.5
 	var verts := PackedVector3Array([
 		Vector3(-hw, 0.0, 0.0), Vector3(hw, 0.0, 0.0),
@@ -831,6 +850,7 @@ static func lane_mesh(length: float, width: float) -> ArrayMesh:
 	arrays[Mesh.ARRAY_INDEX] = idx
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	Fx._shape_cache[key] = mesh
 	return mesh
 
 
@@ -842,6 +862,10 @@ static func fan_mesh(radius: float, arc_deg: float, steps: int = 20) -> ArrayMes
 	## 안쪽이 전부 판정 범위입니다. 칠하면 그 오해가 없습니다.
 	##
 	## 앞은 -Z 입니다(Godot 관습). 부르는 쪽에서 yaw 만 맞추면 됩니다.
+	var key := "f%.2f_%.2f_%d" % [radius, arc_deg, steps]
+	if Fx._shape_cache.has(key):
+		return Fx._shape_cache[key]
+	Fx.n_fan_mesh += 1
 	var half := deg_to_rad(arc_deg) * 0.5
 	var verts := PackedVector3Array()
 	verts.append(Vector3.ZERO)
@@ -859,7 +883,31 @@ static func fan_mesh(radius: float, arc_deg: float, steps: int = 20) -> ArrayMes
 	arrays[Mesh.ARRAY_INDEX] = idx
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	Fx._shape_cache[key] = mesh
 	return mesh
+
+
+static var n_fan_mat := 0
+static var n_fan_mesh := 0
+static var n_lane_mesh := 0
+
+## 바닥에 칠하는 부채꼴·띠를 **모양마다 한 벌씩만** 만들어 둡니다.
+##
+## # 왜
+##
+## 예고는 부를 때마다 `ArrayMesh` 를 새로 지었습니다. 한 층에 108 개입니다
+## (`--pose=alloc` 으로 셌습니다). 데스크톱에서는 공짜지만, 메시를 새로 지으면
+## 그것을 **처음 그리는 프레임**에 드라이버가 정점 버퍼를 올립니다 - 폰 기록의
+## 나쁜 프레임이 "스크립트는 3~5ms 인데 나머지가 100ms" 였던 그 자리입니다.
+##
+## 모양을 정하는 것은 적의 종류뿐입니다(사거리·각도). 같은 종류가 같은 모양을
+## 쓰므로, 값으로 열쇠를 만들면 108 개가 여섯 벌로 줄어듭니다.
+##
+## # 나눠 쓰면 안전한가
+##
+## 예고는 메시를 **읽기만** 합니다 - 커지는 것은 `scale` 로, 놓이는 자리는
+## `position` 으로 합니다. 메시 자체를 고치는 곳은 없습니다.
+static var _shape_cache: Dictionary = {}
 
 
 static func fan_material() -> StandardMaterial3D:
@@ -868,6 +916,7 @@ static func fan_material() -> StandardMaterial3D:
 	## 깊이를 쓰면(depth_draw) 바닥과 다투어 지지직거리고, 양면이 아니면
 	## 감는 방향을 틀렸을 때 통째로 안 보입니다 - 납작한 판에 감는 방향을
 	## 맞추느라 시간을 쓸 이유가 없습니다.
+	Fx.n_fan_mat += 1
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
