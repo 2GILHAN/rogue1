@@ -708,6 +708,13 @@ func _physics_process(delta: float) -> void:
 	_dash_cd = maxf(0.0, _dash_cd - delta)
 	_grab_cd = maxf(0.0, _grab_cd - delta)
 	_invuln = maxf(0.0, _invuln - delta)
+	# **놓았으면 되돌립니다.** `_held` 가 그 아이가 아니게 된 순간이 곧
+	# 놓은 순간입니다 - 어느 갈래로 놓였든(던졌든 맞았든 죽었든) 여기를
+	# 지나갑니다.
+	if _pass_with != null and _held != _pass_with:
+		if is_instance_valid(_pass_with):
+			remove_collision_exception_with(_pass_with)
+		_pass_with = null
 	_parry_ready = maxf(0.0, _parry_ready - delta)
 	_parry_cd = maxf(0.0, _parry_cd - delta)
 	if guarding():
@@ -2659,9 +2666,37 @@ func _take(target: Node3D) -> void:
 	elif target is Enemy:
 		target.hold(self)
 		_held = target
+		_hold_pass(target, true)
 	if _held != null:
 		Fx.popup_text(get_parent(), global_position + Vector3(0, 1.5, 0),
 			"잡았다", Color(1.0, 0.85, 0.5))
+
+
+## 지금 서로 통과하기로 해 둔 아이. **되돌리는 곳을 한 군데로** 두려고
+## 들고 있습니다 - `_held` 를 지우는 곳이 여덟 군데라, 거기마다 되돌리면
+## 반드시 한 곳을 빠뜨립니다(그러면 놓은 뒤에도 영영 통과합니다).
+var _pass_with: Node3D = null
+
+
+func _hold_pass(who: Node3D, on: bool) -> void:
+	## **잡은 그 아이하고만 서로 통과합니다.**
+	##
+	## 잡힌 아이는 매 프레임 손 자리로 끌려옵니다(`Enemy.hold_at`). 그런데
+	## 주인공의 충돌 마스크에 적 층이 들어 있어서, 끌려온 몸이 주인공과
+	## 겹치면 물리가 그 겹침을 **밀어내며 풉니다** - 매 프레임 밀리니 속도가
+	## 쌓이고, 크고 무거운 아이(베개)일수록 겹침이 깊어 더 세게 튕깁니다.
+	## 그렇게 빨라진 몸은 벽도 지나갑니다.
+	##
+	## 층을 통째로 끄면 안 됩니다 - 잡은 동안에도 **다른 적**과는 부딪혀야
+	## 합니다. 그 하나만 예외로 뺍니다.
+	if not is_instance_valid(who) or not (who is CollisionObject3D):
+		return
+	if on:
+		_pass_with = who
+		add_collision_exception_with(who)
+	else:
+		_pass_with = null
+		remove_collision_exception_with(who)
 
 
 func _begin_drink(prop: Prop) -> void:

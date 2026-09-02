@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.61"
+const VERSION := "v0.62"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2889,6 +2889,95 @@ func _drive_pose() -> void:
 						_probe_foe._windup, d.scale.x,
 						_probe_foe._slam_radius(float(_probe_foe.stats["range"]) + 0.4) * d.scale.x,
 						(d.material_override as StandardMaterial3D).albedo_color.a])
+		"carryspeed":
+			# **무거운 아이를 잡고 걸을 때 빨라지는가.**
+			#
+			# 잡힌 아이는 매 프레임 손 자리로 끌려오는데(`Enemy.hold_at`),
+			# 주인공의 충돌 마스크에 적 층이 있어서 그 겹침을 물리가 밀어내며
+			# 풉니다 - 매 프레임 밀리니 속도가 쌓이고, 크고 무거운 아이일수록
+			# 겹침이 깊어 더 세게 튕깁니다. 그렇게 빨라진 몸은 벽도 지나갑니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = true
+				player.bot_move = Vector2.ZERO
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("pillow", 3, dungeon, player)
+				e.speed = 0.0
+				e.max_hp = 9999.0
+				e.hp = e.max_hp
+				e.global_position = player.global_position + Vector3(0, 0, -1.0)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+			# **등 뒤에서 잡습니다.** 무거운 아이는 앞에서는 안 잡힙니다.
+			if _frames == 40 and is_instance_valid(_probe_foe):
+				player._take(_probe_foe)
+				print("[끌기] 잡았나=%s  걸음 한도 %.2fm/s" % [
+					str(player._held == _probe_foe), state.move_speed])
+			# 잡은 채로 걷습니다. 빨라지면 여기서 잡힙니다.
+			# **첫 표본의 기준을 여기서 잡습니다.** 안 잡으면 지난 프로브가
+			# 남긴 자리와 견주어 1000m/s 가 나옵니다.
+			if _frames == 44:
+				_wedge_from = player.global_position
+				_probe_t1 = 0.0
+			if _frames > 45 and _frames < 240:
+				player.bot_move = Vector2(1, 0)
+				# **`velocity` 는 「가려는」 속도**라 물리가 밀어낸 것이 안
+				# 잡힙니다. 실제로 간 거리를 봐야 합니다 - 처음에 velocity
+				# 만 재고 "안 빨라진다" 로 읽을 뻔했습니다.
+				var moved := Vector2(
+					player.global_position.x - _wedge_from.x,
+					player.global_position.z - _wedge_from.z).length()
+				_probe_t1 = maxf(_probe_t1, moved * 60.0)
+				_wedge_from = player.global_position
+			if _frames in [120, 240]:
+				var cc := dungeon.world_to_cell(player.global_position)
+				print("[끌기] f=%d  가장 빨랐던 속도 %.2fm/s (걸음 %.2f)  방 안=%s" % [
+					_frames, _probe_t1, state.move_speed,
+					str(not dungeon.is_solid(cc.x, cc.y))])
+		"ghostcost":
+			# **떠 있는 잔상이 매 프레임 얼마를 먹나.**
+			#
+			# 폰 기록(v0.61)에서 스크립트 시간이 66~70ms 로 **여러 프레임에
+			# 걸쳐 똑같이** 나왔고, 그 프레임들의 노드 수가 바탕(481)보다
+			# 35~78 개 많았습니다. 잔상 한 장이 노드 7 개이니 5~11 장이
+			# 떠 있었다는 뜻입니다.
+			#
+			# 만드는 값(0.89ms)은 이미 쟀습니다. 여기서 보는 것은 **만든 뒤
+			# 떠 있는 동안**의 값입니다 - 잔상은 뼈대를 그대로 들고 있어서,
+			# 아무것도 안 해도 뼈가 매 프레임 갱신될 수 있습니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				for n in get_tree().get_nodes_in_group("props"):
+					(n as Node3D).queue_free()
+			# 바탕값. **판이 가라앉은 뒤**에 잽니다 - 41프레임부터 재면
+			# 시작할 때의 값이 섞여 바탕이 부풀고(3.91ms), 그러면 잔상을
+			# 얹은 쪽이 오히려 싸 보입니다.
+			if _frames > 88 and _frames <= 100:
+				_foe_sum += Performance.get_monitor(Performance.TIME_PROCESS)
+				_foe_n += 1
+			if _frames == 101:
+				print("[잔상값] 잔상 0장: 스크립트 %.2fms  노드 %d" % [
+					_foe_sum / maxf(float(_foe_n), 1.0) * 1000.0,
+					Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
+				_foe_sum = 0.0
+				_foe_n = 0
+				# **오래 남는 잔상을 열 장 만듭니다.** 수명이 짧으면(0.30초)
+				# 재는 동안 사라져서 무엇을 쟀는지 알 수 없습니다.
+				for i in 10:
+					player._afterimage(false)
+				for g in get_tree().get_nodes_in_group("_"):
+					pass
+			# **잔상의 수명은 0.30초(18프레임)**입니다. 107~120 에서 쟀더니
+			# 이미 다 사라진 뒤라 노드가 378 에서 379 로만 늘었습니다 -
+			# 아무것도 안 잰 셈이었습니다. 만든 직후 안에서 재야 합니다.
+			if _frames > 102 and _frames <= 114:
+				_foe_sum += Performance.get_monitor(Performance.TIME_PROCESS)
+				_foe_n += 1
+			if _frames == 115:
+				print("[잔상값] 잔상 열 장 떠 있을 때: 스크립트 %.2fms  노드 %d" % [
+					_foe_sum / maxf(float(_foe_n), 1.0) * 1000.0,
+					Performance.get_monitor(Performance.OBJECT_NODE_COUNT)])
 		"pushcost":
 			# **밀기 이펙트가 무거운가.** 계통 Lv 를 바꿔 가며 같은 밀기를
 			# 반복하고, 그 사이의 값을 평균 냅니다.
