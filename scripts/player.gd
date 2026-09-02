@@ -543,6 +543,13 @@ var _bound_by: Node3D = null
 var _struggle_show := 0.0
 var _attack_cd := 0.0
 var _swing_time := 0.0
+
+## **실험 중인 베개싸움이 거는 고리 둘.** 평소에는 `null` 과 `1.0` 이라
+## 아무 일도 안 합니다 - 어린이집 탐험의 동작은 한 톨도 안 바뀝니다.
+##
+## 걷어낼 때는 이 둘과 아래 두 자리(공격 입력 · 걸음 배율)만 지우면 됩니다.
+var attack_hook: Object = null
+var ext_move_scale := 1.0
 ## 지금 눌러 둔 패링 판정 창. 0 보다 크면 오는 한 대를 받아 냅니다.
 var _parry_ready := 0.0
 ## 받아 내고 비켜서는 동안의 남은 시간. 0 보다 크면 조작을 안 받습니다.
@@ -927,6 +934,8 @@ func _ground_move(delta: float) -> void:
 	# **막고 있으면 느립니다.** 막은 채로 평소처럼 걸으면 켜 두는 것이
 	# 답이 되어, 언제 막을지가 아무것도 정하지 않습니다.
 	speed *= guard_speed_mult()
+	# 베개싸움이 휘두르는 동안 발을 묶는 자리. 평소에는 1.0 입니다.
+	speed *= ext_move_scale
 	var target := wish * speed
 	# 뒤로 갈 때는 느립니다. 사람이 그렇기도 하고, 무엇보다 **뒤로도 같은
 	# 속도로 도망칠 수 있으면 돌아설 이유가 없습니다** - 적에게 등을 보이는
@@ -1896,6 +1905,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		parry_release()
 	elif event.is_action_pressed("dash"):
 		_try_dash()
+	elif event.is_action_pressed("grab") and attack_hook != null:
+		# 베개싸움에서는 이 버튼이 **휘두르기**입니다. 잡기·던지기·고함이
+		# 아니라 하나뿐이라, 갈래를 여기서 끊습니다.
+		attack_hook.call("swing")
 	elif event.is_action_pressed("grab"):
 		grab_press()
 	elif event.is_action_released("grab"):

@@ -158,6 +158,116 @@ static func load_saved() -> String:
 	return String(got) if got != null else ""
 
 
+static func device_line() -> String:
+	## **어느 기기에서 잰 것인가.**
+	##
+	## 이 줄이 없어서 기록 넷을 읽는 동안 어느 폰인지, 어느 GPU 인지, 어느
+	## 브라우저인지 한 번도 몰랐습니다. 같은 100ms 라도 원인이 갈립니다 -
+	## 셰이더를 처음 굽는 멈춤은 드라이버마다 크게 다르고(Mali 가 특히
+	## 느린 것으로 알려져 있습니다), GPU 이름 한 줄이면 그 칸이 정해집니다.
+	##
+	## # 왜 브라우저에게 물어보나
+	##
+	## 웹에서 `RenderingServer.get_video_adapter_name()` 은 "WebGL" 처럼
+	## 쓸모없는 값을 돌려줍니다. 진짜 이름은 `WEBGL_debug_renderer_info`
+	## 확장에만 있고, 그건 자바스크립트로만 물어볼 수 있습니다.
+	##
+	## **못 받아도 그냥 넘어갑니다.** 확장을 막아 둔 브라우저가 있고, 기기
+	## 이름을 못 읽었다고 기록을 못 내보내면 본말이 뒤집힙니다.
+	if not OS.has_feature("web"):
+		return "기기   %s · %s" % [OS.get_name(),
+			RenderingServer.get_video_adapter_name()]
+	var js := """(function(){
+	  try {
+	    var ua = navigator.userAgent || "?";
+	    var c = document.createElement('canvas');
+	    var gl = c.getContext('webgl2') || c.getContext('webgl');
+	    var gpu = "?";
+	    if (gl) {
+	      var e = gl.getExtension('WEBGL_debug_renderer_info');
+	      gpu = e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL)
+	              : gl.getParameter(gl.RENDERER);
+	    }
+	    var mem = navigator.deviceMemory ? (navigator.deviceMemory + "GB") : "?";
+	    return ua + " ||| " + gpu + " ||| "
+	      + screen.width + "x" + screen.height + " x" + (window.devicePixelRatio || 1)
+	      + " ||| " + (navigator.hardwareConcurrency || "?") + "코어 " + mem;
+	  } catch (err) { return "?"; }
+	})()"""
+	var raw: Variant = JavaScriptBridge.eval(js, true)
+	if raw == null:
+		return "기기   못 읽었습니다"
+	var parts := String(raw).split(" ||| ")
+	if parts.size() < 4:
+		return "기기   %s" % String(raw)
+	return "기기   %s
+GPU    %s
+화면   %s · %s" % [
+		_short_ua(parts[0]), parts[1], parts[2], parts[3]]
+
+
+static func _short_ua(ua: String) -> String:
+	## 사용자 에이전트는 200 자가 넘습니다. **OS · 브라우저 · 기기 이름**만
+	## 뽑습니다 - 나머지는 1990년대부터 끌고 다니는 호환용 찌꺼기입니다.
+	var os_name := "?"
+	for pair in [["Android", "Android"], ["iPhone", "iOS"], ["iPad", "iPadOS"],
+			["Windows", "Windows"], ["Mac OS X", "macOS"], ["Linux", "Linux"]]:
+		if ua.contains(String(pair[0])):
+			os_name = String(pair[1])
+			break
+
+	# 순서가 중요합니다. 엣지·삼성·오페라는 자기 이름 **뒤에** Chrome 도 함께
+	# 적으므로, 크롬을 먼저 보면 전부 크롬으로 읽힙니다.
+	#
+	# 사파리는 `Version/` 을 봅니다. `Safari/604.1` 은 **엔진 판**이라 어느
+	# 사파리인지 알려 주지 않습니다 - 실제로 iOS 17.5 가 604 로 찍혔습니다.
+	var browser := "?"
+	for pair in [["Edg/", "Edge"], ["SamsungBrowser/", "Samsung"],
+			["OPR/", "Opera"], ["Firefox/", "Firefox"],
+			["CriOS/", "Chrome(iOS)"], ["Chrome/", "Chrome"],
+			["Version/", "Safari"]]:
+		var tag := String(pair[0])
+		var i := ua.find(tag)
+		if i < 0:
+			continue
+		var ver := ua.substr(i + tag.length(), 8).split(".")[0]
+		browser = "%s %s" % [pair[1], ver] if ver.is_valid_int() else String(pair[1])
+		break
+	if browser == "?" and ua.contains("Safari/"):
+		browser = "Safari"
+
+	return "%s · %s%s" % [os_name, browser, _model_of(ua)]
+
+
+static func _model_of(ua: String) -> String:
+	## 기기 이름. 괄호 안에 세미콜론으로 나뉘어 있는데 **자리가 일정하지
+	## 않습니다.**
+	##
+	##   Linux; Android 14; SM-S918N Build/UP1A...; wv    -> SM-S918N
+	##   Linux; Android 13; SM-A536E                      -> SM-A536E
+	##
+	## 처음에는 첫 `"; "` 를 찾아 `" Build/"` 까지 잘랐습니다. 첫 것은
+	## `Linux;` 라 "Android 14; SM-S918N" 이 통째로 나왔고, `Build/` 가 없는
+	## 삼성 브라우저에서는 이름이 아예 빠졌습니다.
+	##
+	## 그래서 자리를 세지 않고 **아닌 것을 걸러냅니다** - 알맹이는 남는
+	## 하나입니다.
+	var lp := ua.find("(")
+	var rp := ua.find(")", lp + 1)
+	if lp < 0 or rp <= lp:
+		return ""
+	for raw in ua.substr(lp + 1, rp - lp - 1).split("; "):
+		var part := String(raw).strip_edges()
+		# `wv` 는 앱 안의 웹뷰라는 표시일 뿐 기기 이름이 아닙니다.
+		if part == "" or part == "wv" or part == "Linux" or part == "U":
+			continue
+		if part.begins_with("Android") or part.begins_with("Windows") 				or part.begins_with("Intel") or part.begins_with("CPU") 				or part.begins_with("Macintosh") or part.begins_with("X11") 				or part.begins_with("iPhone") or part.begins_with("iPad") 				or part.begins_with("Win64") or part.begins_with("x64"):
+			continue
+		var cut := part.find(" Build/")
+		return " · " + (part.substr(0, cut) if cut > 0 else part)
+	return ""
+
+
 static func report() -> String:
 	## 담은 것을 사람이 읽을 글로 만듭니다.
 	##
@@ -172,6 +282,7 @@ static func report() -> String:
 		float(_total) / maxf(_sum, 0.001), _peak * 1000.0])
 	out.append("%.0fms 넘긴 프레임 %d개 (%.1f%%)" % [
 		BAD * 1000.0, _bad, 100.0 * float(_bad) / float(_total)])
+	out.append(device_line())
 	out.append("")
 
 	# **나쁜 프레임 옆에 무엇이 있었나.** 표시를 세어 보면 무엇이 값을

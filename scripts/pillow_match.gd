@@ -39,6 +39,57 @@ extends Node
 ## 그래서 둘 다 체력을 아주 크게 둡니다. **아무도 안 죽습니다** - 지는 것은
 ## 체력이 0 이 되는 것이 아니라 베개 없이 맞는 것입니다.
 
+## ── 휘두르기 ────────────────────────────────────────────────
+##
+## **누르면 바로 나가지 않습니다.** 감았다가(선딜) 지나가고(판정) 되돌립니다
+## (후딜). 그 0.66초 동안 발이 묶이므로, 언제 휘두를지가 매번 선택이 됩니다 -
+## 소울라이크의 핵심은 공격이 세다는 것이 아니라 **되돌릴 수 없다**는 것입니다.
+##
+## 밀기(달려들기)나 고함(즉발 부채꼴)을 안 쓴 이유가 그것입니다. 둘 다 누르면
+## 그 자리에서 결과가 나서, 적의 패턴을 읽을 이유가 생기지 않습니다.
+const SWING_WINDUP := 0.26
+const SWING_ACTIVE := 0.10
+const SWING_RECOVER := 0.30
+## 휘두르는 동안의 걸음 배율. 0 으로 묶지 않은 이유는 고함 때와 같습니다 -
+## 아예 못 움직이면 예고를 보고 피하는 것과 겨룰 수가 없습니다.
+const SWING_MOVE := 0.30
+const SWING_ARC := 120.0
+const SWING_REACH := 1.9
+const SWING_DAMAGE := 9.0
+const SWING_BREATH := 25.0
+
+## ── 베개를 드는 자세 ────────────────────────────────────────
+##
+## **한 귀퉁이를 잡고 늘어뜨립니다.** 앞으로 반듯이 들면 방패로 보이고, 그러면
+## 휘두르는 물건이라는 게 안 읽힙니다.
+const HANG_POS := Vector3(0.26, 0.44, -0.06)
+const HANG_ROT := Vector3(18.0, 0.0, 64.0)
+## 감았을 때와 지나간 뒤. 몸을 축으로 도는 각입니다.
+const SWING_BACK := 78.0
+const SWING_THROUGH := -86.0
+
+## ── 상대의 패턴 ────────────────────────────────────────────
+##
+## **한 아이가 셋으로 때립니다.** `Enemy.stats` 의 `attack` 을 갈아 끼우면
+## 예고 그림까지 통째로 따라옵니다 - 적 코드를 한 줄도 안 고칩니다.
+##
+## 셋을 고른 기준은 **대처가 서로 달라야 한다**입니다.
+##
+##   내려치기  채워진 원이 커진다   -> 원 밖으로 걸어 나간다
+##   후려치기  앞 부채꼴            -> 뒤로 돌아 들어간다
+##   달려들기  바닥에 띠            -> 옆으로 구른다
+##
+## 셋이 같은 답을 가지면 패턴이 여럿인 뜻이 없습니다.
+const PATTERNS := [
+	{"name": "내려치기", "attack": "slam", "range": 2.1,
+		"windup": 0.72, "cooldown": 1.9},
+	{"name": "후려치기", "attack": "melee", "range": 1.7,
+		"windup": 0.42, "cooldown": 1.4},
+	{"name": "달려들기", "attack": "charge", "range": 5.2,
+		"windup": 0.58, "cooldown": 2.3,
+		"charge_dist": 5.0, "charge_turn": 150.0},
+]
+
 ## 떨어진 베개로 쓰는 소품. `soft` 이라 던져도 안 아픕니다 - 베개는 주우러
 ## 가는 물건이지 무기가 아닙니다(무기 노릇은 손에 든 동안 합니다).
 const DROP_KIND := "daycare_starcushion"
@@ -51,7 +102,16 @@ const DROP_AWAY := 1.6
 ## 일도 안 일어난 것이 됩니다.
 const PICKUP_LOCK := 0.8
 
-## 적이 베개를 주우러 가는 거리. 이보다 가까우면 줍습니다.
+## 베개를 줍는 거리. **버튼이 아니라 다가가면 줍습니다.**
+##
+## 처음에는 주인공만 잡기 버튼으로 줍게 했습니다. 그 버튼이 휘두르기가 되면서
+## 주울 길이 통째로 사라졌는데 - 규칙에는 "먼저 줍는 쪽이 임자" 라고 적어
+## 두고 손에는 주울 방법이 없었습니다.
+##
+## 버튼을 하나 더 만들지 않은 이유: 소울라이크에서 손에 있는 것은 공격·회피·
+## 막기 셋이면 충분하고, 넷째가 늘면 그만큼 앞의 셋을 누를 여유가 줍니다.
+## 다가가면 줍는 쪽이 **둘 다 같은 규칙**이라 겨루기도 공평합니다.
+const PICKUP_NEAR := 1.15
 const FOE_PICKUP := 1.3
 
 ## 이 판의 체력. **줄어들자마자 되돌립니다** - 지는 조건이 체력이 아니라
@@ -82,6 +142,13 @@ var _last_player_hp := 0.0
 var _last_foe_hp := 0.0
 var _foe_guard_arc := 0.0
 
+## 휘두르기가 시작된 뒤 지난 시간. 음수면 안 휘두르는 중입니다.
+var _swing := -1.0
+var _swing_hit := false
+## 지난 프레임의 적 예고 상태. 공격이 끝나는 순간을 잡아 다음 패턴을 고릅니다.
+var _foe_was_winding := false
+var _pattern := ""
+
 
 func setup(g: Node, p: Node3D, f: Node3D) -> void:
 	game = g
@@ -105,7 +172,109 @@ func setup(g: Node, p: Node3D, f: Node3D) -> void:
 
 	_player_pillow = _build_pillow()
 	player.pivot.add_child(_player_pillow)
-	_player_pillow.position = Vector3(0, 0.62, -0.34)
+	_rest_pillow()
+
+	# **입력을 가로챕니다.** 이 고리가 걸린 동안에만 공격 버튼이 휘두르기가
+	# 됩니다(`player.gd` 의 `attack_hook`).
+	player.attack_hook = self
+	_next_pattern()
+
+
+func _rest_pillow() -> void:
+	## 한 귀퉁이를 잡고 늘어뜨린 자리로 되돌립니다.
+	if _player_pillow == null:
+		return
+	_player_pillow.position = HANG_POS
+	_player_pillow.rotation_degrees = HANG_ROT
+
+
+func swing() -> void:
+	## 공격 버튼. **되돌릴 수 없는 한 동작**입니다.
+	if over or _swing >= 0.0:
+		return
+	# 구르는 중·막는 중에는 안 나갑니다. 소울라이크에서 회피와 공격이 겹치면
+	# 둘 다 값이 없어집니다.
+	if float(player.get("_roll_time")) > 0.0 or float(player.get("_guard_pose")) > 0.0:
+		return
+	if not player_has:
+		# **베개가 없으면 휘두를 것이 없습니다.** 주우러 가야 합니다.
+		return
+	var st = player.state
+	if float(st.breath) < SWING_BREATH:
+		player.emit_signal("breath_empty")
+		return
+	st.breath = maxf(0.0, float(st.breath) - SWING_BREATH)
+	_swing = 0.0
+	_swing_hit = false
+	Sfx.play(Sfx.PUSH, -3.0, 0.0)
+
+
+func _drive_swing(delta: float) -> void:
+	if _swing < 0.0:
+		player.ext_move_scale = 1.0
+		return
+	_swing += delta
+	player.ext_move_scale = SWING_MOVE
+
+	var total := SWING_WINDUP + SWING_ACTIVE + SWING_RECOVER
+	# 베개가 실제로 호를 그립니다. **판정과 같은 시계**를 봅니다 - 따로 두면
+	# 보이는 것과 맞는 것이 갈립니다.
+	var yaw := 0.0
+	if _swing < SWING_WINDUP:
+		yaw = lerpf(0.0, SWING_BACK, _swing / SWING_WINDUP)
+	elif _swing < SWING_WINDUP + SWING_ACTIVE:
+		yaw = lerpf(SWING_BACK, SWING_THROUGH,
+			(_swing - SWING_WINDUP) / SWING_ACTIVE)
+	else:
+		yaw = lerpf(SWING_THROUGH, 0.0,
+			(_swing - SWING_WINDUP - SWING_ACTIVE) / SWING_RECOVER)
+	if _player_pillow != null:
+		_player_pillow.rotation_degrees = HANG_ROT + Vector3(0, yaw, 0)
+		# 감을 때 뒤로, 지나갈 때 앞으로 나갑니다.
+		_player_pillow.position = HANG_POS + Vector3(
+			-sin(deg_to_rad(yaw)) * 0.34, 0, -cos(deg_to_rad(yaw)) * 0.18 + 0.18)
+
+	# 판정은 **지나가는 0.10초에 한 번**입니다.
+	if not _swing_hit and _swing >= SWING_WINDUP 			and _swing < SWING_WINDUP + SWING_ACTIVE:
+		_swing_hit = true
+		_resolve_swing()
+
+	if _swing >= total:
+		_swing = -1.0
+		player.ext_move_scale = 1.0
+		_rest_pillow()
+
+
+func _resolve_swing() -> void:
+	if not is_instance_valid(foe):
+		return
+	var face: Vector3 = -player.pivot.global_transform.basis.z
+	var to: Vector3 = foe.global_position - player.global_position
+	to.y = 0.0
+	var reach: float = SWING_REACH + float(foe.get_meta("body_radius", 0.4))
+	if to.length() > reach:
+		return
+	if to.normalized().dot(face) < cos(deg_to_rad(SWING_ARC) * 0.5):
+		return
+	# `from_pos` 를 줍니다. 안 주면 앞을 막는 상대도 못 막습니다.
+	foe.take_damage(SWING_DAMAGE, false, Vector3.ZERO, 0.0, player.global_position)
+
+
+func _next_pattern() -> void:
+	## 다음에 쓸 패턴을 고릅니다. **바로 앞의 것은 안 고릅니다** - 같은 것이
+	## 이어 나오면 외울 것이 없어집니다.
+	var pick: Dictionary = PATTERNS[randi() % PATTERNS.size()]
+	var guard := 0
+	while String(pick["name"]) == _pattern and guard < 8:
+		pick = PATTERNS[randi() % PATTERNS.size()]
+		guard += 1
+	_pattern = String(pick["name"])
+	# **덮어씁니다, 갈아 끼우지 않습니다.** `guard_arc` 처럼 이 판에서 따로
+	# 바꿔 둔 값이 패턴을 고를 때마다 되살아나면 안 됩니다.
+	for k in pick:
+		if k == "name":
+			continue
+		foe.stats[k] = pick[k]
 
 
 func _build_pillow() -> Node3D:
@@ -132,6 +301,14 @@ func _process(delta: float) -> void:
 	if over or not is_instance_valid(player) or not is_instance_valid(foe):
 		return
 	_drop_lock = maxf(0.0, _drop_lock - delta)
+	_drive_swing(delta)
+
+	# **상대의 공격이 끝나면 다음 패턴을 고릅니다.** 공격이 시작될 때 갈면
+	# 이미 `stats` 를 읽은 뒤라(`_begin_attack`) 예고와 판정이 갈립니다.
+	var winding := float(foe.get("_windup")) >= 0.0
+	if _foe_was_winding and not winding:
+		_next_pattern()
+	_foe_was_winding = winding
 
 	var st = player.state
 	# 맞았나. **체력이 줄었으면** 판정이 뚫린 것입니다(막는 각·사거리는 이미
@@ -160,6 +337,10 @@ func _got_hit(is_player: bool) -> void:
 	# 베개 없이 맞았습니다.
 	over = true
 	winner = "적" if is_player else "나"
+	# **고리를 뗍니다.** 안 떼면 제목으로 돌아가 어린이집 탐험을 시작해도
+	# 공격 버튼이 이 판의 휘두르기로 남습니다.
+	player.attack_hook = null
+	player.ext_move_scale = 1.0
 	if game != null and game.has_method("on_pillow_over"):
 		game.on_pillow_over(winner)
 
@@ -169,6 +350,8 @@ func _drop_pillow(is_player: bool) -> void:
 	var who: Node3D = player if is_player else foe
 	if is_player:
 		player_has = false
+		_swing = -1.0
+		player.ext_move_scale = 1.0
 		if _player_pillow != null:
 			_player_pillow.visible = false
 	else:
@@ -200,14 +383,15 @@ func _drive_pickup() -> void:
 	if _drop_lock > 0.0:
 		return
 
-	# **주인공은 원래 방식으로 줍습니다.** 소품 집기가 이미 있으므로 새 규칙을
-	# 만들지 않습니다 - 손에 들렸는지만 봅니다.
-	if not player_has and player.get("_held") == _drop:
+	# **다가가면 줍습니다.** 휘두르는 도중에는 안 줍습니다 - 그러면 감았다가
+	# 지나가는 사이에 저절로 손이 차서, 되돌릴 수 없다는 규칙이 무너집니다.
+	if not player_has and _swing < 0.0 			and player.global_position.distance_to(_drop.global_position) < PICKUP_NEAR:
 		player_has = true
 		if _player_pillow != null:
 			_player_pillow.visible = true
-		player.set("_held", null)
+			_rest_pillow()
 		_drop.visible = false
+		Sfx.play(Sfx.PICK, -2.0, 0.0)
 		return
 
 	# 적은 가까워지면 줍습니다. 걸어오는 것은 원래 하던 일이라 그대로 둡니다.

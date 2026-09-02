@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.66"
+const VERSION := "v0.67"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -252,6 +252,7 @@ var _wedge_from := Vector3.ZERO
 var _probe_t0 := 0.0
 ## 값이 바뀐 프레임만 찍으려고 들고 있는 지난 값.
 var _probe_t1 := 0.0
+var _probe_seen: Array = []
 ## 패링이 도는 동안 벽 안에 들어가 있던 프레임 수.
 var _probe_wall_frames := 0
 ## --pose=death 에서 마지막으로 죽인 프레임.
@@ -804,6 +805,11 @@ func _build_pillow_match() -> void:
 	add_child(pillow)
 	pillow.setup(self, player, foe)
 
+	# **쿼터뷰로 내립니다.** 탐험은 63도로 거의 내려다보는데, 그 각에서는
+	# 적의 몸이 위에서 눌려 보여 **감았는지 지나갔는지**가 안 읽힙니다.
+	# 패턴을 읽어야 하는 판이면 옆모습이 보여야 합니다.
+	set_cam_pitch(48.0)
+	ui.set_cam_pitch(cam_pitch)
 	ui.set_minimap(dungeon, player.global_position, player.global_position)
 	ui.set_boons(_boon_names)
 	if _toon_start and not Toon.enabled:
@@ -2407,6 +2413,97 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"pillowpick":
+			# **놓친 베개를 다시 줍는가.** 규칙에 "먼저 줍는 쪽이 임자" 라고 적어
+			# 뒀으니, 주울 길이 실제로 있어야 합니다.
+			if pillow == null:
+				pass
+			elif _frames == 30:
+				player.take_damage(20.0, player.global_position
+					- player.pivot.global_transform.basis.z * -2.0)
+			elif _frames == 34:
+				print("[줍기] 맞은 직후: 나 %s  떨어진 것 %s" % [
+					str(pillow.player_has), str(pillow._drop != null and pillow._drop.visible)])
+			elif _frames == 40 and pillow._drop != null:
+				# 잠금(0.8초)이 아직 걸린 자리에서 밟아 봅니다.
+				player.global_position = pillow._drop.global_position
+			elif _frames == 44:
+				print("[줍기] 잠금 중에 밟음: 나 %s (false 여야 맞음)" % str(pillow.player_has))
+			elif _frames == 90 and pillow._drop != null:
+				player.global_position = pillow._drop.global_position
+			elif _frames == 94:
+				print("[줍기] 잠금 풀린 뒤 밟음: 나 %s  떨어진 것 %s" % [
+					str(pillow.player_has), str(pillow._drop != null and pillow._drop.visible)])
+				get_tree().quit()
+		"souls":
+			# **소울라이크 규칙 넷이 도는가.**
+			#   ① 휘두르기에 선딜·판정·후딜이 있고 그동안 발이 묶인다
+			#   ② 판정은 지나가는 구간에서만 난다
+			#   ③ 상대 패턴이 셋이고 같은 것이 이어 나오지 않는다
+			#   ④ 카메라가 쿼터뷰다
+			if pillow == null:
+				pass
+			elif _frames == 22 and _probe_arg == "shot":
+				# 화면을 찍을 때는 상대를 사거리 안에 세우고 휘두릅니다.
+				_probe_foe = _first_foe()
+				if is_instance_valid(_probe_foe):
+					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.6
+					_probe_foe.speed = 0.0
+				pillow.swing()
+			elif _frames == 24:
+				print("[소울] 카메라 %.0f도  베개 자리 %.2f,%.2f,%.2f" % [
+					cam_pitch, pillow._player_pillow.position.x,
+					pillow._player_pillow.position.y, pillow._player_pillow.position.z])
+				_probe_foe = _first_foe()
+				if is_instance_valid(_probe_foe):
+					# 사거리 안, 정면에 세웁니다.
+					_probe_foe.global_position = player.global_position 						- player.pivot.global_transform.basis.z * 1.4
+					_probe_foe.speed = 0.0
+					_probe_t0 = float(_probe_foe.hp)
+				pillow.swing()
+			elif _frames == 26:
+				print("[소울] 감는 중(0.03초): 걸음배율 %.2f  적 체력 변화 %.0f" % [
+					player.ext_move_scale, float(_probe_foe.hp) - _probe_t0])
+			elif _frames == 42:
+				# 선딜 0.26 = 15.6프레임. 여기(0.30초)면 지나간 뒤입니다.
+				print("[소울] 지나간 뒤(0.30초): 걸음배율 %.2f  맞았나 %s" % [
+					player.ext_move_scale, str(pillow._swing_hit)])
+			elif _frames == 70:
+				print("[소울] 다 돌린 뒤(0.77초): 걸음배율 %.2f  휘두르는 중 %s" % [
+					player.ext_move_scale, str(pillow._swing >= 0.0)])
+				_probe_t1 = 0.0
+				_probe_seen.clear()
+			elif _frames > 70 and _frames < 400:
+				# 패턴을 서른 번 굴려 셋이 다 나오는지, 같은 것이 이어 나오는지.
+				if _probe_seen.size() < 30:
+					var before: String = pillow._pattern
+					pillow._next_pattern()
+					if before == pillow._pattern:
+						_probe_t1 += 1.0
+					_probe_seen.append(pillow._pattern)
+			elif _frames == 400:
+				var kinds := {}
+				for n in _probe_seen:
+					kinds[n] = int(kinds.get(n, 0)) + 1
+				print("[소울] 패턴 30번: %s  이어 나온 횟수 %.0f" % [str(kinds), _probe_t1])
+				get_tree().quit()
+		"device":
+			# **기기 줄이 제대로 나오는가.**
+			#
+			# 폰이 여기 없으니 실제 기기로는 못 잽니다. 대신 **진짜 UA 문자열**을
+			# 넣어 해석기가 무엇을 뽑는지 봅니다 - 틀리면 기록 넷을 또 모르는
+			# 채로 읽게 됩니다.
+			if _frames == 20:
+				print("[기기] 여기: %s" % Trace.device_line())
+				var uas := [
+					"Mozilla/5.0 (Linux; Android 14; SM-S918N Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.81 Mobile Safari/537.36",
+					"Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/23.0 Chrome/115.0.0.0 Mobile Safari/537.36",
+					"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+				]
+				for ua in uas:
+					print("[기기] %s" % Trace._short_ua(String(ua)))
+				get_tree().quit()
 		"pillowrule":
 			# **베개싸움의 규칙 넷이 실제로 도는가.**
 			#   ① 둘 다 베개를 들고 시작한다
@@ -5331,6 +5428,12 @@ func _on_parried() -> void:
 
 func _on_touch_grab() -> void:
 	if phase == Phase.PLAYING and is_instance_valid(player):
+		# 베개싸움에서는 이 버튼이 휘두르기입니다. 키보드 쪽은
+		# `player.gd` 의 `attack_hook` 이 같은 일을 합니다 - **같은 버튼이
+		# 두 군데서 배선되므로** 둘 다 고쳐야 합니다(v0.54 에 한 번 겪었습니다).
+		if pillow_mode and pillow != null:
+			pillow.swing()
+			return
 		player.grab_press()
 
 
