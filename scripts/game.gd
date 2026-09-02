@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.70"
+const VERSION := "v0.72"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -354,7 +354,8 @@ func _ready() -> void:
 	ui.shop_bought.connect(_on_shop_bought)
 	ui.shop_closed.connect(_close_overlay)
 	ui.restart_requested.connect(start_run)
-	ui.start_requested.connect(start_run)
+	ui.start_requested.connect(_open_intro)
+	ui.intro_done.connect(start_run)
 	ui.pillow_requested.connect(start_pillow)
 	if ui.touch != null:
 		ui.touch.attack_pressed.connect(_on_touch_attack)
@@ -758,7 +759,8 @@ func start_run() -> void:
 	_close_overlay()
 	build_floor()
 	Trace.mark("층시작")
-	ui.toast(RunState.floor_name(state.floor_num), UiTheme.ACCENT)
+	ui.toast("%s — %s" % [RunState.floor_name(state.floor_num),
+		RunState.floor_note(state.floor_num)], UiTheme.ACCENT)
 
 
 func _all_children(root: Node) -> Array:
@@ -910,6 +912,15 @@ func on_pillow_over(who: String) -> void:
 	phase = Phase.DEAD
 	get_tree().paused = true
 	ui.show_pillow_result(who)
+
+
+func _open_intro() -> void:
+	## 여는 카드를 띄웁니다. **다시 도전은 여기를 안 거칩니다**
+	## (`restart_requested` 는 `start_run` 으로 곧장 갑니다).
+	phase = Phase.TITLE
+	_dev_menu = false
+	get_tree().paused = true
+	ui.show_intro()
 
 
 func start_pillow() -> void:
@@ -1627,7 +1638,8 @@ func _on_boon_chosen(id: String) -> void:
 		ui.toast("스킬을 익혔다", UiTheme.ACCENT)
 		return
 	build_floor()
-	ui.toast(RunState.floor_name(state.floor_num), UiTheme.ACCENT)
+	ui.toast("%s — %s" % [RunState.floor_name(state.floor_num),
+		RunState.floor_note(state.floor_num)], UiTheme.ACCENT)
 
 
 func _on_record_stopped(reason: String) -> void:
@@ -2494,6 +2506,46 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"knockscale":
+			# **밀기 계통을 올리면 실제로 더 밀리는가.**
+			#
+			# `--side=N` 으로 계통 Lv 을 정합니다. 힘(impulse)과 **실제로 간
+			# 거리**를 나란히 봅니다 - 힘만 보면 늘 커 보입니다.
+			if _frames == 20:
+				state.skill_lv["push"] = int(_probe_arg) if _probe_arg != "" else 0
+				state._recompute()
+				for n in get_tree().get_nodes_in_group("enemies"):
+					(n as Node3D).queue_free()
+				_alive = 0
+			elif _frames == 30:
+				_probe_foe = Enemy.new()
+				world.add_child(_probe_foe)
+				_probe_foe.setup("grunt", 1, dungeon, player)
+				_probe_foe.speed = 0.0
+				_probe_foe.max_hp = 9999.0
+				_probe_foe.hp = 9999.0
+				_probe_foe.global_position = player.global_position + Vector3(1.0, 0, 0)
+				_probe_foe.add_to_group("enemies")
+			elif _frames == 40 and is_instance_valid(_probe_foe):
+				_wedge_from = _probe_foe.global_position
+				_probe_t1 = 0.0
+				_probe_foe.knock_back(Vector3(1, 0, 0)
+					* (Player.SHOVE_KNOCK + state.shove_knock))
+			elif _frames == 41 and is_instance_valid(_probe_foe):
+				var v := Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()
+				print("[밀어냄] Lv%d  힘 %.1f  민 직후 빠르기 %.2fm/s  (한도 %.2f)" % [
+					state.skill_lv["push"], Player.SHOVE_KNOCK + state.shove_knock,
+					v, state.move_speed * Enemy.KNOCK_SPEED_MULT])
+			elif _frames > 41 and _frames < 130 and is_instance_valid(_probe_foe):
+				# **가장 멀리 간 자리**를 봅니다. 마지막 자리로 재면 적이 미끄럼이
+				# 끝난 뒤 **다시 달려와** 되돌아온 것을 재게 됩니다(실측: f=64 에
+				# 1.26m 였다가 f=80 에 0.01m).
+				_probe_t1 = maxf(_probe_t1,
+					_probe_foe.global_position.distance_to(_wedge_from))
+			elif _frames == 130 and is_instance_valid(_probe_foe):
+				print("[밀어냄] Lv%d  가장 멀리 간 거리 %.2fm" % [
+					state.skill_lv["push"], _probe_t1])
+				get_tree().quit()
 		"openbox":
 			# **가구를 열면 셋 중 하나가 나오는가**, 그리고 **적이 1.5배 아픈가.**
 			if _frames == 30:
@@ -6159,6 +6211,8 @@ func _show_debug_ui() -> void:
 	## 화면 하나를 콕 집어 띄웁니다. 오버레이는 특정 순간에만 나오는데,
 	## 그 순간을 기다렸다 찍는 것은 불안정합니다.
 	match _debug_ui:
+		"intro":
+			_open_intro()
 		"boon":
 			_boon_options = _label_boons(state.offer_boons(rng))
 			phase = Phase.BOON

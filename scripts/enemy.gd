@@ -851,7 +851,10 @@ func _physics_process(delta: float) -> void:
 		var rush: float = float(stats.get("charge_speed", 6.0))
 		velocity.x = _charge_dir.x * rush
 		velocity.z = _charge_dir.z * rush
-	elif _stagger > 0.0:
+	elif _stagger > 0.0 or _slide > 0.0:
+		# **미끄러지는 동안에는 안 쫓아옵니다.** `_pursue` 가 속도를 자기
+		# 걸음으로 덮어써서, 늘려 둔 미끄럼 시간이 아무 일도 안 했습니다 -
+		# 힘을 4.5 배로 올려도 간 거리가 0.60m 로 같던 이유입니다.
 		_settle(delta)
 	else:
 		_pursue(delta, to_target, dist)
@@ -891,6 +894,8 @@ func _tick_knock(delta: float) -> void:
 	## 밀려나는 시간을 줄이고, 다 밀렸으면 미뤄 둔 죽음을 치릅니다.
 	if _knock > 0.0:
 		_knock = maxf(0.0, _knock - delta)
+	if _slide > 0.0:
+		_slide = maxf(0.0, _slide - delta)
 	if not _die_when_landed:
 		return
 	_die_wait -= delta
@@ -908,7 +913,13 @@ func _settle(delta: float) -> void:
 	## 보였습니다. 감속을 낮추면 느린 속도로도 같은 거리가 나옵니다.
 	# 밀림을 줄이는 것은 `_tick_knock` 이 맡습니다 - 여기서 줄이면 이 함수가
 	# 안 불리는 갈래에서 시간이 멈춥니다.
-	var brake := 8.0 if _knock > 0.0 else 30.0
+	# **남은 미끄럼 시간에 딱 맞춰 멈춥니다.** 8.0 으로 못 박아 두면 세게
+	# 밀어도 0.45초에 서 버려서, 늘린 시간이 아무 일도 안 합니다.
+	var brake := 30.0
+	if _slide > 0.0:
+		brake = Vector2(velocity.x, velocity.z).length() / maxf(_slide, 0.05)
+	elif _knock > 0.0:
+		brake = 8.0
 	var flat := Vector3(velocity.x, 0.0, velocity.z).move_toward(Vector3.ZERO, brake * delta)
 	velocity.x = flat.x
 	velocity.z = flat.z
@@ -2151,6 +2162,36 @@ func interrupt(hold: float) -> void:
 ## 이어 갈 수 있어야 밀기가 정리하는 기술이 됩니다.
 const KNOCK_SPEED_MULT := 1.2
 
+## **미는 힘이 늘면 빠르기가 아니라 「미끄러지는 시간」이 늡니다.**
+##
+## 밀기 계통을 Lv3 까지 올리면 힘이 3.6 에서 16.2 로 **4.5 배**가 되는데,
+## 재 보니 **간 거리가 넷 다 0.60m 로 같았습니다** - 위의 속도 한도가 잘라
+## 버려서 Lv0 과 Lv3 이 눈에 똑같았습니다.
+##
+## 한도를 푸는 것이 답이 아닙니다. 그 한도는 "너무 빠르게 밀린다" 를 고치려고
+## 넣은 것이고(v0.57), 지금도 그 말은 맞습니다.
+##
+## 그래서 **같은 빠르기로 더 오래 미끄러집니다.** 보기에 빠르지 않으면서
+## 세게 민 것이 화면에 남습니다.
+const SLIDE_BASE := 0.45
+const SLIDE_AT := 3.6
+## 1.35 에서 2.1 로 올렸습니다. 1.35 면 Lv2(10.8)가 이미 상한이라 **Lv2 와
+## Lv3 이 눈에 같았습니다** - 마지막 한 단계를 찍을 이유가 화면에서 사라지는
+## 것이 이 문제의 시작이었습니다.
+const SLIDE_MAX := 2.1
+
+## 미끄러지는 동안 남은 시간. `_knock` 과 **따로 둡니다** - `_knock` 은 지정
+## 불가와 몸 돌리기까지 정하는데(v0.62), 그것까지 1.35초로 늘리면 세게 민
+## 상대를 그동안 다시 걸 수 없습니다.
+var _slide := 0.0
+
+
+func _begin_slide(impulse: Vector3) -> void:
+	## 힘을 시간으로 바꿉니다. 미는 자리가 둘이라(`knock_back` · `shove`)
+	## 한 함수에 둡니다 - 한쪽만 고치면 던진 물건에 맞을 때만 안 밀립니다.
+	_slide = clampf(SLIDE_BASE * impulse.length() / SLIDE_AT,
+		SLIDE_BASE, SLIDE_MAX)
+
 
 func _cap_knock() -> void:
 	## 바닥을 따라 미는 빠르기를 걸음의 1.2배로 자릅니다. **한 군데에서만**
@@ -2188,6 +2229,7 @@ func knock_back(impulse: Vector3, chain: int = 0) -> void:
 	# 편이 예측 가능하고, 미는 힘이 상대를 멈춰 세운다는 것도 사실입니다.
 	velocity.x = 0.0
 	velocity.z = 0.0
+	_begin_slide(impulse)
 	velocity += impulse
 	_cap_knock()
 	velocity.y = maxf(velocity.y, 2.2)      # 살짝 띄워야 밀린 것으로 보입니다
@@ -2446,6 +2488,7 @@ func _hit_others_while_flying() -> void:
 
 func shove(impulse: Vector3) -> void:
 	## 밖에서 밀 때. 주인공이 몸으로 밀거나 던져진 물건이 칠 때 씁니다.
+	_begin_slide(impulse)
 	velocity += impulse
 	_cap_knock()
 	_stagger = maxf(_stagger, 0.12)

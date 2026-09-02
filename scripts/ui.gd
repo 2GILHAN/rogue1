@@ -9,6 +9,8 @@ signal shop_bought(index: int)
 signal shop_closed
 signal restart_requested
 signal start_requested
+## 여는 카드를 읽고 「들어간다」를 눌렀습니다.
+signal intro_done
 ## 실험 중인 1:1 베개싸움. 재미없으면 이 줄과 `pillow_match.gd` 를 지웁니다.
 signal pillow_requested
 signal toon_toggled
@@ -246,7 +248,10 @@ func _build_hud() -> void:
 	var top := HBoxContainer.new()
 	top.add_theme_constant_override("separation", 14)
 	col.add_child(top)
-	_floor = UiTheme.label("지하 1층", 22, UiTheme.ACCENT)
+	# 첫 갱신 전까지 잠깐 보이는 값입니다. "지하 1층" 으로 두었더니 여는
+	# 카드 뒤로 그것이 비쳐서, 반 이름을 쓰기로 한 판에서 옛 이름이 화면에
+	# 먼저 나왔습니다.
+	_floor = UiTheme.label("씨앗반 1/5", 22, UiTheme.ACCENT)
 	top.add_child(_floor)
 	_gold = UiTheme.label("◆ 0", 20, Fx.GOLD_COLOR)
 	top.add_child(_gold)
@@ -1186,7 +1191,10 @@ func set_ultimate(ratio: float, on: bool, note: String, shown: bool) -> void:
 
 
 func update_hud(state: RunState, enemies_left: int, _unused: float) -> void:
-	_floor.text = RunState.floor_name(state.floor_num)
+	# **몇째인지 같이 보여 줍니다.** 이름만 있으면 "원장실이 마지막" 을 아는
+	# 사람에게만 진행이 보입니다 - 숫자가 붙으면 처음 하는 사람도 압니다.
+	_floor.text = "%s %d/%d" % [RunState.floor_name(state.floor_num),
+		state.floor_num, Game.FINAL_FLOOR]
 	# 사탕 개수. 마름모(◆)는 금화의 기호라 그대로 두면 이름만 바뀐 것이
 	# 됩니다.
 	_gold.text = "사탕 %d" % state.gold
@@ -1326,6 +1334,38 @@ func show_pillow_result(who: String) -> void:
 		pillow_requested.emit()))
 	row.add_child(_menu_button("  제목으로  (Esc)  ", func() -> void:
 		title_requested.emit()))
+	_overlay.visible = true
+
+
+func show_intro() -> void:
+	## **판이 시작하기 전에 한 번.** 왜 여기 있고 무엇을 하면 이기는지.
+	##
+	## # 왜 필요한가
+	##
+	## 끝 화면은 둘 다 있었는데(쓰러졌다 · 나갔다) **여는 화면이 없었습니다.**
+	## 처음 여는 사람은 어디로 가야 하는지, 무엇을 하면 끝나는지 모른 채로
+	## 방에 떨어집니다 - 끝이 있다는 것을 죽고 나서야 알게 됩니다.
+	##
+	## # 왜 다시 도전할 때는 안 나오나
+	##
+	## 한 번 읽으면 아는 것이라, 매번 나오면 그때부터는 **누르고 넘기는 벽**
+	## 입니다. 제목 화면에서 들어올 때만 나옵니다(`Game.start_requested`).
+	_clear_overlay()
+	_title("어린이집 탐험")
+	_sub("낮잠 시간에 혼자 깼다.
+"
+		+ "다섯 반을 지나 원장실까지 가면 집에 갈 수 있다.", UiTheme.TEXT)
+	_sub("반의 아이를 모두 쓰러뜨리면   →   파란 문이 열린다
+"
+		+ "가구를 열면   →   사탕이 쏟아지거나, 텅 비거나, 시련이 걸린다
+"
+		+ "책을 읽거나 시련을 이겨 내면   →   기술을 배운다")
+	_sub("씨앗반 · 나무반 · 햇님반 · 달님반 · 원장실", UiTheme.ACCENT)
+	var row := VBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_overlay_box.add_child(row)
+	row.add_child(_menu_button("  들어간다  (Enter)  ", func() -> void:
+		intro_done.emit()))
 	_overlay.visible = true
 
 
