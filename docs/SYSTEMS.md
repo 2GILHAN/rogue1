@@ -3005,6 +3005,7 @@ TOTO-FightClub
   --pose=block                  막는 자세 — 손과 머리가 겹치는지 · 발이 뜨는지
   --pose=guardhit [--side=back] 베개 아이가 밀려온 몸도 앞에서 막는지
   --pose=heldwarn               잡힌 적의 예고가 사라지는지
+  --pose=labpose                실험실에서 고른 자세가 뼈에 닿는지
   --pose=pushcost --side=<Lv>   밀기 이펙트 값 · 잔상 한 장을 마디마디
   --pose=propfade               가리는 가구가 비치는지
   --pose=shoppause              창이 떠 있는 동안 판과 시계가 멈추는지
@@ -3036,7 +3037,7 @@ TOTO-FightClub
                                 섰을 때(front) 벽이 어떻게 걷히는지 봅니다
   --pose=stamina                연타 벌금. 밀기만 연타 → 번갈아 쓰기 순서로
                                 드는 숨을 찍습니다 (--boon=steady 로 스킬 확인)
---ui=riglab [--char --clip --hip --motion]
+--ui=riglab [--char --clip --labpose --hip --motion]
 --boon=gale,bomb,pierce,slam    축복을 미리 걸고 시작
 --shoulder                      어깨 너머 시점으로 시작
 --teacher-here                  선생님을 눈앞에

@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.54"
+const VERSION := "v0.55"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -269,6 +269,8 @@ var _push_far := 0.0
 var _riglab: RigLab = null
 var _lab_hip := 0.0
 var _lab_clip := ""
+## --labpose= 로 열어 둘 자세 이름.
+var _lab_pose := ""
 var _lab_char := -1
 var _lab_motion := 0.0
 var _start_shoulder := false
@@ -468,8 +470,13 @@ func _read_args() -> void:
 			# 비교할 때 손으로 맞추면 같은 값인지 알 수 없습니다.
 			_lab_motion = float(a.substr(9))
 		elif a.begins_with("--char="):
-			# 실험실을 그 캐릭터로 엽니다(0=도원 1=서진 2=블랙 3=선생님).
+			# 실험실을 그 캐릭터로 엽니다. 차례는 `RigLab.CHARACTERS` 입니다
+			# (0 주인공 · 1 박치기 · 2 던지기 · 3 베개 · 4 고함 · 5 선생님).
 			_lab_char = int(a.substr(7))
+		elif a.begins_with("--labpose="):
+			# 실험실을 그 자세로 열어 둡니다(BLOCK / SHOUT / ROLL ...).
+			# 이름은 `PoseOverride` 의 상수 이름 그대로입니다.
+			_lab_pose = a.substr(10)
 		elif a.begins_with("--clip="):
 			# 실험실을 그 동작으로 열어 둡니다(Idle/Walk/Run/Push).
 			_lab_clip = a.substr(7)
@@ -2312,6 +2319,28 @@ func _drive_pose() -> void:
 				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
 				_foe_n += 1
+		"labpose":
+			# **실험실에서 고른 자세가 실제로 뼈에 닿는가.**
+			#
+			# 단추가 눌리는 것과 자세가 걸리는 것은 다릅니다 - 이름으로
+			# 상수를 꺼내는 자리(`_set_pose`)가 조용히 빗나가면, 단추만
+			# 밝아지고 몸은 그대로입니다.
+			if _frames == 30 and _riglab != null:
+				var sk: Skeleton3D = _riglab._skel
+				if sk == null:
+					print("[실험실] 뼈대가 없습니다")
+				else:
+					await sk.skeleton_updated
+					var arm := sk.find_bone("LeftArm")
+					var leg := sk.find_bone("RightUpLeg")
+					var ea := sk.get_bone_pose_rotation(arm).get_euler() * 57.2958
+					var el := sk.get_bone_pose_rotation(leg).get_euler() * 57.2958
+					var ra := sk.get_bone_rest(arm).basis.get_euler() * 57.2958
+					print("[실험실] 자세=%s  섞임 %.2f" % [
+						_riglab._pose_name, _riglab._pose_layer.weight
+							if _riglab._pose_layer != null else -1.0])
+					print("[실험실] LeftArm 지금 (%.0f,%.0f,%.0f) 쉼 (%.0f,%.0f,%.0f)  RightUpLeg X %.0f" % [
+						ea.x, ea.y, ea.z, ra.x, ra.y, ra.z, el.x])
 		"guardhit":
 			# **베개 아이는 앞에서 오는 것을 다 막아야 합니다.**
 			#
@@ -4279,6 +4308,8 @@ func open_riglab() -> void:
 		_riglab.start_hip = _lab_hip
 	if _lab_clip != "":
 		_riglab.start_clip = _lab_clip
+	if _lab_pose != "":
+		_riglab.start_pose = _lab_pose
 	if _lab_char >= 0:
 		_riglab.start_char = _lab_char
 	if _lab_motion > 0.0:

@@ -37,6 +37,8 @@ const CHARACTERS := [
 	{"name": "주인공", "path": "res://assets/characters/hero.glb"},
 	{"name": "적1_박치기", "path": "res://assets/characters/foe_charger.glb"},
 	{"name": "적3_던지기", "path": "res://assets/characters/foe_thrower.glb"},
+	{"name": "적4_베개", "path": "res://assets/characters/foe_blocker.glb"},
+	{"name": "적2_고함", "path": "res://assets/characters/foe_shouter.glb"},
 	{"name": "보스_선생님", "path": "res://assets/characters/boss_teacher.glb"},
 ]
 
@@ -79,6 +81,9 @@ var _hip_base := 0.33
 var start_hip := 0.0
 ## 열자마자 이 동작으로 시작합니다(--clip=).
 var start_clip := ""
+## 열자마자 이 자세를 걸어 둡니다(--labpose=). 이름은 `PoseOverride` 의
+## 상수 이름 그대로입니다(BLOCK / SHOUT / ROLL ...).
+var start_pose := ""
 ## 열자마자 이 캐릭터로 시작합니다(--char=).
 var start_char := -1
 ## 열자마자 동작 크기를 이 배율로 둡니다(--motion=).
@@ -97,6 +102,25 @@ var _readout: Label
 var _hip_label: Label
 var _speed_label: Label
 var _clip_buttons: Array[Button] = []
+
+## 자세 층. **클립 위에 덮어씌우는 것**이라 클립과 따로 고릅니다 - 걷는 다리
+## 위에 막는 상체를 얹는 식으로, 게임에서 실제로 도는 방식 그대로입니다.
+##
+## 여기에 줄을 더하는 것이 곧 실험실에 자세를 더하는 일입니다.
+const LAB_POSES: Array = [
+	["없음", ""], ["막기", "BLOCK"], ["고함", "SHOUT"], ["구르기", "ROLL"],
+	["달려들기", "LUNGE"], ["잡고 있기", "CARRY"], ["맞음", "HURT"],
+	["붙잡힘", "BOUND"], ["마시기", "DRINK"], ["읽기", "READ"],
+	["박치기 예고", "REACH"], ["박치기", "RAM"], ["베개 막기", "GUARD"],
+	["베개 듦", "SLAM_UP"], ["베개 내리침", "SLAM_DOWN"], ["물놀이", "SPLASH_A"],
+]
+var _pose_layer: PoseOverride
+var _pose_name := ""
+var _pose_buttons: Array[Button] = []
+## 자세를 얼마나 섞을지. 게임에서는 0~1 을 오가는데, 여기서는 손으로 잡습니다 -
+## 섞이는 도중의 모양이 어색한 자세가 있어서 그 중간을 봐야 합니다.
+var _pose_weight := 1.0
+var _pose_label: Label
 var _tune_sliders: Dictionary = {}
 var _frame_label: Label
 ## -1 이면 그냥 흐릅니다. 0~1 이면 그 지점에 세웁니다.
@@ -209,6 +233,11 @@ func _load_character(index: int) -> void:
 			var a := Models.add_anchor(_model, bone)
 			if a != null:
 				_feet.append(a)
+		# **캐릭터를 갈아 끼울 때마다 자세 층을 다시 답니다.** 층은 뼈대에
+		# 붙어 있어서 모델과 함께 사라집니다 - 안 다시 달면 두 번째 캐릭터
+		# 부터는 자세 단추가 아무 일도 안 합니다.
+		_pose_layer = Models.add_pose(_model)
+		_set_pose(_pose_name)
 
 	_snapshot_clips()
 	if start_motion > 0.0:
@@ -221,6 +250,9 @@ func _load_character(index: int) -> void:
 	_hip = _hip_base if start_hip <= 0.0 else start_hip
 	_apply_hip()
 	_play(_clip if start_clip == "" else start_clip)
+	if start_pose != "":
+		_set_pose(start_pose)
+		_refresh_buttons()
 	_sync_tune_sliders()
 	_refresh_buttons()
 
@@ -235,6 +267,31 @@ func _mesh_list(node: Node) -> Array[MeshInstance3D]:
 		for c in n.get_children():
 			stack.append(c)
 	return out
+
+
+func _set_pose(key: String) -> void:
+	## 자세를 갈아 끼웁니다. 빈 문자열이면 끕니다.
+	_pose_name = key
+	if _pose_layer == null:
+		return
+	if key == "":
+		_pose_layer.weight = 0.0
+		_pose_layer.pose = {}
+		return
+	# **이름으로 상수를 꺼냅니다.** 표(`LAB_POSES`)에 줄만 더하면 되도록
+	# 하려면 여기서 이름을 값으로 바꿔야 합니다 - `match` 로 적으면 자세를
+	# 더할 때마다 두 곳을 고치게 되고, 반드시 한쪽을 빠뜨립니다.
+	#
+	# `PoseOverride.get(key)` 는 안 됩니다(정적이 아닌 함수라 클래스에 대고
+	# 못 부릅니다). 스크립트의 **상수 목록**을 꺼내 봅니다.
+	var consts: Dictionary = (PoseOverride as Script).get_script_constant_map()
+	var got: Variant = consts.get(key)
+	if typeof(got) != TYPE_DICTIONARY:
+		push_warning("리그 실험실: 그런 자세가 없습니다 - %s" % key)
+		_pose_layer.weight = 0.0
+		return
+	_pose_layer.pose = got
+	_pose_layer.weight = _pose_weight
 
 
 func _play(clip: String) -> void:
@@ -457,6 +514,40 @@ func _build_ui() -> void:
 		_char_buttons.append(b)
 
 	col.add_child(_gap(6))
+	col.add_child(UiTheme.label("자세 (클립 위에 덮습니다)", 15, UiTheme.DIM))
+	var prow := HBoxContainer.new()
+	prow.add_theme_constant_override("separation", 4)
+	col.add_child(prow)
+	var pcol := VBoxContainer.new()
+	pcol.add_theme_constant_override("separation", 4)
+	col.add_child(pcol)
+	var line: HBoxContainer = null
+	for i in LAB_POSES.size():
+		# 넷씩 끊어 넣습니다. 한 줄에 다 넣으면 글자가 뭉개져 안 읽힙니다.
+		if i % 4 == 0:
+			line = HBoxContainer.new()
+			line.add_theme_constant_override("separation", 4)
+			pcol.add_child(line)
+		var pb := _button(String(LAB_POSES[i][0]))
+		pb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var key := String(LAB_POSES[i][1])
+		pb.pressed.connect(func() -> void:
+			_set_pose(key)
+			_refresh_buttons())
+		line.add_child(pb)
+		_pose_buttons.append(pb)
+
+	_pose_label = UiTheme.label("섞임 1.00", 15, UiTheme.TEXT)
+	col.add_child(_pose_label)
+	var pw := _slider(0.0, 1.0, 0.02, 1.0)
+	pw.value_changed.connect(func(v: float) -> void:
+		_pose_weight = v
+		if _pose_layer != null:
+			_pose_layer.weight = v if _pose_name != "" else 0.0
+		_pose_label.text = "섞임 %.2f" % v)
+	col.add_child(pw)
+
+	col.add_child(_gap(6))
 	col.add_child(UiTheme.label("동작", 15, UiTheme.DIM))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
@@ -578,6 +669,9 @@ func _refresh_buttons() -> void:
 	var names := ["Idle", "Walk", "Run", "Push"]
 	for i in _clip_buttons.size():
 		_clip_buttons[i].modulate = Color(1, 1, 1) if names[i] == _clip else Color(0.62, 0.62, 0.66)
+	for i in _pose_buttons.size():
+		_pose_buttons[i].modulate = (Color(1, 1, 1)
+			if String(LAB_POSES[i][1]) == _pose_name else Color(0.62, 0.62, 0.66))
 
 
 func _gap(px: int) -> Control:
