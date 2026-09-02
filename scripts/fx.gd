@@ -206,6 +206,44 @@ static func warm_up(parent: Node3D) -> void:
 	parent.add_child(fan)
 	fan.create_tween().tween_callback(fan.queue_free).set_delay(0.1)
 
+	# **나머지도 전부 데웁니다.**
+	#
+	# 폰 기록(v0.69)에서 나쁜 프레임 넷이 "스크립트 14~15ms 는 평범한데 엔진이
+	# 93~128ms" 였습니다. 그리기 수도 50~85 로 평범하고 새로 읽어 온 자원도
+	# 0 이라, 양이 아니라 **처음 그리는 한 번**입니다.
+	#
+	# 여기가 고함 선과 예고 부채꼴 둘만 데우고 있었습니다. 아래 넷은 싸우다
+	# 처음 나오는 것들이라, 그 한 번이 싸우는 도중에 옵니다.
+	#
+	# 바닥 아래(-40m)에서 그립니다 - 보이지 않지만 그리기는 합니다.
+	var deep := Vector3(0, -40, 0)
+
+	# ① 터지는 조각(MultiMesh + 가산 합성). 맞을 때·죽을 때·부딪힐 때 나옵니다.
+	burst(parent, deep, Color(1, 1, 1), 6, 1.0)
+
+	# ② 퍼지는 고리. 문이 열릴 때·폭죽·막아 냈을 때.
+	ring(parent, deep, Color(1, 1, 1), 1.0)
+
+	# ③ 피해 숫자(Label3D). 글자를 처음 그리는 값이 따로 있습니다 - 글립을
+	#    그때 굽습니다.
+	popup_text(parent, deep, "0", Color(1, 1, 1))
+
+	# ④ 잔상 재질(반투명 파랑). 주인공이 처음 구를 때까지 안 나옵니다.
+	var gh := MeshInstance3D.new()
+	var gm := BoxMesh.new()
+	gm.size = Vector3(0.3, 0.3, 0.3)
+	gh.mesh = gm
+	var gmat := StandardMaterial3D.new()
+	gmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gmat.albedo_color = Color(0.45, 0.72, 1.0, 0.35)
+	gh.material_override = gmat
+	gh.set_meta("flat", true)
+	gh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(gh)
+	gh.position = deep
+	gh.create_tween().tween_callback(gh.queue_free).set_delay(0.1)
+
 
 static func arm_streak(parent: Node3D, hands: Vector3, dir: Vector3,
 		strong: bool = false) -> void:

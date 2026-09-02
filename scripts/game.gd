@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.69"
+const VERSION := "v0.70"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2667,7 +2667,7 @@ func _drive_pose() -> void:
 				# 손대기 **전**의 자리를 돌려주므로, 그걸로 재면 팔을 뻗어 놓고도
 				# 손이 몸 옆에 있는 것으로 계산됩니다(models.gd 의 add_anchor).
 				_probe_seen.clear()
-				for b in ["LeftHand", "RightHand", "LeftArm", "RightArm", "Chest"]:
+				for b in ["LeftHand", "RightHand", "LeftArm", "RightArm", "Head"]:
 					var a := BoneAttachment3D.new()
 					a.bone_name = b
 					r.skel.add_child(a)
@@ -2691,12 +2691,22 @@ func _drive_pose() -> void:
 			elif _frames == 45:
 				# 선딜 0.26초 = 15.6프레임. 여기가 감은 끝입니다.
 				_probe_hand_err("감은 끝")
-			elif _frames == 48:
-				_probe_hand_err("지나가는 중")
-				print("[리그] 칠 때 사거리 %.2fm  베개끝 높이 %.2f" % [
+				# **어깨 뒤로 세워 올린 베개가 머리를 뚫지 않나.** 감는 각을
+				# 108도까지 키우면서 손이 머리 옆으로 올라옵니다.
+				var head: Vector3 = (_probe_seen[4] as Node3D).global_position
+				var ha: Vector3 = pillow.rig.hands()
+				var hb: Vector3 = pillow.rig.tip()
+				var hv := hb - ha
+				var hu := clampf((head - ha).dot(hv) / maxf(hv.length_squared(), 0.0001),
+					0.0, 1.0)
+				print("[리그] 감은 끝 베개가 머리에서 %.2f (0.25 넘어야 안 뚫음)" % [
+					(ha + hv * hu).distance_to(head)])
+			elif _frames == 50:
+				_probe_hand_err("가장 뻗은 데")
+				print("[리그] 가장 뻗었을 때 사거리 %.2fm  베개끝 높이 %.2f" % [
 					pillow.rig.reach(), pillow.rig.tip().y])
 				_probe_swept()
-			elif _frames > 45 and _frames < 53 and is_instance_valid(_probe_foe):
+			elif _frames > 45 and _frames < 58 and is_instance_valid(_probe_foe):
 				_probe_swept()
 
 			elif _frames == 66:
@@ -2768,9 +2778,12 @@ func _drive_pose() -> void:
 			elif _frames == 26:
 				print("[소울] 감는 중(0.03초): 걸음배율 %.2f  적 체력 변화 %.0f" % [
 					player.ext_move_scale, float(_probe_foe.hp) - _probe_t0])
-			elif _frames == 42:
-				# 선딜 0.26 = 15.6프레임. 여기(0.30초)면 지나간 뒤입니다.
-				print("[소울] 지나간 뒤(0.30초): 걸음배율 %.2f  맞았나 %s" % [
+			elif _frames == 52:
+				# 선딜 0.26 + 판정 0.16 = 0.42초 = 25프레임. 여기(0.47초)면
+				# 다 지나간 뒤입니다. 42프레임(0.30초)에서 보다가 옮겼습니다 -
+				# 판정 구간을 0.10 에서 0.16 으로 늘리면서 그때는 아직
+				# **지나가는 중**이 됐습니다.
+				print("[소울] 지나간 뒤(0.47초): 걸음배율 %.2f  맞았나 %s" % [
 					player.ext_move_scale, str(pillow._swing_hit)])
 			elif _frames == 70:
 				print("[소울] 다 돌린 뒤(0.77초): 걸음배율 %.2f  휘두르는 중 %s" % [
@@ -2791,7 +2804,7 @@ func _drive_pose() -> void:
 					kinds[n] = int(kinds.get(n, 0)) + 1
 				print("[소울] 패턴 30번: %s  이어 나온 횟수 %.0f" % [str(kinds), _probe_t1])
 				get_tree().quit()
-			elif _frames > 24 and _frames < 45 and is_instance_valid(_probe_foe):
+			elif _frames > 24 and _frames < 55 and is_instance_valid(_probe_foe):
 				# **재는 동안 제자리에 붙듭니다.** 이 줄은 사슬의 **맨 뒤**에
 				# 있어야 합니다 - 앞에 두면 26·42프레임의 확인을 통째로
 				# 삼켜서, 아무 소리 없이 검사가 사라집니다(그렇게 한 번 놓쳤습니다).

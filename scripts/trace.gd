@@ -340,6 +340,9 @@ static func report() -> String:
 			_draw[i2], _node[i2], _foe[i2], _floor[i2], _res[i2],
 			_mark[i2] if _mark[i2] != "" else "-"])
 	out.append("")
+	out.append("스크립트가 ms 보다 크면 그 칸은 못 믿습니다 - 엔진의 계기가 한 프레임")
+	out.append("밀려 나옵니다(끊긴 프레임에서 480ms 가 찍힌 적이 있습니다).")
+	out.append("「게임」은 제가 직접 잰 것이라 늘 맞습니다.")
 	out.append("「게임」은 game.gd 의 _process 가, 「나머지스크립트」는 적·소품·UI 가")
 	out.append("각자 쓴 시간입니다. 스크립트 = 게임 + 나머지스크립트.")
 	out.append("「엔진」이 크면 우리 코드가 아니라 그리는 시간입니다")

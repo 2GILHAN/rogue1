@@ -49,8 +49,11 @@ extends Node
 ## 밀기(달려들기)나 고함(즉발 부채꼴)을 안 쓴 이유가 그것입니다. 둘 다 누르면
 ## 그 자리에서 결과가 나서, 적의 패턴을 읽을 이유가 생기지 않습니다.
 const SWING_WINDUP := 0.26
-const SWING_ACTIVE := 0.10
-const SWING_RECOVER := 0.30
+## **0.10초에서 늘렸습니다.** 감는 각을 62도에서 108도로 키우면서 지나가는
+## 각이 136도에서 212도가 됐는데, 0.10초면 60프레임에서도 여섯 장이라
+## 휘두른 것이 아니라 **베개가 순간이동한 것**으로 보입니다(폰은 그 절반입니다).
+const SWING_ACTIVE := 0.16
+const SWING_RECOVER := 0.26
 ## 휘두르는 동안의 걸음 배율. 0 으로 묶지 않은 이유는 고함 때와 같습니다 -
 ## 아예 못 움직이면 예고를 보고 피하는 것과 겨룰 수가 없습니다.
 const SWING_MOVE := 0.30
@@ -63,33 +66,63 @@ const SWING_BREATH := 25.0
 ## 여기서는 두 손이 쥔 자리(그립)가 몸 둘레 어디를 지나는지만 적습니다.
 ##
 ##   쉼    오른쪽 옆에 늘어뜨림          걸을 때 베개가 발치에서 흔들립니다
-##   감기  오른쪽 뒤로, 조금 올림        "지금 친다" 가 보여야 피할 수 있습니다
-##   지남  왼쪽으로 가로질러, 팔을 폄    이때만 팔 + 베개가 한 선이 됩니다
+##   감기  **오른 어깨 뒤로 세워 올림**   "지금 친다" 가 보여야 피할 수 있습니다
+##   지남  왼쪽 끝까지 가로지름          이때만 팔 + 베개가 한 선이 됩니다
 ##   되돌림 다시 오른쪽 옆으로           후딜. 여기서 맞으면 못 막습니다
 ##
 ## 양수가 오른쪽입니다. **오른쪽으로 감았다가 왼쪽으로** 지나갑니다.
+##
+## 처음에는 62도 감아 -74도로 보냈습니다(136도). **옹졸했습니다** - 베개가
+## 몸 옆에 매달린 채로 도는 그림이라, 0.70m 짜리 물건을 두 손으로 쥐고 있는
+## 것이 안 보였습니다. 어깨 뒤(108도)에서 왼쪽 끝(-104도)까지 **212도**를
+## 지나갑니다.
 const REST_YAW := 26.0
-const WIND_YAW := 62.0
-const THROUGH_YAW := -74.0
-## 그립의 높이(어깨에서). 늘어뜨렸을 때는 배 높이, 칠 때는 가슴 높이입니다.
+const WIND_YAW := 108.0
+const THROUGH_YAW := -104.0
+## 그립의 높이(어깨에서). 늘어뜨렸을 때는 배 높이, **감을 때는 어깨 위**,
+## 칠 때는 가슴 높이입니다 - 위에서 아래로 비스듬히 지나갑니다.
 ##
 ## -0.30 으로 뒀다가 물렀습니다. 이 아이의 팔이 0.33m 라 어깨에서 30cm 아래는
 ## **팔을 다 쓴 자리**여서 두 손이 몸에 붙어 버리고, 거기서 0.70m 짜리 베개를
 ## 늘어뜨리면 **끝이 바닥 아래로 15cm 들어갑니다.**
 const REST_LIFT := -0.16
-const WIND_LIFT := -0.08
+## **어깨 위로 못 듭니다.** 108도로 감으면 손이 머리 옆으로 오는데, 이 아이는
+## 머리통 반지름이 0.25m 라 거기가 곧 머리 속입니다(재 봤습니다: 베개 선이
+## 머리뼈에서 0.11m). 낮게 감고 **올려 치는** 쪽으로 갑니다.
+const WIND_LIFT := -0.13
 const HIT_LIFT := -0.02
-## 팔을 얼마나 펴는가. **칠 때만 1.0** 입니다 - 그 순간에만 사거리가 다 납니다.
+## 팔을 얼마나 펴는가.
+##
+## **각도로 정합니다.** 앞쪽 55도 안이면 다 펴고, 거기서 더 돌아갈수록 접힙니다 -
+## 사람이 방망이를 휘두를 때 하는 일이 그것입니다. 뒤로 감을 때는 손이 어깨에
+## 붙고(팔이 접혀야 뒤로 갈 수 있습니다), 앞을 지날 때 쭉 펴지고, 넘어가면서
+## 다시 접힙니다. **팔이 가장 긴 순간이 곧 상대가 있는 자리**가 됩니다.
+const EXTEND_FULL_TO := 55.0
+const EXTEND_FALL := 70.0
+const EXTEND_MIN := 0.62
 const REST_EXTEND := 0.55
-const WIND_EXTEND := 0.72
 ## 쉴 때 베개가 늘어지는 각. 0 이면 똑바로 아래인데, 그러면 이 아이 키(1.25m)
 ## 에 0.70m 짜리 베개라 **끝이 바닥을 뚫습니다.** 0.30 이면 63도쯤 기울어
 ## 끝이 바닥을 스칩니다 - 질질 끄는 그림이 이 판에 맞습니다.
 const REST_HANG := 0.30
+## 감았을 때. **어깨 위로 세우려다 물렀습니다.**
+##
+## 1.38(위로 34도)이면 야구 방망이처럼 어깨 뒤로 세운 그림인데, 이 아이는 머리통
+## 반지름이 0.25m 라 베개 몸통이 **머리를 지나갑니다**(재 봤습니다: 1.38 에서
+## 0.19m, 1.15 에서 0.23m). 사람은 팔이 머리보다 훨씬 길어서 되는 동작이고,
+## 머리가 몸의 3분의 1 인 아이에게는 안 되는 동작입니다.
+##
+## 0.95(거의 수평)면 베개가 **뒤로 곧게 뻗어** 머리를 비켜 갑니다. 그때 가장
+## 가까운 것은 베개가 아니라 두 손이고(0.25m, 그나마 머리뼈 기준이라 실제
+## 머리통까지는 더 멉니다), 뒤로 뻗은 0.70m 는 내려다보는 카메라에서 오히려
+## 더 잘 보입니다.
+const WIND_HANG := 0.95
 
 ## 베개의 두께·폭 몫. 판정은 **손에서 베개 끝까지의 선분**과 상대 몸의 거리로
 ## 보는데, 베개는 선이 아니라 두께가 있는 물건이라 그만큼 더 줍니다.
 const PILLOW_HALF := 0.12
+## 한 프레임을 몇 번 나눠 보는가. 아래 `_drive_swing` 에 이유가 있습니다.
+const HIT_STEPS := 3
 
 ## ── 상대의 패턴 ────────────────────────────────────────────
 ##
@@ -119,8 +152,11 @@ const PATTERNS := [
 ## 과 후려치기의 follow-through 가 아직 도는 중이었습니다 - 베개를 내리꽂는
 ## 그림이 나오기도 전에 이미 다음 패턴의 몸이 되어 있었습니다.
 const REPICK_AFTER := 0.45
-## 후려친 뒤 베개가 끝까지 지나가는 시간.
-const FOLLOW_TIME := 0.26
+## 후려친 뒤 베개가 끝까지 지나가는 시간. 호가 커진 만큼 늘렸습니다.
+const FOLLOW_TIME := 0.34
+## 상대가 후려칠 때 **예고가 끝나는 순간** 베개가 있는 각. 판정이 그때
+## 나므로(`Enemy._strike`) 베개도 그때 정면을 조금 지나 있어야 합니다.
+const FOE_HIT_YAW := -18.0
 
 ## 떨어진 베개로 쓰는 소품. `soft` 이라 던져도 안 아픕니다 - 베개는 주우러
 ## 가는 물건이지 무기가 아닙니다(무기 노릇은 손에 든 동안 합니다).
@@ -278,49 +314,21 @@ func _drive_swing(delta: float) -> void:
 		if player_has:
 			rig.aim(REST_YAW, REST_LIFT, REST_EXTEND, REST_HANG, 12.0, delta)
 		return
+	var was := _swing
 	_swing += delta
 	player.ext_move_scale = SWING_MOVE
-
 	var total := SWING_WINDUP + SWING_ACTIVE + SWING_RECOVER
-	# **베개가 실제로 호를 그립니다.** 판정도 같은 시계를 봅니다 - 따로 두면
-	# 보이는 것과 맞는 것이 갈립니다.
-	var yaw := REST_YAW
-	var lift := REST_LIFT
-	var extend := REST_EXTEND
-	var hang := REST_HANG
-	if _swing < SWING_WINDUP:
-		# 감기. 뒤로 갈수록 느려집니다(끝에서 한 박자 멈춰야 "온다" 가 보입니다).
-		var t := _swing / SWING_WINDUP
-		var e := 1.0 - (1.0 - t) * (1.0 - t)
-		yaw = lerpf(REST_YAW, WIND_YAW, e)
-		lift = lerpf(REST_LIFT, WIND_LIFT, e)
-		extend = lerpf(REST_EXTEND, WIND_EXTEND, e)
-		hang = lerpf(REST_HANG, 0.45, e)
-	elif _swing < SWING_WINDUP + SWING_ACTIVE:
-		# 지나가기. **가속합니다** - 등속으로 돌면 미는 것으로 보입니다.
-		var t := (_swing - SWING_WINDUP) / SWING_ACTIVE
-		var e := t * t * (3.0 - 2.0 * t)
-		yaw = lerpf(WIND_YAW, THROUGH_YAW, e)
-		lift = lerpf(WIND_LIFT, HIT_LIFT, e)
-		extend = lerpf(WIND_EXTEND, 1.0, minf(t * 2.5, 1.0))
-		# 베개는 **먼저 펴지고** 몸이 따라옵니다. 늘어진 채로 도는 것이 아니라
-		# 원심력으로 펴져 나가는 그림입니다.
-		hang = lerpf(0.45, 1.0, minf(t * 3.0, 1.0))
-	else:
-		var t := (_swing - SWING_WINDUP - SWING_ACTIVE) / SWING_RECOVER
-		yaw = lerpf(THROUGH_YAW, REST_YAW, t)
-		lift = lerpf(HIT_LIFT, REST_LIFT, t)
-		extend = lerpf(1.0, REST_EXTEND, t)
-		hang = lerpf(1.0, REST_HANG, t)
-	rig.aim(yaw, lift, extend, hang)
-	# **허리와 골반이 같이 틉니다.** 앞으로 숙이는 몫은 지나가는 구간에서만
-	# 줍니다 - 감을 때 숙이면 이미 친 것으로 보입니다.
-	player.ext_pose = rig.lean(10.0 * clampf(hang, 0.0, 1.0))
 
-	# 판정은 **지나가는 0.10초 동안 매 프레임** 봅니다. 한 번만 보면 그
-	# 프레임에 어디 있었느냐가 전부라, 베개가 훑고 지나간 자리는 안 세어집니다.
-	if not _swing_hit and _swing >= SWING_WINDUP \
-			and _swing < SWING_WINDUP + SWING_ACTIVE:
+	# **판정은 프레임 사이도 봅니다.**
+	#
+	# 지나가는 구간이 0.16초에 212도라 한 프레임에 22도씩 갑니다. 베개 끝은
+	# 그 사이에 40cm 를 가는데 상대 몸은 반지름 20cm 라, 프레임마다 한 번씩만
+	# 보면 **끝이 상대를 건너뛸 수 있습니다.** 시계를 셋으로 쪼개 봅니다.
+	for i in HIT_STEPS:
+		var at: float = was + delta * float(i + 1) / float(HIT_STEPS)
+		_aim_at(at)
+		if _swing_hit or at < SWING_WINDUP or at >= SWING_WINDUP + SWING_ACTIVE:
+			continue
 		if is_instance_valid(foe) and _pillow_hits(rig, foe):
 			_swing_hit = true
 			# `from_pos` 를 줍니다. 안 주면 앞을 막는 상대도 못 막습니다.
@@ -331,6 +339,53 @@ func _drive_swing(delta: float) -> void:
 		_swing = -1.0
 		player.ext_move_scale = 1.0
 		player.ext_pose = {}
+
+
+func _extend_for(yaw: float) -> float:
+	## 그 각에서 팔을 얼마나 펴는가. 앞쪽이면 다 펴고 뒤로 갈수록 접힙니다.
+	return clampf(1.0 - maxf(absf(yaw) - EXTEND_FULL_TO, 0.0) / EXTEND_FALL,
+		EXTEND_MIN, 1.0)
+
+
+func _aim_at(t: float) -> void:
+	## **시각 하나로 베개 자리를 냅니다.** 그림과 판정이 같은 함수를 보므로
+	## 둘이 갈라질 수가 없고, 프레임 사이를 들여다볼 수도 있습니다.
+	var yaw := REST_YAW
+	var lift := REST_LIFT
+	var hang := REST_HANG
+	var arc := 0.0
+	if t < SWING_WINDUP:
+		# 감기. 뒤로 갈수록 느려집니다(끝에서 한 박자 멈춰야 "온다" 가 보입니다).
+		var e: float = 1.0 - pow(1.0 - clampf(t / SWING_WINDUP, 0.0, 1.0), 2.0)
+		yaw = lerpf(REST_YAW, WIND_YAW, e)
+		lift = lerpf(REST_LIFT, WIND_LIFT, e)
+		hang = lerpf(REST_HANG, WIND_HANG, e)
+		arc = e
+	elif t < SWING_WINDUP + SWING_ACTIVE:
+		# 지나가기. **가속했다 감속합니다** - 등속으로 돌면 미는 것으로 보입니다.
+		var u: float = clampf((t - SWING_WINDUP) / SWING_ACTIVE, 0.0, 1.0)
+		var e: float = u * u * (3.0 - 2.0 * u)
+		yaw = lerpf(WIND_YAW, THROUGH_YAW, e)
+		lift = lerpf(WIND_LIFT, HIT_LIFT, e)
+		# 베개가 **먼저 펴집니다.** 늘어진 채로 도는 것이 아니라 원심력으로
+		# 펴져 나가는 그림입니다.
+		hang = lerpf(WIND_HANG, 1.0, minf(u * 3.0, 1.0))
+		arc = 1.0
+	else:
+		var u: float = clampf((t - SWING_WINDUP - SWING_ACTIVE) / SWING_RECOVER,
+			0.0, 1.0)
+		yaw = lerpf(THROUGH_YAW, REST_YAW, u)
+		lift = lerpf(HIT_LIFT, REST_LIFT, u)
+		hang = lerpf(1.0, REST_HANG, u)
+		arc = 1.0 - u
+	# 팔은 **각도가 정합니다.** 쉴 때만 느슨하게 두고, 휘두르는 동안은 앞쪽에서
+	# 다 펴집니다.
+	var extend: float = lerpf(REST_EXTEND, _extend_for(yaw),
+		clampf(arc * 1.6, 0.0, 1.0))
+	rig.aim(yaw, lift, extend, hang)
+	# **허리와 골반이 같이 틉니다.** 앞으로 숙이는 몫은 지나가는 구간에서만
+	# 줍니다 - 감을 때 숙이면 이미 친 것으로 보입니다.
+	player.ext_pose = rig.lean(10.0 * clampf(hang, 0.0, 1.0) * arc)
 
 
 func _pillow_hits(from: PillowRig, other: Node3D) -> bool:
@@ -384,26 +439,26 @@ func _drive_foe_rig(delta: float) -> void:
 		# 후려치기. 감았다가 **예고가 끝나는 순간 정면을 지납니다** - 판정이
 		# 그때 나므로(`Enemy._strike`), 베개도 그때 거기 있어야 합니다.
 		var t := clampf(1.0 - wind / total, 0.0, 1.0)
-		if t < 0.70:
-			var e := t / 0.70
-			yaw = lerpf(REST_YAW, WIND_YAW, e)
+		if t < 0.66:
+			var e := t / 0.66
+			yaw = lerpf(REST_YAW, WIND_YAW, 1.0 - pow(1.0 - e, 2.0))
 			lift = lerpf(REST_LIFT, WIND_LIFT, e)
-			extend = lerpf(REST_EXTEND, WIND_EXTEND, e)
-			hang = lerpf(REST_HANG, 0.45, e)
+			hang = lerpf(REST_HANG, WIND_HANG, e)
 		else:
-			var e := (t - 0.70) / 0.30
-			yaw = lerpf(WIND_YAW, -24.0, e * e * (3.0 - 2.0 * e))
+			var e := (t - 0.66) / 0.34
+			yaw = lerpf(WIND_YAW, FOE_HIT_YAW, e * e * (3.0 - 2.0 * e))
 			lift = lerpf(WIND_LIFT, HIT_LIFT, e)
-			extend = lerpf(WIND_EXTEND, 1.0, minf(e * 2.0, 1.0))
-			hang = lerpf(0.45, 1.0, minf(e * 2.5, 1.0))
+			hang = lerpf(WIND_HANG, 1.0, minf(e * 3.0, 1.0))
+		# 팔은 주인공과 **같은 규칙**으로 폅니다 - 앞쪽에서 다 펴고 뒤에서 접힙니다.
+		extend = _extend_for(yaw)
 		rate = 0.0
 	elif wind >= 0.0 and mode == "slam":
 		# 내려치기. **머리 위로 세웁니다**(hang 2 면 베개가 위를 봅니다).
 		var t := clampf(1.0 - wind / total, 0.0, 1.0)
 		yaw = lerpf(REST_YAW, 0.0, t)
-		lift = lerpf(REST_LIFT, 0.30, t)
-		extend = lerpf(REST_EXTEND, 0.34, t)
-		hang = lerpf(REST_HANG, 1.85, t)
+		lift = lerpf(REST_LIFT, 0.34, t)
+		extend = lerpf(REST_EXTEND, 0.45, t)
+		hang = lerpf(REST_HANG, 1.9, t)
 		rate = 0.0
 	elif slam_t > 0.0:
 		# 내리꽂은 자리. 앞 아래로 눌러 놓습니다 - 바닥에 그린 원이 그 자리입니다.
@@ -413,11 +468,11 @@ func _drive_foe_rig(delta: float) -> void:
 		hang = 1.0
 		rate = 26.0
 	elif wind >= 0.0 and mode == "charge":
-		# 달려들기 예고. 뒤로 조금 감고 몸을 낮춥니다.
-		yaw = 20.0
-		lift = -0.18
-		extend = 0.60
-		hang = 0.40
+		# 달려들기 예고. 뒤로 감고 몸을 낮춥니다.
+		yaw = 62.0
+		lift = -0.10
+		extend = _extend_for(62.0)
+		hang = 0.85
 	elif charge > 0.0:
 		# 달리는 중. **베개를 앞으로 내밀고** 옵니다.
 		yaw = 0.0
@@ -429,15 +484,15 @@ func _drive_foe_rig(delta: float) -> void:
 		# 후려친 뒤. 끝까지 지나가고 나서 돌아옵니다.
 		var t := 1.0 - _foe_follow / FOLLOW_TIME
 		if t < 0.4:
-			yaw = lerpf(-24.0, THROUGH_YAW, t / 0.4)
-			extend = 1.0
+			yaw = lerpf(FOE_HIT_YAW, THROUGH_YAW, t / 0.4)
+			extend = _extend_for(yaw)
 			lift = HIT_LIFT
 			hang = 1.0
 		else:
 			var e := (t - 0.4) / 0.6
 			yaw = lerpf(THROUGH_YAW, REST_YAW, e)
 			lift = lerpf(HIT_LIFT, REST_LIFT, e)
-			extend = lerpf(1.0, REST_EXTEND, e)
+			extend = lerpf(_extend_for(THROUGH_YAW), REST_EXTEND, e)
 			hang = lerpf(1.0, REST_HANG, e)
 		rate = 0.0
 
