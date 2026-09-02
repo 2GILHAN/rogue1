@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.52"
+const VERSION := "v0.54"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -249,6 +249,8 @@ var _wedge_prop: Prop = null
 var _wedge_from := Vector3.ZERO
 ## --pose=shoppause 에서 창을 열 때의 시계.
 var _probe_t0 := 0.0
+## 값이 바뀐 프레임만 찍으려고 들고 있는 지난 값.
+var _probe_t1 := 0.0
 ## --pose=death 에서 마지막으로 죽인 프레임.
 var _death_at := 0
 ## --pose=foecost 에서 프레임을 모으는 자리.
@@ -2310,6 +2312,199 @@ func _drive_pose() -> void:
 				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
 				_foe_n += 1
+		"guardhit":
+			# **베개 아이는 앞에서 오는 것을 다 막아야 합니다.**
+			#
+			# 주인공이 직접 때리는 것만 막고 있었습니다 - 다른 적을 밀어
+			# 부딪히면 그 판정이 통째로 건너뛰어져 정면에서도 피해가
+			# 들어갔습니다(`_crash_into_foe` 가 어디서 왔는지를 안 넘겼습니다).
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				var boss := Enemy.new()
+				world.add_child(boss)
+				boss.setup("pillow", 3, dungeon, player)
+				boss.speed = 0.0
+				boss.global_position = player.global_position + Vector3(0, 0, -4.0)
+				boss.died.connect(_on_enemy_died)
+				_probe_foe = boss
+				_alive += 1
+				var ammo := Enemy.new()
+				world.add_child(ammo)
+				ammo.setup("grunt", 1, dungeon, player)
+				ammo.speed = 0.0
+				# `--side=back` 이면 **뒤에서** 굴려 보냅니다. 앞만 막는 것이
+				# 규칙이라, 뒤는 그대로 들어가야 맞습니다 - 안 확인하면
+				# "다 막는 적" 이 되어도 모릅니다.
+				ammo.global_position = player.global_position + Vector3(0, 0,
+					-5.4 if _probe_arg == "back" else -2.2)
+				ammo.died.connect(_on_enemy_died)
+				_ram_foe = ammo
+				_alive += 1
+				_probe_t0 = boss.hp
+				_probe_t1 = boss.hp
+				print("[막는적] 베개 아이 체력 %.0f  막는 각 %.0f도" % [
+					boss.hp, float(boss.stats.get("guard_arc", 0.0))])
+			# 정면에서 굴러온 몸으로 받습니다.
+			# **몸이 돌 틈을 줍니다.** 세우자마자 밀면 베개 아이가 아직
+			# 주인공을 안 보고 있어서(실측: 보는 쪽 0.70,-0.71) 정면으로
+			# 민 것이 옆에서 온 것이 됩니다 - 막기가 검사되지 않습니다.
+			if _frames == 120 and is_instance_valid(_ram_foe):
+				# **살살 밉니다.** 세게 밀면 한 프레임에 상대를 지나쳐서,
+				# 부딪히는 순간에는 이미 뒤에 가 있습니다 - 그러면 "뒤에서
+				# 맞았으니 안 막힌 것" 이라 막기가 제대로 검사되지 않습니다
+				# (처음에 16 으로 밀어 놓고 그렇게 읽었습니다).
+				# 밀림은 거리를 가면서 죽습니다. 2m 를 6 으로 밀었더니
+				# 1.38m 에서 멈춰 **부딪히지도 못했습니다** - 그걸 "뒤에서도
+				# 안 아프다" 로 읽을 뻔했습니다. 닿는 자리에서 밉니다.
+				_ram_foe.knock_back(Vector3(0, 0,
+					1.0 if _probe_arg == "back" else -1.0) * 8.0)
+			# 부딪히는 순간의 자리와 방향을 봅니다. 막기는 **자리**로
+			# 판정하므로, 어디서 왔다고 넘겼는지가 전부입니다.
+			if _frames >= 118 and _frames <= 190 and is_instance_valid(_probe_foe) 					and is_instance_valid(_ram_foe):
+				var to: Vector3 = _ram_foe.global_position - _probe_foe.global_position
+				to.y = 0.0
+				# 체력이 바뀐 프레임만 찍습니다. 서른 줄을 다 보면
+					# 어느 순간에 들어갔는지가 묻힙니다.
+				if not is_equal_approx(_probe_foe.hp, _probe_t1):
+					_probe_t1 = _probe_foe.hp
+					var f: Vector3 = _probe_foe.facing()
+					print("[막는적] f=%d 체력 %.0f  앞쪽=%s(내적 %.2f) 거리 %.2f  베개가 보는 쪽 (%.2f,%.2f)  굴러온몸 (%.2f,%.2f)  베개 (%.2f,%.2f)  주인공 (%.2f,%.2f)" % [
+						_frames, _probe_foe.hp,
+						str(_probe_foe.guard_blocks(_ram_foe.global_position)),
+						to.normalized().dot(f), to.length(), f.x, f.z,
+						_ram_foe.global_position.x, _ram_foe.global_position.z,
+						_probe_foe.global_position.x, _probe_foe.global_position.z,
+						player.global_position.x, player.global_position.z])
+			if _frames in [130, 150, 180] and is_instance_valid(_probe_foe) 					and is_instance_valid(_ram_foe):
+				print("[막는적] f=%d 거리 %.2f  굴러온몸 z=%.2f  베개 z=%.2f  체력 %.0f" % [
+					_frames,
+					_ram_foe.global_position.distance_to(_probe_foe.global_position),
+					_ram_foe.global_position.z, _probe_foe.global_position.z,
+					_probe_foe.hp])
+			if _frames == 200 and is_instance_valid(_probe_foe):
+				print("[막는적] 정면으로 밀어 부딪힌 뒤: 체력 %.0f (처음 %.0f) — 안 깎여야 맞음" % [
+					_probe_foe.hp, _probe_t0])
+				# **앞뒤를 판정에 직접 물어봅니다.**
+				#
+				# 뒤에서 굴려 보내는 것으로는 검사가 안 됩니다 - 밀림이 거리를
+				# 가면서 죽어서 몸이 닿지도 못합니다(2m 를 8 로 밀어도
+				# 1.38m 에서 멈췄습니다). 판정 자체를 앞과 뒤에서 물어보는
+				# 편이 확실하고, 그것이 실제로 갈리는 자리입니다.
+				var fwd: Vector3 = _probe_foe.facing()
+				var front: Vector3 = _probe_foe.global_position + fwd * 1.2
+				var behind: Vector3 = _probe_foe.global_position - fwd * 1.2
+				print("[막는적] 판정: 앞에서 오면 막음=%s  뒤에서 오면 막음=%s (앞 true / 뒤 false 여야 맞음)" % [
+					str(_probe_foe.guard_blocks(front)),
+					str(_probe_foe.guard_blocks(behind))])
+		"heldwarn":
+			# **잡힌 적의 예고가 사라지는가.** 잡아 놓고도 바닥에 위험 구역이
+			# 남아 있으면, 없어진 공격을 피해 다니게 됩니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("brute", 3, dungeon, player)
+				e.global_position = player.global_position + Vector3(0.9, 0, 0)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+			# 예고가 돌기를 기다렸다가 잡습니다.
+			if _frames > 40 and _frames < 400 and is_instance_valid(_probe_foe) 					and _probe_foe._windup >= 0.0 and _probe_t0 <= 0.0:
+				_probe_t0 = 1.0
+				print("[잡힌예고] 잡기 전: 띠 %s  원 %s  부채꼴 %s" % [
+					str(_probe_foe._lane != null and _probe_foe._lane.visible),
+					str(_probe_foe._disc != null and _probe_foe._disc.visible),
+					str(_probe_foe._melee_fan != null and _probe_foe._melee_fan.visible)])
+				_probe_foe.hold(player)
+			if _probe_t0 > 0.0:
+				_probe_t0 += 1.0
+				if int(_probe_t0) == 6 and is_instance_valid(_probe_foe):
+					print("[잡힌예고] 잡은 뒤: 띠 %s  원 %s  부채꼴 %s  (셋 다 false 여야 맞음)" % [
+						str(_probe_foe._lane != null and _probe_foe._lane.visible),
+						str(_probe_foe._disc != null and _probe_foe._disc.visible),
+						str(_probe_foe._melee_fan != null and _probe_foe._melee_fan.visible)])
+		"block":
+			# **막는 자세가 실제로 어떤 모양인가.** 눈으로 보고 고르면 팔이
+			# 머리를 뚫거나 다리 앞뒤가 뒤집혀도 모릅니다 - 이 리그에서 이미
+			# 여러 번 그랬습니다(팔 앞뒤 · 무릎 방향 · 적 보폭).
+			#
+			# 뼈를 몸 기준(`_pivot`)으로 옮겨 재므로, 아이가 어느 쪽을 보고
+			# 있든 값이 같습니다. -Z 가 앞입니다.
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				player.parry_press()
+			if _frames == 32 and is_instance_valid(player):
+				# **그려지기 직전에 읽습니다.**
+				#
+				# 그냥 읽으면 자세 층이 아니라 **애니메이션이 덮어쓴 값**이
+				# 나옵니다 - 자세 층(SkeletonModifier3D)은 스켈레톤의 수정
+				# 단계에서 도는데 그것은 이 코드보다 뒤입니다. 처음에 그걸
+				# 모르고 "다리가 안 움직인다" 로 읽었습니다(뼈가 쉼 자세와
+				# 똑같이 나왔습니다).
+				var sk: Skeleton3D = Models.find_skeleton(player.body)
+				if sk != null:
+					# **뼈대가 다 갱신된 뒤에 읽습니다.**
+					#
+					# 자세 층(SkeletonModifier3D)은 스켈레톤의 수정 단계에서
+					# 도는데, 그건 이 코드보다 **뒤**입니다. 그냥 읽으면
+					# 애니메이션이 써 놓은 값이 나옵니다 - 처음에 그걸 모르고
+					# "다리가 안 움직인다" 로 읽었습니다(다리 뼈가 쉼 자세와
+					# 한 자리도 안 다르게 나왔습니다). `frame_pre_draw` 로도
+					# 안 됩니다. 이 신호라야 수정이 끝난 뒤입니다.
+					await sk.skeleton_updated
+				if sk == null:
+					print("[막기] 뼈를 못 찾았습니다")
+				else:
+					var inv := player.pivot.global_transform.affine_inverse()
+					var at := func(n: String) -> Vector3:
+						var i := sk.find_bone(n)
+						if i < 0:
+							return Vector3.INF
+						return inv * (sk.global_transform * sk.get_bone_global_pose(i)).origin
+					var head: Vector3 = at.call("Head")
+					var lh: Vector3 = at.call("LeftHand")
+					var rh: Vector3 = at.call("RightHand")
+					if lh == Vector3.INF:
+						lh = at.call("LeftForeArm")
+						rh = at.call("RightForeArm")
+					var lf: Vector3 = at.call("LeftFoot")
+					var rf: Vector3 = at.call("RightFoot")
+					var rk: Vector3 = at.call("RightLeg")
+					var msk: Skeleton3D = player._pose.get_skeleton()
+					print("[막기] 자세 층의 뼈대=%d  내가 읽는 뼈대=%d  같은가=%s" % [
+						msk.get_instance_id() if msk != null else -1,
+						sk.get_instance_id(), str(msk == sk)])
+					print("[막기] 자세 섞임 %.2f  막기시간 %.2f  지금 걸린 자세의 LeftArm=%s RightUpLeg=%s" % [
+						player._pose.weight, player._guard_pose,
+						str(player._pose.pose.get("LeftArm", "없음")),
+						str(player._pose.pose.get("RightUpLeg", "없음"))])
+					print("[막기] 머리 (%.2f, %.2f, %.2f)" % [head.x, head.y, head.z])
+					print("[막기] 왼손 머리와 %.3fm  오른손 머리와 %.3fm  (붙으면 뚫립니다)" % [
+						lh.distance_to(head), rh.distance_to(head)])
+					# **머리 뼈가 아니라 머리 한가운데**를 기준으로 봐야 합니다.
+					# 뼈는 목 위에 있고 머리통은 그보다 훨씬 위·앞으로
+					# 큽니다 - 뼈까지의 거리만 보면 얼굴을 뚫고 있어도
+					# "0.2m 떨어짐" 으로 읽힙니다.
+					var brain: Vector3 = head + Vector3(0, 0.12, -0.02)
+					print("[막기] 손 높이  왼 %.2f  오른 %.2f  (머리뼈 %.2f, 머리 한가운데 %.2f)" % [
+						lh.y, rh.y, head.y, brain.y])
+					print("[막기] 머리 한가운데와  왼 %.3fm  오른 %.3fm   두 손 사이 %.3fm" % [
+						lh.distance_to(brain), rh.distance_to(brain), lh.distance_to(rh)])
+					print("[막기] 오른무릎 앞으로 %.2fm(음수가 앞)  오른발 %.2fm  왼발 %.2fm" % [
+						rk.z, rf.z, lf.z])
+					print("[막기] 발 높이  오른 %.2f  왼 %.2f" % [rf.y, lf.y])
+					# **자세 층이 다리 뼈를 실제로 썼나.** 위치만 보면
+					# "안 움직였다" 인지 "재는 곳이 틀렸다" 인지 안 갈립니다.
+					for bn in ["RightUpLeg", "RightLeg", "LeftUpLeg", "LeftLeg",
+							"LeftArm", "LeftForeArm"]:
+						var bi := sk.find_bone(bn)
+						if bi < 0:
+							print("[막기] %s 뼈 없음" % bn)
+							continue
+						var e := sk.get_bone_pose_rotation(bi).get_euler() * 57.2958
+						var r := sk.get_bone_rest(bi).basis.get_euler() * 57.2958
+						print("[막기] %-12s 지금 (%6.1f,%6.1f,%6.1f)  쉼 (%6.1f,%6.1f,%6.1f)" % [
+							bn, e.x, e.y, e.z, r.x, r.y, r.z])
 		"buttons":
 			# **한 버튼이 둘로 갈리는가.** 공격 버튼은 이동 입력으로 밀기와
 			# 고함을 가릅니다 - 눌러 보기 전에 무엇이 나올지 알 수 있어야
@@ -4420,13 +4615,17 @@ func _on_read_done() -> void:
 
 
 func _on_touch_attack() -> void:
+	## **빨간 버튼은 막기입니다.** 여기가 `shout_press()` 로 남아 있어서
+	## 폰에서는 막기를 눌러도 고함이 나갔습니다 - 키보드 쪽(`_unhandled_input`)
+	## 만 고치고 이쪽을 빠뜨렸습니다. 같은 버튼이 두 군데서 배선됩니다.
 	if phase == Phase.PLAYING and is_instance_valid(player):
-		player.shout_press()
+		player.parry_press()
 
 
 func _on_touch_attack_release() -> void:
-	if is_instance_valid(player):
-		player.shout_release()
+	## 막기는 **뗄 때 할 일이 없습니다.** 판정 창은 누른 순간 열리고 시간이
+	## 닫습니다 - 떼는 것으로 닫으면 손가락을 얹고 있는 것이 답이 됩니다.
+	pass
 
 
 

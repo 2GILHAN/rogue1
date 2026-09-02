@@ -478,6 +478,16 @@ var _parry_from := Vector3.ZERO
 ## 느려진 시간이 끝나는 **실제** 시각(ms).
 var _parry_slow_until := 0
 var _parry_cd := 0.0
+## 막는 자세가 남는 시간. 판정 창(0.16~0.34초)보다 조금 길게 둡니다 - 창과
+## 똑같이 두면 자세가 들어가기도 전에 풀려서, 눌렀는데 아무 그림도 안 납니다.
+var _guard_pose := 0.0
+const GUARD_POSE_MIN := 0.30
+## 막는 동안 몸을 내리는 깊이(m).
+##
+## 엉덩이 높이는 `HIP` 로 **고정**입니다. 그래서 무릎만 접으면 발이 바닥에서
+## 떠오릅니다(재 봤습니다: 0.03m 에서 0.11m 로). 접은 만큼 몸을 내려야 오른발이
+## 바닥에 남습니다 - 구르기가 몸을 띄우는 것(`ROLL_LIFT`)과 같은 자리입니다.
+const GUARD_CROUCH := 0.09
 ## 구르고 나온 직후의 질주가 남은 시간(「이속」 Lv2).
 var _roll_burst := 0.0
 ## 지난 프레임에 구르는 중이었나. 끝나는 **그 프레임**을 잡으려는 값입니다.
@@ -622,6 +632,11 @@ func _physics_process(delta: float) -> void:
 	_invuln = maxf(0.0, _invuln - delta)
 	_parry_ready = maxf(0.0, _parry_ready - delta)
 	_parry_cd = maxf(0.0, _parry_cd - delta)
+	_guard_pose = maxf(0.0, _guard_pose - delta)
+	# **되돌리는 쪽을 잊으면 웅크린 채로 걸어 다닙니다.** 구르기가 자기
+	# 높이를 쓰는 동안에는 건드리지 않습니다.
+	if _guard_pose <= 0.0 and _roll_time <= 0.0 and body != null 			and not is_equal_approx(body.position.y, HIP):
+		body.position.y = HIP
 	_tick_parry(delta)
 	state.elapsed += delta
 
@@ -1620,6 +1635,18 @@ func _drive_pose_layer(delta: float) -> void:
 		want = 1.0
 	elif _lunge_time > 0.0 and _lunge_at != null:
 		pass          # 위에서 이미 정했습니다
+	elif _guard_pose > 0.0:
+		# **웅크린 만큼 몸을 내립니다.** 엉덩이 높이가 고정이라 무릎만 접으면
+		# 발이 바닥에서 떠오릅니다(재 봤습니다: 0.03 -> 0.11m).
+		if body != null:
+			var deep := clampf(_guard_pose / GUARD_POSE_MIN, 0.0, 1.0)
+			body.position.y = HIP - GUARD_CROUCH * deep
+		# **막는 자세가 고함보다 앞입니다.** 둘은 서로 다른 버튼이 됐지만,
+		# 고함을 지른 직후에 막기를 누르면 `_shout_hold` 가 아직 남아 있어서
+		# 팔이 뒤로 젖혀진 채로 막게 됩니다 - 지금 무엇을 하고 있는지는
+		# **마지막에 누른 것**이 말해야 합니다.
+		_pose.pose = PoseOverride.BLOCK
+		want = 1.0
 	elif _shout_hold > 0.0:
 		# **모으기 시작하는 순간부터** 팔이 뒤로 갑니다.
 		#
@@ -1756,6 +1783,7 @@ func parry_press() -> void:
 		return
 	_parry_cd = PARRY_COOLDOWN
 	_parry_ready = state.parry_window
+	_guard_pose = maxf(state.parry_window, GUARD_POSE_MIN)
 	# **연 것이 보여야 합니다.** 판정 창은 0.16~0.34초라, 아무 표시도 없으면
 	# 눌렀는지 안 눌렀는지조차 모릅니다.
 	Sfx.play_at(Sfx.PICK, 0.8, -8.0)

@@ -56,17 +56,24 @@ const BUTTON_ANGLES := {"shout": 252.0, "grab": 172.0}
 
 ## 버튼 그림. 무슨 일이 일어나는지가 그림에 그대로 들어 있습니다 -
 ## 소리 지르는 아이(빨강), 미는 아이(노랑), 구르는 아이(파랑).
-## 버튼 그림. **열쇠 이름은 안 바꿉니다** - 그림 파일도 코드 곳곳의 `kind`
-## 문자열도 이 이름을 쓰고 있어서, 하는 일이 바뀌었다고 이름까지 고치면
-## 고칠 곳이 여섯 군데로 늡니다.
+## 버튼 그림.
 ##
-##   shout -> 지금은 **막기**입니다(빨강)
-##   grab  -> 지금은 **공격**입니다(노랑). 제자리면 고함, 방향을 주면 밀기
-##   roll  -> 구르기(파랑)
+## **열쇠 이름(`kind`)은 안 바꿉니다** - 코드 곳곳이 이 문자열을 쓰고 있어서,
+## 하는 일이 바뀌었다고 이름까지 고치면 고칠 곳이 여섯 군데로 늡니다. 그림
+## 파일 이름은 **지금 하는 일**을 그대로 씁니다.
+##
+##   shout -> **막기** (`button_block`)
+##   grab  -> **공격** (`button_attack`). 제자리면 고함, 방향을 주면 밀기
+##   roll  -> 구르기 (`button_roll`)
+##
+## 원본은 900px 인데 화면에서는 **116px** 로 그립니다. 그대로 들이면 한 장에
+## 3.2MB(VRAM)라, `size_limit=256` 으로 자릅니다 - 폰에서 확대해도 충분하고
+## 세 장이 9.7MB 에서 0.8MB 가 됩니다. 압축은 안 겁니다(`compress/mode=0`):
+## 작은 UI 그림에 블록 압축을 걸면 테두리에 얼룩이 집니다.
 const BUTTON_ART := {
-	"shout": "res://assets/textures/buttons/button_red.png",
-	"grab": "res://assets/textures/buttons/button_yellow.png",
-	"roll": "res://assets/textures/buttons/button_blue.png",
+	"shout": "res://assets/textures/buttons/button_block.png",
+	"grab": "res://assets/textures/buttons/button_attack.png",
+	"roll": "res://assets/textures/buttons/button_roll.png",
 }
 
 var move := Vector2.ZERO

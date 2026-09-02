@@ -712,6 +712,13 @@ func _physics_process(delta: float) -> void:
 	if _dead or not is_instance_valid(target):
 		return
 	if held_by != null:
+		# **붙잡혀 있으면 아무것도 안 합니다. 다만 예고는 지워야 합니다.**
+		#
+		# 여기서 그냥 돌아가면 바닥에 칠해 둔 예고가 그 자리에 그대로
+		# 남습니다 - 잡아 놓고도 이미 없어진 공격의 위험 구역을 피해 다니게
+		# 됩니다(아래 `_hide_warnings` 를 부르는 자리는 여기보다 뒤라 영영
+		# 안 지나갑니다).
+		_hide_warnings()
 		return
 	# **책을 읽는 동안에는 멈춥니다.**
 	#
@@ -849,10 +856,21 @@ func _physics_process(delta: float) -> void:
 	_crash_check(pre)
 	_push_what_we_hit()
 	_drive_attack_pose(delta)
-	_drive_shout_fan(delta)
-	_drive_melee_fan(delta)
-	_drive_charge_lane(delta)
-	_drive_slam_disc(delta)
+	# **붙잡혀 있는 동안에는 예고를 안 그립니다.**
+	#
+	# 잡힌 아이는 아무것도 못 합니다(`hold` 이 `_windup` 을 지웁니다). 그런데
+	# 바닥에 칠해 둔 예고는 그 자리에 남아서, 이미 없어진 공격의 위험 구역이
+	# 계속 떠 있었습니다 - 잡아 놓고도 그 자리를 피해 다니게 됩니다.
+	#
+	# **넷을 다 끕니다.** 부채꼴 둘(맨손·호통)만 끄고 띠와 원을 놓치면, 잡은
+	# 아이가 박치기나 베개면 그 자리가 그대로 남습니다.
+	if held_by != null:
+		_hide_warnings()
+	else:
+		_drive_shout_fan(delta)
+		_drive_melee_fan(delta)
+		_drive_charge_lane(delta)
+		_drive_slam_disc(delta)
 	_drive_animation()
 
 
@@ -1346,6 +1364,22 @@ func _slam_center(reach: float) -> Vector3:
 
 func _slam_radius(reach: float) -> float:
 	return reach * 0.5
+
+
+func _hide_warnings() -> void:
+	## 바닥에 칠해 둔 예고 넷을 한꺼번에 끕니다. 붙잡혔을 때와 끊겼을 때가
+	## 같은 자리를 봅니다 - 하나라도 빠지면 없는 공격의 예고가 남습니다.
+	if _lane != null:
+		_lane.visible = false
+	_lane_flash = 0.0
+	if _disc != null:
+		_disc.visible = false
+	if _melee_fan != null:
+		_melee_fan.visible = false
+	_melee_flash = 0.0
+	if _shout_fan != null:
+		_shout_fan.visible = false
+	_fan_flash = 0.0
 
 
 func _show_slam_disc() -> void:
@@ -2266,7 +2300,13 @@ func _crash_into_foe(speed: float) -> bool:
 		# 부딪힌 둘 다 아픕니다. 한쪽만 아프면 밀린 몸이 상처 없는 무기가
 		# 되고, 그러면 적을 벽이 아니라 적에게 던지는 것만 답이 됩니다.
 		var hurt := speed * CRASH_FOE
-		other.take_damage(hurt, false, Vector3.ZERO)
+		# **어디서 왔는지를 넘깁니다.**
+		#
+		# 안 넘기면 `from_pos` 가 Vector3.INF 가 되고, 그건 「어디서 왔는지
+		# 모른다」 는 뜻이라 **앞을 막는 적도 못 막습니다.** 베개 든 아이는
+		# 앞이 막혀 있는데, 다른 적을 밀어서 부딪히면 그 판정이 통째로
+		# 건너뛰어져 정면에서도 피해가 들어갔습니다.
+		other.take_damage(hurt, false, Vector3.ZERO, 0.0, global_position)
 		# **연쇄(「밀기」 Lv3).** 부딪힌 적도 같은 방향으로 밀리고, 그 적이
 		# 또 부딪히면 한 번 더 - 남은 횟수를 하나 줄여 넘깁니다.
 		#
@@ -2276,7 +2316,7 @@ func _crash_into_foe(speed: float) -> bool:
 			other.knock_back(_crash_dir * (speed * 0.7), _chain_left - 1)
 		else:
 			other.knock_back(_crash_dir * (throw_knock * 0.6))
-		take_damage(hurt * 0.6, false, Vector3.ZERO)
+		take_damage(hurt * 0.6, false, Vector3.ZERO, 0.0, other.global_position)
 		_crash_mark()
 		return true
 	return false
@@ -2359,7 +2399,8 @@ func _hit_others_while_flying() -> void:
 		to.y = 0.0
 		if to.length() > 0.9 + float(other.get_meta("body_radius", 0.3)):
 			continue
-		other.take_damage(damage * 1.2, false, Vector3.ZERO)
+		# 날아가며 치는 것도 같습니다 - 어디서 왔는지를 넘깁니다.
+		other.take_damage(damage * 1.2, false, Vector3.ZERO, 0.0, global_position)
 		# 맞은 쪽도 **밀기와 같은 세기**로 밀립니다. 여기 숫자를 따로 두면
 		# 미는 힘을 키워도 던져서 치는 것만 그대로라, 같은 손에서 나온 두
 		# 기술이 다르게 자랍니다.
