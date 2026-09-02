@@ -24,10 +24,27 @@ const GRAVITY := 22.0
 
 ## 받아 낸 순간 세상이 느려지는 배속과, 그 시간(**실제 시간**입니다 - 느린
 ## 시간으로 재면 배속을 바꿀 때마다 길이가 같이 흔들립니다).
-## 막기를 연달아 누르지 못하게 하는 대기. **숨은 안 씁니다** - 숨으로 막으면
-## 숨이 빈 순간 방어가 통째로 사라져서, 가장 위험할 때 가장 못 막습니다.
-## 대기로 막으면 「연타로 뭉개기」만 막힙니다.
+## 막기를 연달아 **두드리지** 못하게 하는 대기. 패링 창은 이 간격으로만
+## 다시 열립니다 - 없으면 버튼을 떨듯이 눌러 창을 늘 열어 둘 수 있습니다.
+## 누르고 **있는** 것은 이 값과 무관하게 계속 막습니다.
 const PARRY_COOLDOWN := 0.50
+
+## ── 누르고 있는 동안의 막기 ────────────────────────────────────────
+##
+## 막기는 **두 가지**입니다. 누르고 있으면 계속 막고(값을 치릅니다), 오는
+## 것에 **맞춰 누르면** 패링이 됩니다(값이 없고 되받아칩니다).
+##
+## 계속 막는 쪽에 값이 없으면 누르고만 있는 것이 답이 되어, 타이밍을 맞출
+## 이유가 사라집니다. 숨으로 값을 매깁니다.
+
+## 막고 있는 동안 초당 줄어드는 숨.
+const BREATH_GUARD := 22.0
+## 막고 있는 동안의 걸음(배). 막은 채로 평소처럼 걸으면 그냥 켜 두는 것이
+## 답입니다.
+const GUARD_MOVE := 0.45
+## **앞쪽 이만큼만 막습니다.** 뒤는 그대로 맞습니다 - 등을 조심할 이유가
+## 없어지면 막기가 자세가 아니라 스위치가 됩니다(베개 아이와 같은 규칙).
+const GUARD_ARC := 130.0
 const PARRY_SLOW := 0.34
 const PARRY_SLOW_TIME := 0.42
 ## 상대 **머리 위** 어디까지 솟구치는가. 머리끝에서 이만큼 더 올라갑니다.
@@ -481,6 +498,8 @@ var _parry_cd := 0.0
 ## 막는 자세가 남는 시간. 판정 창(0.16~0.34초)보다 조금 길게 둡니다 - 창과
 ## 똑같이 두면 자세가 들어가기도 전에 풀려서, 눌렀는데 아무 그림도 안 납니다.
 var _guard_pose := 0.0
+## 막기 버튼을 누르고 있나.
+var _guard_held := false
 const GUARD_POSE_MIN := 0.30
 ## 막는 동안 몸을 내리는 깊이(m).
 ##
@@ -632,6 +651,11 @@ func _physics_process(delta: float) -> void:
 	_invuln = maxf(0.0, _invuln - delta)
 	_parry_ready = maxf(0.0, _parry_ready - delta)
 	_parry_cd = maxf(0.0, _parry_cd - delta)
+	if guarding():
+		# 막고 있는 동안 숨이 줍니다. 다하면 `guarding()` 이 false 가 되어
+		# 그 순간부터 그냥 맞습니다 - 손은 그대로 얹고 있어도 됩니다.
+		state.breath = maxf(0.0, state.breath - BREATH_GUARD * delta)
+		_guard_pose = maxf(_guard_pose, 0.12)
 	_guard_pose = maxf(0.0, _guard_pose - delta)
 	# **되돌리는 쪽을 잊으면 웅크린 채로 걸어 다닙니다.** 구르기가 자기
 	# 높이를 쓰는 동안에는 건드리지 않습니다.
@@ -771,6 +795,11 @@ func _physics_process(delta: float) -> void:
 var _slip := 0.0
 
 
+func guard_speed_mult() -> float:
+	## 막는 동안의 걸음(배). 막은 채로 평소처럼 걸으면 켜 두는 것이 답입니다.
+	return GUARD_MOVE if guarding() else 1.0
+
+
 func _accel_now() -> float:
 	## 미끄러지는 동안에는 **가는 쪽을 바꾸기 어렵습니다.** 속도를 줄이는 것이
 	## 아니라 조종이 늦어지는 것이라, 밟은 채로 방향을 꺾으면 그대로 밀려
@@ -804,6 +833,9 @@ func _ground_move(delta: float) -> void:
 	# 구르고 나온 직후의 질주(「이속」 Lv2).
 	if _roll_burst > 0.0:
 		speed *= ROLL_BURST_MULT
+	# **막고 있으면 느립니다.** 막은 채로 평소처럼 걸으면 켜 두는 것이
+	# 답이 되어, 언제 막을지가 아무것도 정하지 않습니다.
+	speed *= guard_speed_mult()
 	var target := wish * speed
 	# 뒤로 갈 때는 느립니다. 사람이 그렇기도 하고, 무엇보다 **뒤로도 같은
 	# 속도로 도망칠 수 있으면 돌아설 이유가 없습니다** - 적에게 등을 보이는
@@ -1758,6 +1790,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		# 막기로 바뀐 것**이라, 액션 이름까지 고치면 키 설정이 통째로
 		# 어긋납니다.
 		parry_press()
+	elif event.is_action_released("attack"):
+		parry_release()
 	elif event.is_action_pressed("dash"):
 		_try_dash()
 	elif event.is_action_pressed("grab"):
@@ -1772,18 +1806,44 @@ func attack() -> void:
 	parry_press()
 
 
+func parry_release() -> void:
+	## 손을 뗐습니다. 자세는 조금 더 남습니다 - 그 프레임에 뚝 끊기면 막다가
+	## 사라진 것이 아니라 자세가 튄 것으로 보입니다.
+	_guard_held = false
+
+
+## 한 대 막을 때마다 더 드는 숨. `guarding()` 이 이만큼은 남아 있는지 봅니다.
+const BREATH_GUARD_HIT := BREATH_GUARD * 0.4
+
+
+func guarding() -> bool:
+	## 지금 막고 있나. 숨이 다하면 못 막습니다 - **버티는 데도 값이 듭니다.**
+	##
+	## 「0 보다 크다」로는 모자랍니다. 숨은 늘 조금씩 차오르므로, 바닥난
+	## 뒤에도 한 톨 남은 것으로 계속 막힙니다(실측: 숨을 0 으로 두고 네
+	## 프레임 뒤에 맞았더니 1.6 이 차 있어서 그대로 막았습니다). **한 대
+	## 값만큼**은 있어야 합니다.
+	return (_guard_held and not _dead and _parry_air <= 0.0
+		and state.breath >= BREATH_GUARD_HIT)
+
+
 func parry_press() -> void:
 	## 판정 창을 엽니다. 이 안에 맞으면 그 한 대를 받아 냅니다.
 	##
 	## **공격은 안 나갑니다.** 순수한 방어입니다 - 누르면 뭐라도 나가는
 	## 기술이면 계속 누르는 것이 답이 되어, 타이밍을 맞출 이유가 없습니다.
-	if _dead or _parry_air > 0.0 or _parry_cd > 0.0:
+	if _dead or _parry_air > 0.0:
 		return
 	if _joy_time > 0.0 or _bound_time > 0.0 or _read_time > 0.0:
 		return
+	_guard_held = true
+	_guard_pose = maxf(_guard_pose, GUARD_POSE_MIN)
+	# **패링 창은 누른 그 순간에만** 열립니다. 누르고 있는 동안 계속 열려
+	# 있으면 막기와 패링이 같은 것이 되어, 맞추는 일이 없어집니다.
+	if _parry_cd > 0.0:
+		return
 	_parry_cd = PARRY_COOLDOWN
 	_parry_ready = state.parry_window
-	_guard_pose = maxf(state.parry_window, GUARD_POSE_MIN)
 	# **연 것이 보여야 합니다.** 판정 창은 0.16~0.34초라, 아무 표시도 없으면
 	# 눌렀는지 안 눌렀는지조차 모릅니다.
 	Sfx.play_at(Sfx.PICK, 0.8, -8.0)
@@ -3839,6 +3899,30 @@ func is_invulnerable() -> bool:
 	return _invuln > 0.0 or _dead
 
 
+func _guard_takes(from: Vector3) -> bool:
+	## 누르고 있는 막기가 이 한 대를 받아 내는가.
+	##
+	## **앞쪽 130도만** 막습니다. 뒤까지 막으면 등을 조심할 이유가 없어지고,
+	## 그러면 막기가 자세가 아니라 스위치가 됩니다(베개 아이와 같은 규칙).
+	if not guarding():
+		return false
+	var to := from - global_position
+	to.y = 0.0
+	if to.length_squared() < 0.0001:
+		return false
+	if to.normalized().dot(aim) < cos(deg_to_rad(GUARD_ARC) * 0.5):
+		return false
+	# 막을 때마다 숨을 한 번 더 씁니다. 계속 막고만 있으면 숨이 먼저 다합니다.
+	state.breath = maxf(0.0, state.breath - BREATH_GUARD_HIT)
+	_invuln = maxf(_invuln, 0.10)
+	_guard_pose = maxf(_guard_pose, GUARD_POSE_MIN)
+	Sfx.play(Sfx.PUSH, -8.0, 0.06)
+	Game.shake(0.12, 0.08)
+	Fx.ring(get_parent(), global_position + to.normalized() * 0.5,
+		Color(0.70, 0.85, 1.0, 0.55), 1.1, 0.22)
+	return true
+
+
 func _try_parry(from: Vector3) -> bool:
 	## **맞기 직전에 고함을 눌러 뒀나.** 눌러 뒀으면 그 한 대를 받아 냅니다.
 	if _parry_ready <= 0.0 or _dead or _parry_air > 0.0:
@@ -4015,6 +4099,12 @@ func take_damage(amount: float, from: Vector3 = Vector3.ZERO,
 	# 되고, 대신 받아 냅니다 - 무적(`is_invulnerable`)보다 뒤에 둡니다.
 	# 구르는 중이면 이미 안 맞으므로 패링이 될 일도 없습니다.
 	if _try_parry(from):
+		return
+	# **누르고 있으면 막습니다.** 앞쪽에서 오는 것만입니다.
+	#
+	# 패링보다 뒤입니다 - 맞춰 누른 사람은 되받아쳐야지 그냥 막고 마는 것이
+	# 아닙니다. 막기는 값(숨)을 치르고 피해만 지웁니다.
+	if _guard_takes(from):
 		return
 	# 맞으면 연속이 끊깁니다. 게이지는 두 됩니다(ultimate.gd 참고).
 	ultimate.broke()

@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.55"
+const VERSION := "v0.56"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2319,6 +2319,69 @@ func _drive_pose() -> void:
 				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
 				_foe_n += 1
+		"guardhold":
+			# **막기 셋을 가릅니다.**
+			#
+			#   누르고 있으면      앞에서 오는 것을 막습니다(숨을 씁니다)
+			#   맞춰 누르면        패링(되받아칩니다)
+			#   뒤에서 오면        그냥 맞습니다
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = false
+				debug_aim = Vector3(0, 0, -1)
+				state.hp = state.max_hp
+				state.breath = state.max_breath
+				print("[막기셋] 시작 체력 %.0f  숨 %.0f" % [state.hp, state.max_breath])
+			# ① 누르고 있는 동안 앞에서 맞습니다. 패링 창(0.16초)이 닫히고
+			#    한참 뒤라, 이건 순수하게 「누르고 있어서」 막는 것입니다.
+			if _frames == 30:
+				player.parry_press()
+			if _frames == 90:
+				player.take_damage(20.0, player.global_position + Vector3(0, 0, -1.5), 5.0)
+			if _frames == 92:
+				print("[막기셋] 누르고 있는 중 앞에서: 체력 %.0f  숨 %.0f  막는중=%s (안 깎여야 맞음)" % [
+					state.hp, state.breath, str(player.guarding())])
+			# ② 같은 상태에서 **뒤에서** 맞습니다.
+			if _frames == 100:
+				player.take_damage(20.0, player.global_position + Vector3(0, 0, 1.5), 5.0)
+			if _frames == 104:
+				print("[막기셋] 누르고 있는 중 뒤에서: 체력 %.0f (깎여야 맞음)" % state.hp)
+			# ③ 손을 떼고, 맞춰 눌러 패링.
+			if _frames == 150:
+				player.parry_release()
+				state.hp = state.max_hp
+				state.breath = state.max_breath
+			if _frames == 160 and is_instance_valid(player):
+				var e := Enemy.new()
+				world.add_child(e)
+				e.setup("grunt", 1, dungeon, player)
+				e.speed = 0.0
+				e.max_hp = 9999.0
+				e.hp = e.max_hp
+				e.global_position = player.global_position + Vector3(0, 0, -1.5)
+				e.died.connect(_on_enemy_died)
+				_probe_foe = e
+				_alive += 1
+			if _frames == 170:
+				player.parry_press()
+			if _frames == 176 and is_instance_valid(_probe_foe):
+				player.take_damage(20.0, _probe_foe.global_position, 5.0)
+			if _frames == 180:
+				print("[막기셋] 맞춰 누름: 체력 %.0f  패링중=%s (패링이어야 맞음)" % [
+					state.hp, str(player._parry_air > 0.0)])
+			# ④ 숨이 다하면 못 막습니다.
+			if _frames == 240:
+				player._end_parry() if player._parry_air > 0.0 else null
+				state.hp = state.max_hp
+				state.breath = 0.0
+				player.parry_press()
+			# **패링 창이 닫히기를 기다렸다** 때립니다. 누르자마자 때리면
+			# 그건 패링이라, 「숨이 없어서 못 막았나」 가 검사되지 않습니다.
+			if _frames == 268:
+				state.breath = 0.0
+				player.take_damage(20.0, player.global_position + Vector3(0, 0, -1.5), 5.0)
+			if _frames == 272:
+				print("[막기셋] 숨 0 에서 앞에서: 체력 %.0f  막는중=%s  패링중=%s (깎여야 맞음)" % [
+					state.hp, str(player.guarding()), str(player._parry_air > 0.0)])
 		"labpose":
 			# **실험실에서 고른 자세가 실제로 뼈에 닿는가.**
 			#
@@ -2341,6 +2404,35 @@ func _drive_pose() -> void:
 							if _riglab._pose_layer != null else -1.0])
 					print("[실험실] LeftArm 지금 (%.0f,%.0f,%.0f) 쉼 (%.0f,%.0f,%.0f)  RightUpLeg X %.0f" % [
 						ea.x, ea.y, ea.z, ra.x, ra.y, ra.z, el.x])
+					# **팔뚝이 어디를 가리키나.** 각도만 보면 접힌 것은
+					# 알아도 손끝이 위인지 아래인지는 모릅니다 - 팔꿈치에서
+					# 손으로 가는 방향을 봐야 합니다(Y 가 +1 이면 하늘).
+					var world := func(n: String) -> Vector3:
+						var i := sk.find_bone(n)
+						return (sk.global_transform * sk.get_bone_global_pose(i)).origin 							if i >= 0 else Vector3.INF
+					# **어깨 간격**을 같이 찍습니다. "손을 어깨보다 조금 더
+					# 벌린다" 같은 기준은 몸 크기에 따라 달라지므로, 절대
+					# 거리만 보면 캐릭터가 바뀔 때 말이 안 맞습니다.
+					var ls: Vector3 = world.call("LeftArm")
+					var rs: Vector3 = world.call("RightArm")
+					var lhh: Vector3 = world.call("LeftHand")
+					var rhh: Vector3 = world.call("RightHand")
+					if lhh != Vector3.INF and ls != Vector3.INF:
+						var hd: Vector3 = world.call("Head")
+						print("[실험실] 어깨 사이 %.3fm   두 손 사이 %.3fm   손/어깨 %.2f배   손이 머리뼈보다 %+.3fm" % [
+							ls.distance_to(rs), lhh.distance_to(rhh),
+							lhh.distance_to(rhh) / maxf(ls.distance_to(rs), 0.0001),
+							lhh.y - hd.y])
+					for side in ["Left", "Right"]:
+						var elbow: Vector3 = world.call(side + "ForeArm")
+						var hand: Vector3 = world.call(side + "Hand")
+						if hand == Vector3.INF:
+							print("[실험실] %sHand 뼈가 없습니다" % side)
+							continue
+						var dir := (hand - elbow).normalized()
+						print("[실험실] %-5s 팔뚝 방향 (%.2f,%.2f,%.2f)  손이 팔꿈치보다 %+.3fm  %s" % [
+							side, dir.x, dir.y, dir.z, hand.y - elbow.y,
+							"위" if dir.y > 0.3 else ("아래" if dir.y < -0.3 else "옆")])
 		"guardhit":
 			# **베개 아이는 앞에서 오는 것을 다 막아야 합니다.**
 			#
@@ -4654,9 +4746,9 @@ func _on_touch_attack() -> void:
 
 
 func _on_touch_attack_release() -> void:
-	## 막기는 **뗄 때 할 일이 없습니다.** 판정 창은 누른 순간 열리고 시간이
-	## 닫습니다 - 떼는 것으로 닫으면 손가락을 얹고 있는 것이 답이 됩니다.
-	pass
+	## 손을 뗐습니다. **누르고 있는 동안은 계속 막습니다.**
+	if is_instance_valid(player):
+		player.parry_release()
 
 
 
