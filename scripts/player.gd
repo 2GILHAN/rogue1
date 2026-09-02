@@ -26,18 +26,20 @@ const GRAVITY := 22.0
 ## 시간으로 재면 배속을 바꿀 때마다 길이가 같이 흔들립니다).
 const PARRY_SLOW := 0.34
 const PARRY_SLOW_TIME := 0.42
-## 상대 **머리 위** 어디에 서는가. 머리끝에서 이만큼 더 올라갑니다.
+## 상대 **머리 위** 어디까지 솟구치는가. 머리끝에서 이만큼 더 올라갑니다.
 const PARRY_RISE := 0.75
-## 공중에 머무는 시간. 이 안에 다음 누름이 없으면 제자리에 내려섭니다.
-const PARRY_HANG := 1.25
-## 뒷발로 찰 때의 피해 배수와 넘기는 힘.
-const PARRY_HEEL_MULT := 1.6
-const PARRY_HEEL_KNOCK := 11.0
-## 앞발로 찰 때의 피해 배수와, 그 반발로 내가 물러나는 거리(m).
-const PARRY_FRONT_MULT := 1.3
-const PARRY_FRONT_BACK := 1.9
-## 구르기로 내려설 때 상대 뒤로 얼마나 떨어져 서는가(m).
-const PARRY_BEHIND := 1.0
+## 솟구쳐 **머리를 밟기까지**, 그리고 재비를 돌아 **내려서기까지**.
+##
+## 후속 누름이 없습니다. 받아 내면 이 한 동작이 끝까지 돕니다 - 공중에서
+## 버튼을 고르게 하면, 받아 낸 그 순간에 무엇을 눌러야 하는지 배울 자리가
+## 없어서 손이 굳습니다.
+const PARRY_STOMP := 0.20
+const PARRY_FLIP := 0.46
+## 밟을 때의 피해 배수와 밀어내는 힘.
+const PARRY_STOMP_MULT := 1.7
+const PARRY_STOMP_KNOCK := 11.0
+## 재비를 돌아 **원래 자리보다 뒤로** 얼마나 물러나 내려서는가(m).
+const PARRY_BACK := 2.2
 const ACCEL := 55.0
 const FRICTION := 40.0
 ## 구르기: 4.0m/s 로 0.28초 = **1.12m** (1.76 -> 1.40 -> 1.12, 두 번 0.8배).
@@ -459,10 +461,14 @@ var _attack_cd := 0.0
 var _swing_time := 0.0
 ## 지금 눌러 둔 패링 판정 창. 0 보다 크면 오는 한 대를 받아 냅니다.
 var _parry_ready := 0.0
-## 받아 내고 공중에 떠 있는 남은 시간. 0 보다 크면 세 버튼이 **후속 동작**이
-## 됩니다(밀기=뒷발 · 구르기=뒤로 착지 · 고함=앞발).
+## 받아 내고 도는 한 동작의 남은 시간. 0 보다 크면 조작을 안 받습니다.
 var _parry_air := 0.0
+## 밟기가 이미 들어갔나. 한 번만 들어가야 합니다.
+var _parry_hit := false
 var _parry_foe: Node3D = null
+## 내려설 자리. 받아 낸 순간 정해 둡니다 - 도는 동안 상대가 밀려나므로,
+## 그때 가서 뽑으면 착지 자리가 상대를 따라 흔들립니다.
+var _parry_to := Vector3.ZERO
 ## 뛰어오르기 전 자리. 앞발로 차면 여기보다 조금 **뒤로** 내려섭니다.
 var _parry_from := Vector3.ZERO
 ## 느려진 시간이 끝나는 **실제** 시각(ms).
@@ -1946,8 +1952,7 @@ func grab_press() -> void:
 	## 잡을 것이 없으면 밀기입니다. 상황이 이미 하나로 정해져 있으므로 버튼을
 	## 나누지 않습니다 - 엄지가 갈 곳만 늘어납니다.
 	if _parry_air > 0.0:
-		# **받아 내고 떠 있는 중 — 뒷발입니다.**
-		_parry_heel()
+		# **받아 내고 도는 동안에는 아무것도 안 받습니다.**
 		return
 	if _mash():
 		return
@@ -2993,8 +2998,6 @@ func _begin_shout() -> bool:
 	##
 	## 지금은 **누르면 나갑니다.** 값은 숨 10 하나입니다.
 	if _parry_air > 0.0:
-		# **받아 내고 떠 있는 중 — 앞발입니다.**
-		_parry_front()
 		return false
 	if _mash():
 		return false
@@ -3375,8 +3378,6 @@ func _end_joyride() -> void:
 
 func _try_dash() -> void:
 	if _parry_air > 0.0:
-		# **받아 내고 떠 있는 중 — 상대 뒤로 내려섭니다.**
-		_parry_behind()
 		return
 	if _mash():
 		return
@@ -3798,18 +3799,23 @@ func _try_parry(from: Vector3) -> bool:
 
 
 func _begin_parry(foe: Node3D) -> void:
-	## 받아 냈습니다. **세상이 느려지고, 상대 머리 위로 솟구칩니다.**
+	## 받아 냈습니다. **여기서부터 끝까지 한 동작**입니다 - 솟구쳐 머리를 밟고,
+	## 재비를 돌아 원래 자리보다 뒤에 내려섭니다.
+	##
+	## 후속 누름을 안 받습니다. 공중에서 버튼을 고르게 하면 받아 낸 그 순간에
+	## 무엇을 눌러야 하는지 배울 자리가 없어서, 손이 굳은 채로 떨어집니다.
 	_parry_ready = 0.0
 	_parry_foe = foe
 	_parry_from = global_position
-	_parry_air = PARRY_HANG
-	_invuln = maxf(_invuln, PARRY_HANG + 0.2)
+	_parry_hit = false
+	_parry_air = PARRY_STOMP + PARRY_FLIP
+	_invuln = maxf(_invuln, _parry_air + 0.2)
 	# 받아 낸 한 대는 **없던 일이 됩니다.** 안 지우면 내려서는 순간 그
 	# 공격이 마저 들어옵니다.
 	if foe.has_method("interrupt"):
 		foe.call("interrupt", 0.9)
-	# 구르기·밀기·던지기 같은 것이 돌고 있으면 다 접습니다. 공중에서 그것들이
-	# 계속 돌면 몸이 두 군데에 있는 것이 됩니다.
+	# 돌고 있던 것들을 다 접습니다. 공중에서 계속 돌면 몸이 두 군데에 있는
+	# 것이 됩니다.
 	_dash_time = 0.0
 	_roll_time = 0.0
 	_push_time = 0.0
@@ -3817,23 +3823,22 @@ func _begin_parry(foe: Node3D) -> void:
 	_lunge_at = null
 	_swing_time = 0.0
 
-	# **상대 머리 위**입니다. 키는 적마다 다르므로 발밑이 아니라 키에서 뽑습니다.
-	var head: float = float(foe.get_meta("body_height", 1.2))
-	global_position = Vector3(foe.global_position.x,
-		foe.global_position.y + head + PARRY_RISE, foe.global_position.z)
-	velocity = Vector3.ZERO
-	# 아래를 봅니다 - 상대를 내려다보는 자리라야 다음 동작이 읽힙니다.
-	var to: Vector3 = foe.global_position - _parry_from
-	to.y = 0.0
-	if to.length_squared() > 0.0001:
-		aim = to.normalized()
+	var dir: Vector3 = foe.global_position - _parry_from
+	dir.y = 0.0
+	if dir.length_squared() > 0.0001:
+		dir = dir.normalized()
+	else:
+		dir = aim
+	aim = dir
+	# **내려설 자리를 지금 정합니다.** 도는 동안 상대가 밀려나므로, 그때 가서
+	# 뽑으면 착지 자리가 상대를 따라 흔들립니다.
+	_parry_to = _parry_from - dir * PARRY_BACK
+	_parry_to.y = _parry_from.y
 
 	_slow_world()
 	Sfx.play(Sfx.PUSH, 0.0, 0.0)
 	Sfx.play_at(Sfx.PICK, 1.5, -2.0)
 	Game.shake(0.30, 0.16)
-	Fx.ring(get_parent(), foe.global_position + Vector3(0, head * 0.6, 0),
-		Fx.RUSH_COLOR, 2.2, 0.35)
 	Fx.burst(get_parent(), _parry_from + Vector3(0, 0.9, 0),
 		Color(1.0, 0.95, 0.8), 12, 3.6)
 	parried.emit()
@@ -3856,105 +3861,81 @@ func _restore_time() -> void:
 
 
 func _tick_parry(delta: float) -> void:
-	## 느려진 시간을 되돌리고, 공중에 머무는 시간을 셉니다.
+	## 느려진 시간을 되돌리고, 받아 낸 뒤의 한 동작을 굴립니다.
 	if _parry_slow_until > 0 and Time.get_ticks_msec() >= _parry_slow_until:
 		_restore_time()
 	if _parry_air <= 0.0:
 		return
-	# 상대가 살아 있으면 그 머리 위에 계속 붙어 있습니다 - 밀려나거나
-	# 쓰러지는 동안 내가 허공에 남으면 무엇을 밟고 선 것인지 안 보입니다.
-	if is_instance_valid(_parry_foe):
-		var head: float = float(_parry_foe.get_meta("body_height", 1.2))
-		global_position = Vector3(_parry_foe.global_position.x,
-			_parry_foe.global_position.y + head + PARRY_RISE,
-			_parry_foe.global_position.z)
 	_parry_air -= delta
+	var flip_left := minf(_parry_air, PARRY_FLIP)
+	if _parry_air > PARRY_FLIP:
+		# **솟구치는 마디.** 상대 머리 위로 올라갑니다.
+		var k := 1.0 - clampf((_parry_air - PARRY_FLIP) / PARRY_STOMP, 0.0, 1.0)
+		var head := 1.2
+		var top := _parry_from
+		if is_instance_valid(_parry_foe):
+			head = float(_parry_foe.get_meta("body_height", 1.2))
+			top = _parry_foe.global_position
+		global_position = _parry_from.lerp(
+			Vector3(top.x, top.y + head + PARRY_RISE, top.z), k)
+	else:
+		if not _parry_hit:
+			_parry_stomp()
+		# **재비를 돌아 내려서는 마디.** 뒤로 물러나면서 한 바퀴 돕니다.
+		var k2 := 1.0 - clampf(flip_left / PARRY_FLIP, 0.0, 1.0)
+		var head2 := 1.2
+		var top2 := _parry_from
+		if is_instance_valid(_parry_foe):
+			head2 = float(_parry_foe.get_meta("body_height", 1.2))
+			top2 = _parry_foe.global_position
+		var from_top := Vector3(top2.x, top2.y + head2 + PARRY_RISE, top2.z)
+		var pos := from_top.lerp(_parry_to, k2)
+		# 도는 동안 살짝 더 떠오릅니다 - 곧장 떨어지면 재비가 아니라
+		# 미끄러지는 것으로 보입니다.
+		pos.y += sin(k2 * PI) * 0.55
+		global_position = pos
+		if pivot != null:
+			# **뒤로 한 바퀴.** 물러나는 쪽으로 도는 것이 재비입니다.
+			pivot.rotation.x = -TAU * k2
+	velocity = Vector3.ZERO
 	if _parry_air <= 0.0:
-		_end_parry(_parry_from)
+		_end_parry()
 
 
-func _end_parry(land_at: Vector3) -> void:
-	## 내려섭니다. 어디로 내려서는지는 부르는 쪽이 정합니다.
+func _parry_stomp() -> void:
+	## **머리를 밟습니다.** 한 번만 들어갑니다.
+	_parry_hit = true
+	var foe := _parry_foe
+	if not is_instance_valid(foe):
+		return
+	var roll := state.roll_damage(rng)
+	foe.call("take_damage", float(roll[0]) * PARRY_STOMP_MULT, bool(roll[1]),
+		global_position, Enemy.SHOUT_STAGGER, global_position)
+	# **내가 온 쪽의 반대**로 밀려납니다. 나는 뒤로 물러나고 상대는 앞으로 -
+	# 둘이 서로 멀어져야 밟고 튕겨 나온 것으로 보입니다.
+	var away: Vector3 = foe.global_position - _parry_from
+	away.y = 0.0
+	away = away.normalized() if away.length_squared() > 0.0001 else aim
+	if foe.has_method("knock_back"):
+		foe.call("knock_back", away * PARRY_STOMP_KNOCK)
+	Sfx.play(Sfx.PUSH, -1.0, 0.0)
+	Game.shake(0.34, 0.18)
+	Fx.burst(get_parent(), foe.global_position + Vector3(0, 0.9, 0),
+		Fx.RUSH_COLOR, 12, 4.2)
+	note_hit()
+
+
+func _end_parry() -> void:
+	## 내려섭니다.
 	_parry_air = 0.0
 	_parry_foe = null
 	_restore_time()
-	var to := land_at
-	to.y = _parry_from.y
-	global_position = to
+	global_position = _parry_to
 	velocity = Vector3.ZERO
+	if pivot != null:
+		pivot.rotation.x = 0.0
 	Fx.burst(get_parent(), global_position + Vector3(0, 0.2, 0),
 		Color(0.86, 0.80, 0.70), 6, 2.0)
-
-
-func _parry_kick(mult: float, knock: float, back: bool) -> Node3D:
-	## 공중에서 상대를 찹니다. `back` 이면 **뒷발**(내가 온 쪽의 반대로
-	## 넘깁니다), 아니면 **앞발**(내가 온 쪽으로 밀어냅니다).
-	var foe := _parry_foe
-	if not is_instance_valid(foe):
-		return null
-	var roll := state.roll_damage(rng)
-	foe.call("take_damage", float(roll[0]) * mult, bool(roll[1]),
-		global_position, Enemy.SHOUT_STAGGER, global_position)
-	# 넘기는 방향은 **내가 뛰어오른 자리에서 상대 쪽**입니다. 뒷발은 그대로,
-	# 앞발은 나를 밀어내는 쪽이라 상대에게는 같은 방향으로 갑니다.
-	var away: Vector3 = foe.global_position - _parry_from
-	away.y = 0.0
-	if away.length_squared() < 0.0001:
-		away = aim
-	away = away.normalized()
-	if foe.has_method("knock_back"):
-		foe.call("knock_back", away * knock)
-	# 찬 쪽을 봅니다. 다음 프레임부터는 평소 규칙이 다시 정합니다 - 찬 아이는
-	# 날아가는 동안 록온이 안 걸리므로(`is_targetable`), 그 사이의 조준은
-	# 손(스틱·마우스)이 잡습니다. 여기서 넣는 것은 **차는 그 순간**입니다.
-	aim = away
-	Sfx.play(Sfx.PUSH, -1.0, 0.0)
-	Game.shake(0.34, 0.18)
-	Fx.burst(get_parent(), foe.global_position + Vector3(0, 0.8, 0),
-		Fx.RUSH_COLOR, 10, 4.0)
-	note_hit()
-	return foe
-
-
-func _parry_heel() -> void:
-	## **밀기 — 뒷발로 차서 뒤로 넘깁니다.** 내려서는 자리는 제자리입니다.
-	_parry_kick(PARRY_HEEL_MULT, PARRY_HEEL_KNOCK, true)
-	_end_parry(_parry_from)
-
-
-func _parry_behind() -> void:
-	## **구르기 — 상대 뒤로 내려섭니다.** 등을 보고 서므로 그대로 잡거나
-	## 밀 수 있습니다.
-	var foe := _parry_foe
-	if not is_instance_valid(foe):
-		_end_parry(_parry_from)
-		return
-	var dir: Vector3 = foe.global_position - _parry_from
-	dir.y = 0.0
-	if dir.length_squared() < 0.0001:
-		dir = aim
-	dir = dir.normalized()
-	var spot: Vector3 = foe.global_position + dir * PARRY_BEHIND
-	# **상대의 뒤를 봅니다.** 내려서자마자 등이 보여야 이 선택이 값을 합니다.
-	aim = -dir
-	_end_parry(spot)
-	Fx.burst(get_parent(), global_position + Vector3(0, 0.6, 0),
-		Fx.RUSH_COLOR, 8, 3.0)
-
-
-func _parry_front() -> void:
-	## **고함 — 앞발로 차고, 그 반발로 왔던 자리보다 조금 뒤에 내려섭니다.**
-	var foe := _parry_kick(PARRY_FRONT_MULT, PARRY_HEEL_KNOCK * 0.7, false)
-	var back: Vector3 = _parry_from
-	var look := aim
-	if foe != null:
-		var dir: Vector3 = foe.global_position - _parry_from
-		dir.y = 0.0
-		if dir.length_squared() > 0.0001:
-			back = _parry_from - dir.normalized() * PARRY_FRONT_BACK
-			look = dir.normalized()
-	_end_parry(back)
-	aim = look
 
 
 func take_damage(amount: float, from: Vector3 = Vector3.ZERO,
