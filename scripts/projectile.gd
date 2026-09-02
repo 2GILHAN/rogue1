@@ -90,7 +90,7 @@ func _physics_process(delta: float) -> void:
 			if bool(player.call("is_invulnerable")):
 				_passed = true
 				return
-			player.call("take_damage", damage, global_position)
+			player.call("take_damage", damage, global_position, 5.0, "던진 것")
 			_pop(Color(0.7, 1.0, 0.6))
 
 

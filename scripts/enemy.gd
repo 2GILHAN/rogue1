@@ -1821,6 +1821,18 @@ func _slam_hit() -> void:
 	Game.shake(0.26, 0.18)
 
 
+func _hurt_other(other: Node, amount: float) -> void:
+	## 부딪힌 상대를 아프게 합니다. **주인공이면 이름을 같이 넘깁니다** -
+	## 죽음 화면이 "무엇에게 졌나" 를 적으려면 그 한 줄이 필요합니다.
+	##
+	## 주인공과 적은 `take_damage` 의 인자가 다릅니다(주인공은 맞은 자리와
+	## 밀리는 세기, 적은 치명타 여부까지). 여기서 갈라 둡니다.
+	if other is Enemy:
+		(other as Enemy).take_damage(amount, false, Vector3.ZERO, 0.0, global_position)
+	else:
+		other.call("take_damage", amount, global_position, 5.0, label_of(kind))
+
+
 func guard_blocks(from_pos: Vector3) -> bool:
 	## 앞을 막는 적이 **그 자리에서 오는 것**을 막는지.
 	##
@@ -2384,7 +2396,7 @@ func _crash_into_foe(speed: float) -> bool:
 		# 모른다」 는 뜻이라 **앞을 막는 적도 못 막습니다.** 베개 든 아이는
 		# 앞이 막혀 있는데, 다른 적을 밀어서 부딪히면 그 판정이 통째로
 		# 건너뛰어져 정면에서도 피해가 들어갔습니다.
-		other.take_damage(hurt, false, Vector3.ZERO, 0.0, global_position)
+		_hurt_other(other, hurt)
 		# **연쇄(「밀기」 Lv3).** 부딪힌 적도 같은 방향으로 밀리고, 그 적이
 		# 또 부딪히면 한 번 더 - 남은 횟수를 하나 줄여 넘깁니다.
 		#
@@ -2478,7 +2490,7 @@ func _hit_others_while_flying() -> void:
 		if to.length() > 0.9 + float(other.get_meta("body_radius", 0.3)):
 			continue
 		# 날아가며 치는 것도 같습니다 - 어디서 왔는지를 넘깁니다.
-		other.take_damage(damage * 1.2, false, Vector3.ZERO, 0.0, global_position)
+		_hurt_other(other, damage * 1.2)
 		# 맞은 쪽도 **밀기와 같은 세기**로 밀립니다. 여기 숫자를 따로 두면
 		# 미는 힘을 키워도 던져서 치는 것만 그대로라, 같은 손에서 나온 두
 		# 기술이 다르게 자랍니다.

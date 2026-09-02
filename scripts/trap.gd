@@ -225,7 +225,8 @@ func _bite(who: Node3D) -> void:
 	if who is Enemy:
 		(who as Enemy).take_damage(dmg, false, dir, 0.3)
 	elif who.has_method("take_damage"):
-		who.call("take_damage", dmg, global_position, float(stats.get("knock", 4.0)))
+		who.call("take_damage", dmg, global_position,
+			float(stats.get("knock", 4.0)), "바닥의 압정")
 
 
 ## 소리가 들리는 거리. 압정 반지름(0.85)의 네 배쯤 - 걸어서 한 걸음

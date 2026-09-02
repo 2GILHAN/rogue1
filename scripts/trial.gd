@@ -274,7 +274,7 @@ func _land_ball(at: Vector3) -> void:
 	# **적도 맞습니다.** 나만 아프면 그냥 피해 다니는 장애물이고, 적도 맞으면
 	# 적을 공 밑으로 몰아넣는 놀이가 생깁니다(함정과 같은 사정입니다).
 	if is_instance_valid(_player) and _player.global_position.distance_to(at) < BALL_RADIUS:
-		_player.take_damage(BALL_DAMAGE, at)
+		_player.take_damage(BALL_DAMAGE, at, 5.0, "떨어지는 공")
 	for n in _game.get_tree().get_nodes_in_group("enemies"):
 		var foe := n as Node3D
 		if is_instance_valid(foe) and foe.global_position.distance_to(at) < BALL_RADIUS:

@@ -75,6 +75,40 @@ const WALL_TEXTURE := "res://assets/textures/wall3.png"
 ## 무늬를 빼고 벽지의 바탕색을 그대로 쓰면 같은 벽의 윗면으로 읽힙니다.
 ## 값은 `wall3.png` 에서 가장 많이 나오는 색입니다(48%, 240/224/216).
 const WALL_TOP_COLOR_TEX := ""
+## **반마다 벽지와 바닥 색이 다릅니다.**
+##
+## 다섯 반을 지난다고 여는 카드에 써 놓고, 화면에서는 씨앗반과 원장실이
+## 구별되지 않았습니다 - 이름과 한 줄로 **말만 하고 눈으로는 안 보여 주는**
+## 상태였습니다.
+##
+## 그림을 바꾸지 않고 **색만** 곱합니다. 벽지 한 장을 그대로 쓰되 반마다
+## 물을 다르게 탄 셈이라, 그림체가 어긋나지 않으면서 방이 달라집니다.
+##
+## 처음에는 0.86~1.06 으로 옅게 잡았습니다. 화면을 나란히 놓고 보니 **세 반이
+## 거의 같아 보였습니다** - 바닥 그림 자체의 색(0.38, 0.33, 0.30)이 진해서
+## ±10% 로는 묻힙니다. 0.72~1.30 으로 넓혔습니다.
+##
+##   씨앗반   연둣빛      처음 오는 밝은 방
+##   나무반   따뜻한 나무
+##   햇님반   노란빛
+##   달님반   푸른빛      어두워지기 시작합니다
+##   원장실   잿빛        해가 안 드는 방
+const FLOOR_TINTS := [
+	Color(0.92, 1.14, 0.90), Color(1.16, 0.94, 0.74),
+	Color(1.30, 1.10, 0.66), Color(0.76, 0.88, 1.28),
+	Color(0.78, 0.72, 0.84),
+]
+
+
+static func floor_tint(n: int) -> Color:
+	if n >= 1 and n <= FLOOR_TINTS.size():
+		return FLOOR_TINTS[n - 1]
+	return Color(1, 1, 1)
+
+
+## 지금 층의 색. `generate` 가 정하고 `_build_geometry` 가 씁니다.
+var tint_now := Color(1, 1, 1)
+
 const WALL_TOP_TINT := Color(0.941, 0.878, 0.847)
 ## 벽 그림에 곱하는 색조. 셰이더가 색조를 그림에 곱하므로 1 에 가깝게 둡니다 -
 ## 어두운 색을 주면 걸레받이에서 겪은 것처럼 그림이 통째로 가라앉습니다.
@@ -144,6 +178,7 @@ func generate_test_room(rng: RandomNumberGenerator, side: int = 22) -> void:
 
 func generate(floor_num: int, rng: RandomNumberGenerator) -> void:
 	_rng = rng
+	tint_now = floor_tint(floor_num)
 	# 층이 깊어질수록 넓어집니다. 무한히 넓히면 이동 시간만 길어지므로 상한을 둡니다.
 	# **판을 좁혔습니다**(48~64 → 34~44).
 	#
@@ -372,11 +407,11 @@ func _build_geometry() -> void:
 	#
 	# 밋밋함은 **걸레받이**가 대신 풉니다 - 무늬 없이 벽에 두께와 경계를
 	# 주는 방법입니다.
-	var wall_top_mat := _wall_material(WALL_TOP_COLOR_TEX, WALL_TOP_TINT)
-	var wall_side_mat := _wall_material(WALL_TEXTURE, WALL_TEX_TINT)
+	var wall_top_mat := _wall_material(WALL_TOP_COLOR_TEX, WALL_TOP_TINT * tint_now)
+	var wall_side_mat := _wall_material(WALL_TEXTURE, WALL_TEX_TINT * tint_now)
 	# 걸레받이는 바닥과 같은 나무입니다. **벽 셰이더**를 씁니다 - 바닥 재질을
 	# 그대로 쓰면 벽이 걷힐 때 걸레받이만 남아 공중에 뜹니다.
-	var base_mat := _wall_material(FLOOR_TEXTURE, Color(0.88, 0.82, 0.72))
+	var base_mat := _wall_material(FLOOR_TEXTURE, Color(0.88, 0.82, 0.72) * tint_now)
 
 	var fst := SurfaceTool.new()
 	fst.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -485,7 +520,10 @@ func _textured(path: String, tint: Color, rough: float) -> StandardMaterial3D:
 		# 어둡게 내리는 일은 그림 쪽에서 합니다(make_textures.py 의
 		# stylize). 여기서 또 곱하면 두 번 어두워져 진흙색이 됩니다.
 		# 여기서는 살짝만 눌러 벽·소품과 밝기를 맞춥니다.
-		mat.albedo_color = Color(0.88, 0.82, 0.72)
+		# **반의 색은 여기서도 곱합니다.** 그림이 있을 때 이 줄이 색을 통째로
+		# 무시하고 있어서, 반마다 다른 색을 넘겨도 바닥이 다섯 반 모두
+		# 같았습니다(실측: 2~5층 평균색 차이 0.5~2.8).
+		mat.albedo_color = Color(0.88, 0.82, 0.72) * tint_now
 	else:
 		mat.albedo_color = tint
 	return mat

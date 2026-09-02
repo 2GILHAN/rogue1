@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.72"
+const VERSION := "v0.73"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -317,6 +317,44 @@ var pillow_mode := false
 var pillow: PillowMatch = null
 ## 도는 중인 시련. 없으면 null 입니다.
 var trial: Trial = null
+
+## **첫 판에만 나오는 손 안내.** 이미 보여 준 것은 다시 안 띄웁니다.
+##
+## 여는 카드는 읽고 잊습니다 - 규칙 넷을 한꺼번에 읽고 방에 들어가면 그중
+## 하나도 손에 안 남습니다. **필요한 순간에 한 줄**이 훨씬 잘 남습니다.
+##
+## 첫 판인지는 `Record` 가 압니다(끝낸 판이 0 인가). 두 번째 판부터는 이
+## 갈래가 통째로 안 돕니다 - 아는 것을 다시 알려 주면 그때부터는 잡음입니다.
+var _hints_on := false
+var _hints_shown: Dictionary = {}
+
+
+func _hint(key: String, text: String) -> void:
+	if not _hints_on or _hints_shown.has(key):
+		return
+	_hints_shown[key] = true
+	ui.toast(text, UiTheme.GOOD)
+
+
+func _drive_hints() -> void:
+	## 지금 화면에 있는 것을 보고 알려 줍니다. **거리 안에 들어왔을 때**만
+	## 띄웁니다 - 방 반대편의 적을 보고 "막아라" 하면 무엇을 막으라는
+	## 것인지 모릅니다.
+	if not _hints_on or not is_instance_valid(player):
+		return
+	if _openable_near() != null:
+		_hint("open", "공격 버튼 — 가구를 열어 봅니다")
+		return
+	if _shelf_near() != null:
+		_hint("read", "공격 버튼 — 책을 읽으면 기술을 배웁니다")
+		return
+	for n in get_tree().get_nodes_in_group("enemies"):
+		var foe := n as Node3D
+		if not is_instance_valid(foe):
+			continue
+		if foe.global_position.distance_to(player.global_position) < 3.2:
+			_hint("fight", "막기로 버티고, 구르기로 피합니다")
+			return
 var _test_kind := ""
 var _test_timer := 0.0
 ## 실험용 방에서 한 번에 두는 적 수와 다시 내보내는 간격(초).
@@ -756,6 +794,10 @@ func start_run() -> void:
 		state.floor_num = _debug_floor
 		for _i in range(_debug_floor - 1):
 			state.apply_boon(String(RunState.BOONS[rng.randi_range(0, RunState.BOONS.size() - 1)]["id"]))
+	# **첫 판에만 손 안내를 켭니다.** 판을 시작할 때 한 번 물어봅니다 -
+	# 매 프레임 물어보면 브라우저 저장소를 그만큼 두드립니다.
+	_hints_on = Record.is_first_run()
+	_hints_shown.clear()
 	_close_overlay()
 	build_floor()
 	Trace.mark("층시작")
@@ -1672,7 +1714,7 @@ func _on_player_died() -> void:
 			# 쓰러지는 장면까지 담고 끊습니다. 죽는 순간 끊으면 영상이 늘
 			# 한창 싸우다 잘린 것처럼 끝나서, 남에게 보낼 것이 못 됩니다.
 			ui.stop_recording()
-			ui.show_death(state))
+			ui.show_death(state, player.last_hit_by if is_instance_valid(player) else ""))
 
 
 # ------------------------------------------------------------ 물물교환
@@ -2506,6 +2548,38 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"polish":
+			# **완성도 넷이 도는가.**
+			#   ① 죽으면 무엇에게 졌는지 남는다
+			#   ② 기록이 저장되고 다음 판에 읽힌다
+			#   ③ 손 안내가 첫 판에만 나온다
+			#   ④ 반마다 색이 다르다
+			if _frames == 20:
+				var tints := PackedStringArray()
+				for f in range(1, 6):
+					var c := Dungeon.floor_tint(f)
+					tints.append("%.2f/%.2f/%.2f" % [c.r, c.g, c.b])
+				print("[완성도] ④ 반 색: %s  (지금 층 %.2f/%.2f/%.2f)" % [
+					" ".join(tints), dungeon.tint_now.r, dungeon.tint_now.g,
+					dungeon.tint_now.b])
+				print("[완성도] ③ 손 안내 켜짐 %s  (끝낸 판 %d)" % [
+					str(_hints_on), Record.runs()])
+			elif _frames == 30 and is_instance_valid(player):
+				var foe := _first_foe()
+				if is_instance_valid(foe):
+					foe.call("_hurt_other", player, 5.0)
+				print("[완성도] ① 마지막으로 맞은 것: 「%s」" % player.last_hit_by)
+			elif _frames == 40:
+				state.floor_num = 3
+				state.elapsed = 137.0
+				print("[완성도] ② 판 끝 한 줄: 「%s」" % Record.line(state, false))
+				state.floor_num = 5
+				state.elapsed = 240.0
+				print("[완성도] ② 나간 뒤:     「%s」" % Record.line(state, true))
+				print("[완성도] ② 제목 화면:   「%s」" % Record.best_line())
+				print("[완성도] ③ 두 판 뒤 안내: %s (끝낸 판 %d)" % [
+					str(Record.is_first_run()), Record.runs()])
+				get_tree().quit()
 		"knockscale":
 			# **밀기 계통을 올리면 실제로 더 밀리는가.**
 			#
@@ -6022,6 +6096,7 @@ func _process(delta: float) -> void:
 		trial.tick(delta)
 		if trial != null and trial.running:
 			ui.set_prompt(label)
+	_drive_hints()
 	_drive_skill_hud()
 	_drive_test_spawns(delta)
 	# 읽는 동안 바깥부터 어두워집니다. 켜고 끄는 것이 아니라 **옮겨** 갑니다 -
@@ -6227,7 +6302,7 @@ func _show_debug_ui() -> void:
 			state.elapsed = 254.0
 			phase = Phase.DEAD
 			get_tree().paused = true
-			ui.show_death(state)
+			ui.show_death(state, player.last_hit_by if is_instance_valid(player) else "")
 		"help":
 			phase = Phase.PAUSED
 			get_tree().paused = true

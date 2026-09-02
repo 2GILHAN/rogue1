@@ -913,7 +913,7 @@ func _physics_process(_delta: float) -> void:
 		var dir := linear_velocity.normalized()
 		if hostile:
 			# 주인공의 take_damage 는 인자가 다릅니다(맞은 자리, 밀리는 세기).
-			enemy.call("take_damage", _damage, global_position, 7.0)
+			enemy.call("take_damage", _damage, global_position, 7.0, "날아온 %s" % kind)
 		else:
 			# 던진 물건도 **자리**를 넘깁니다. 앞을 막는 적(베개)에게
 			# 정면으로 던지면 막힙니다 - 손으로 치는 것과 같은 규칙이라야

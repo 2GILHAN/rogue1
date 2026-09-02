@@ -1361,6 +1361,9 @@ func show_intro() -> void:
 "
 		+ "책을 읽거나 시련을 이겨 내면   →   기술을 배운다")
 	_sub("씨앗반 · 나무반 · 햇님반 · 달님반 · 원장실", UiTheme.ACCENT)
+	var best := Record.best_line()
+	if best != "":
+		_sub(best, UiTheme.GOOD)
 	var row := VBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_overlay_box.add_child(row)
@@ -1666,12 +1669,18 @@ func mark_sold(index: int) -> void:
 		_shop_buttons[index].disabled = true
 
 
-func show_death(state: RunState) -> void:
+func show_death(state: RunState, last_hit_by: String = "") -> void:
 	_clear_overlay()
 	_title("쓰러졌다", UiTheme.BAD)
+	# **무엇에게 졌나.** 숫자만 있으면 잘한 판과 못한 판이 같은 모양으로
+	# 끝나고, 다음 판에 무엇을 고칠지가 안 남습니다.
+	if last_hit_by != "":
+		_sub("%s에게  ·  %s에서" % [last_hit_by,
+			RunState.floor_name(state.floor_num)], UiTheme.BAD)
 	_sub("%s까지. 처치 %d · 사탕 %d · %d분 %d초" % [
 		RunState.floor_name(state.floor_num), state.kills, state.gold,
 		int(state.elapsed) / 60, int(state.elapsed) % 60], UiTheme.TEXT)
+	_sub(Record.line(state, false))
 	_sub("다음 던전은 다른 모양입니다.")
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1692,6 +1701,7 @@ func show_win(state: RunState) -> void:
 	_sub("%s까지 다 지났습니다. 처치 %d · 사탕 %d · %d분 %d초" % [
 		RunState.floor_name(Game.FINAL_FLOOR), state.kills, state.gold,
 		int(state.elapsed) / 60, int(state.elapsed) % 60], UiTheme.TEXT)
+	_sub(Record.line(state, true))
 	_sub("다음 던전은 다른 모양입니다.")
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
