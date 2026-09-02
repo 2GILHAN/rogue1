@@ -91,10 +91,20 @@ const PARRY_REACH := LUNGE_RANGE
 ## 처음에는 「때린 자리 근처에 적이 있나」 로 갈랐는데, 가까이서 쏜 아이가
 ## 그 안에 들어와 **원거리인데 맞붙기로 잡혔습니다.**
 const PARRY_HIT_NEAR := 0.9
-## 반원을 다 돌았을 때 상대 곁에 서는 거리(m).
-const PARRY_BESIDE := 0.95
-## 반원을 도는 동안 잔상을 떨구는 간격(m). 구르기와 같은 규칙 - **거리마다**
-## 떨굽니다. 시간으로 떨구면 멀리서 돌 때 성기고 코앞에서 돌 때 뭉칩니다.
+## **거리를 좁히고 나서 비켜섭니다.**
+##
+## 상대가 이 거리 안이면 「바로 앞」이라 그냥 겁니다. 그보다 멀면 먼저
+## 직선으로 달려가 이만큼까지 좁힌 뒤에 비켜서며 겁니다.
+##
+## 한동안 상대를 중심으로 **반원**을 그리며 들어갔습니다. 멀 때는 그럴듯했는데
+## 코앞에서 받아 내도 반 바퀴를 돌아서, 가까울수록 동작이 더 커졌습니다 -
+## 거꾸로입니다. 좁히는 일과 거는 일은 **따로**여야 합니다.
+const PARRY_CLOSE := 1.05
+## 좁히러 달려가는 빠르기(m/s)와 그 시간의 한도.
+const PARRY_RUN_SPEED := 9.0
+const PARRY_RUN_MAX := 0.34
+## 잔상을 떨구는 간격(m). 구르기와 같은 규칙 - **거리마다** 떨굽니다. 시간으로
+## 떨구면 멀리서 달려올 때 성기고 코앞에서 걸 때 뭉칩니다.
 const PARRY_TRAIL_STEP := 0.22
 ## 발을 거는 동안 몸을 내리는 깊이(m). 다리를 뻗으면 발이 뜹니다.
 const PARRY_CROUCH := 0.14
@@ -533,10 +543,10 @@ var _parry_foe: Node3D = null
 ## 비켜서서 설 자리. 받아 낸 순간 정해 둡니다 - 가는 동안 상대가 밀려나므로,
 ## 그때 가서 뽑으면 설 자리가 상대를 따라 흔들립니다.
 var _parry_to := Vector3.ZERO
-## 반원을 그리며 다가가는 중인가(멀리서 쏜 것을 받아 냈을 때).
-var _parry_arc := false
-## 도는 쪽(+1 / -1)과, 잔상을 떨군 뒤 지나온 거리.
-var _parry_spin := 1.0
+## 좁히러 달려가는 시간(0 이면 바로 앞이라 안 달립니다)과 그 끝 자리.
+var _parry_run := 0.0
+var _parry_run_to := Vector3.ZERO
+## 잔상을 떨군 뒤 지나온 거리.
 var _parry_trail := 0.0
 ## 뛰어오르기 전 자리. 앞발로 차면 여기보다 조금 **뒤로** 내려섭니다.
 var _parry_from := Vector3.ZERO
@@ -4064,11 +4074,11 @@ func _parry_ignore() -> void:
 	parried.emit()
 
 
-func _begin_parry(foe: Node3D, arc: bool) -> void:
-	## 받아 냈습니다. **발을 걸어 넘어뜨립니다.**
+func _begin_parry(foe: Node3D, _unused: bool = false) -> void:
+	## 받아 냈습니다. **거리를 좁히고, 비켜서면서 발을 걸어 넘어뜨립니다.**
 	##
-	## `arc` 면 **반원을 그리며 다가갑니다**(멀리서 쏜 것을 받아 냈을 때).
-	## 아니면 옆으로 반걸음 비켜서면서 겁니다(맞붙어서 맞았을 때).
+	## 좁히는 마디는 **멀 때만** 돕니다. 바로 앞이면 그냥 겁니다 - 코앞에서도
+	## 달려가는 시늉을 하면 그게 더 큰 동작입니다.
 	##
 	## 후속 누름이 없습니다. 받아 내면 이 한 동작이 끝까지 돕니다 - 받아 낸
 	## 그 순간에 무엇을 눌러야 하는지 배울 자리가 없으면 손이 굳습니다.
@@ -4076,8 +4086,6 @@ func _begin_parry(foe: Node3D, arc: bool) -> void:
 	_parry_foe = foe
 	_parry_from = global_position
 	_parry_hit = false
-	_parry_air = PARRY_TIME
-	_invuln = maxf(_invuln, _parry_air + 0.2)
 	# 받아 낸 한 대는 **없던 일이 됩니다.** 안 지우면 끝나는 순간 그 공격이
 	# 마저 들어옵니다.
 	if foe.has_method("interrupt"):
@@ -4103,24 +4111,17 @@ func _begin_parry(foe: Node3D, arc: bool) -> void:
 	var wish := _wish_dir
 	if wish.length_squared() > 0.04 and wish.dot(side) < 0.0:
 		side = -side
-	_parry_arc = arc
-	_parry_spin = 1.0 if side.dot(Vector3(-dir.z, 0.0, dir.x)) >= 0.0 else -1.0
-	if arc:
-		# **설 자리는 반원이 끝나는 그 점**이어야 합니다.
-		#
-		# 처음에는 「상대의 옆」으로 따로 잡아 뒀는데, 그러면 곡선을 다 돌고
-		# 나서 마지막에 딴 자리로 순간이동합니다. 곡선을 그리는 식
-		# (`_arc_point`)에 t=1 을 넣어 뽑으면 둘이 어긋날 수가 없습니다.
-		var c: Vector3 = foe.global_position
-		c.y = _parry_from.y
-		var v0: Vector3 = _parry_from - c
-		v0.y = 0.0
-		var a1 := atan2(v0.z, v0.x) + PI * _parry_spin
-		_parry_to = c + Vector3(cos(a1), 0.0, sin(a1)) * PARRY_BESIDE
-	else:
-		_parry_to = _parry_from + side * PARRY_STEP
+	# **먼저 거리를 좁힙니다.** 바로 앞(1.05m)이면 안 달립니다.
+	var gap: float = _parry_from.distance_to(foe.global_position) - PARRY_CLOSE
+	_parry_run = clampf(gap / PARRY_RUN_SPEED, 0.0, PARRY_RUN_MAX) if gap > 0.05 else 0.0
+	_parry_run_to = _parry_from + dir * maxf(gap, 0.0)
+	_parry_run_to.y = _parry_from.y
+	# 비켜서는 것은 **좁힌 자리에서** 시작합니다.
+	_parry_to = _parry_run_to + side * PARRY_STEP
 	_parry_to.y = _parry_from.y
 	_parry_trail = 0.0
+	_parry_air = _parry_run + PARRY_TIME
+	_invuln = maxf(_invuln, _parry_air + 0.2)
 
 	Sfx.play(Sfx.GRAB, -2.0, 0.0)
 	Sfx.play_at(Sfx.PICK, 1.4, -3.0)
@@ -4140,26 +4141,30 @@ func _tick_parry(delta: float) -> void:
 	if _parry_air <= 0.0:
 		return
 	_parry_air -= delta
-	var k := 1.0 - clampf(_parry_air / PARRY_TIME, 0.0, 1.0)
-	# **바닥에 붙어 갑니다.** 뜨지 않습니다 - 이 동작의 요점이 「작게」 라,
-	# 조금이라도 뜨면 다시 큰 동작이 됩니다.
-	var e := k * k * (3.0 - 2.0 * k)
+	# **두 마디입니다.** 먼저 직선으로 좁히고(멀 때만), 그 다음 비켜서며
+	# 겁니다. 바닥에 붙어 갑니다 - 조금이라도 뜨면 다시 큰 동작이 됩니다.
 	var pos: Vector3
-	if _parry_arc and is_instance_valid(_parry_foe):
-		pos = _arc_point(e)
+	var k := 0.0
+	if _parry_air > PARRY_TIME:
+		# ① 좁히는 마디.
+		var kr := 1.0 - clampf((_parry_air - PARRY_TIME) / maxf(_parry_run, 0.0001),
+			0.0, 1.0)
+		pos = _parry_from.lerp(_parry_run_to, kr)
 	else:
-		pos = _parry_from.lerp(_parry_to, e)
+		# ② 비켜서며 거는 마디.
+		k = 1.0 - clampf(_parry_air / PARRY_TIME, 0.0, 1.0)
+		pos = _parry_run_to.lerp(_parry_to, k * k * (3.0 - 2.0 * k))
 	pos.y = _parry_from.y
-	# **반원을 도는 동안 잔상을 떨굽니다.** 거리마다입니다(구르기와 같은 규칙).
-	if _parry_arc:
-		_parry_trail += pos.distance_to(global_position)
-		if _parry_trail >= PARRY_TRAIL_STEP:
-			_parry_trail = 0.0
-			_afterimage(false)
+	# **가는 내내 잔상을 떨굽니다.** 거리마다입니다(구르기와 같은 규칙) -
+	# 좁히는 마디에서는 촘촘하고, 비켜서는 짧은 걸음에서는 두어 장입니다.
+	_parry_trail += pos.distance_to(global_position)
+	if _parry_trail >= PARRY_TRAIL_STEP:
+		_parry_trail = 0.0
+		_afterimage(false)
 	global_position = pos
 	velocity = Vector3.ZERO
 	# **지나가면서** 겁니다. 다 비켜선 뒤에 걸면 두 동작으로 보입니다.
-	if not _parry_hit and k >= PARRY_TRIP_AT:
+	if not _parry_hit and _parry_air <= PARRY_TIME and k >= PARRY_TRIP_AT:
 		_parry_trip()
 	# 넘어뜨린 쪽을 계속 봅니다.
 	if is_instance_valid(_parry_foe):
@@ -4169,24 +4174,6 @@ func _tick_parry(delta: float) -> void:
 			aim = to.normalized()
 	if _parry_air <= 0.0:
 		_end_parry()
-
-
-func _arc_point(t: float) -> Vector3:
-	## **상대를 중심으로 반원을 그립니다.** 각도와 반지름을 같이 좁히므로,
-	## 돌면서 다가가는 한 줄기 곡선이 됩니다.
-	##
-	## 곧장 가면 「달려든 것」이고, 그건 밀기가 이미 하는 일입니다. 받아 낸
-	## 뒤의 이 한 번은 **돌아 들어가는 것**이라야 밀기와 구분됩니다.
-	var c: Vector3 = _parry_foe.global_position
-	c.y = _parry_from.y
-	var v0: Vector3 = _parry_from - c
-	v0.y = 0.0
-	var r0 := maxf(v0.length(), 0.05)
-	var a0 := atan2(v0.z, v0.x)
-	# 끝 각도는 시작에서 **반 바퀴**입니다. 도는 쪽은 비키는 쪽을 따릅니다.
-	var a := a0 + PI * _parry_spin * t
-	var r := lerpf(r0, PARRY_BESIDE, t)
-	return c + Vector3(cos(a) * r, 0.0, sin(a) * r)
 
 
 func _parry_trip() -> void:

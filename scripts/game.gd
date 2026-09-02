@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.59"
+const VERSION := "v0.59.1"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2777,7 +2777,9 @@ func _drive_pose() -> void:
 				# `--side=far` 는 **그 밖에서 쏜 것**입니다. 빈칸이면 맞붙어서
 				# 맞은 것(옆으로 비켜서며 걸기)입니다.
 				var away := 1.5
-				if _probe_arg == "near":
+				if _probe_arg == "close":
+					away = 1.0          # 바로 앞 - 좁히는 마디가 없어야 합니다
+				elif _probe_arg == "near":
 					away = 2.2
 				elif _probe_arg == "far":
 					away = 6.0
@@ -2787,6 +2789,7 @@ func _drive_pose() -> void:
 				_alive += 1
 				_wedge_from = player.global_position
 				_probe_t0 = e.hp
+				Player.ghost_n = 0
 				state.breath = state.max_breath
 			if _frames == 40:
 				player.attack()
@@ -2809,6 +2812,9 @@ func _drive_pose() -> void:
 					_probe_foe.hp,
 					Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()])
 			if _frames == 120 and is_instance_valid(_probe_foe):
+				print("[패링] %-4s 잔상 %d장  좁힌 시간 %.2f초" % [
+					_probe_arg if _probe_arg != "" else "맞붙",
+					Player.ghost_n, player._parry_run])
 				print("[패링] %-4s 끝: 움직인 거리 %.2fm  적과의 거리 %.2fm  적이 받은 피해 %.0f  적 체력 %.0f" % [
 					_probe_arg if _probe_arg != "" else "맞붙",
 					_wedge_from.distance_to(player.global_position),
