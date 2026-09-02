@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.65"
+const VERSION := "v0.66"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -195,6 +195,7 @@ var _seed := 0
 var _die_at := -1
 ## --pose=run|roll|shout. 그 동작만 계속 시켜서 화면으로 확인합니다.
 var _pose := ""
+var _auto_pillow := false
 ## 확인용 자세(--pose=milk / pool)가 눈앞에 놓는 소품.
 var _probe_prop: Prop = null
 var _pool_from := Vector3.ZERO
@@ -303,6 +304,11 @@ var _toon_start := true
 var _grade_on := true
 ## 실험용 방. 네모난 방 하나에 고른 적만 계속 나옵니다.
 var test_mode := false
+## **실험 중인 1:1 베개싸움.** 규칙은 통째로 `pillow_match.gd` 에 있습니다 -
+## 여기에는 방을 세우는 갈래 하나와 이 변수뿐이라, 재미없으면 그 파일과
+## `pillow_` 로 시작하는 몇 줄만 지우면 흔적이 없습니다.
+var pillow_mode := false
+var pillow: PillowMatch = null
 var _test_kind := ""
 var _test_timer := 0.0
 ## 실험용 방에서 한 번에 두는 적 수와 다시 내보내는 간격(초).
@@ -341,6 +347,7 @@ func _ready() -> void:
 	ui.shop_closed.connect(_close_overlay)
 	ui.restart_requested.connect(start_run)
 	ui.start_requested.connect(start_run)
+	ui.pillow_requested.connect(start_pillow)
 	if ui.touch != null:
 		ui.touch.attack_pressed.connect(_on_touch_attack)
 		ui.touch.attack_released.connect(_on_touch_attack_release)
@@ -401,7 +408,9 @@ func _ready() -> void:
 	_dev_menu = false
 	get_tree().paused = true
 	ui.show_title()
-	if _auto_start:
+	if _auto_pillow:
+		call_deferred("start_pillow")
+	elif _auto_start:
 		call_deferred("start_run")
 
 
@@ -458,6 +467,9 @@ func _read_args() -> void:
 			_trace_at = int(a.substr(11))
 		elif a == "--fps-log":
 			_fps_log = true
+		elif a == "--mode=pillow":
+			# 베개싸움을 손으로 안 고르고 바로 열기. 재는 자리에서 씁니다.
+			_auto_pillow = true
 		elif a.begins_with("--pose="):
 			_pose = a.substr(7)
 		elif a.begins_with("--boon="):
@@ -716,6 +728,7 @@ func start_run() -> void:
 		if not Recorder.start():
 			ui.toast("녹화를 시작하지 못했습니다", UiTheme.BAD)
 	test_mode = false
+	pillow_mode = false
 	_test_kind = ""
 	state = RunState.new()
 	_boon_names.clear()
@@ -739,9 +752,103 @@ func start_run() -> void:
 	ui.toast(RunState.floor_name(state.floor_num), UiTheme.ACCENT)
 
 
+func _first_foe() -> Node3D:
+	for n in get_tree().get_nodes_in_group("enemies"):
+		if is_instance_valid(n):
+			return n as Node3D
+	return null
+
+
+func _probe_foe_arc() -> float:
+	var f := _first_foe()
+	return float(f.stats.get("guard_arc", 0.0)) if f != null else -1.0
+
+
+func _build_pillow_match() -> void:
+	## 베개싸움 한 판을 세웁니다. **`build_floor` 의 끝을 대신합니다** -
+	## 출구도 상점도 스킬 고르기도 없습니다.
+	##
+	## # 가구를 두는 이유
+	##
+	## 빈 네모에서 1:1 을 하면 서로 마주 보고 걸어가 부딪히는 것이 전부입니다.
+	## 이 판의 답은 **앞이 막혀 있으니 옆으로 돌아라** 인데, 돌 자리를 만드는
+	## 것이 기둥입니다 - 가릴 것이 없으면 도는 동안 내내 보이고, 그러면 돌
+	## 이유가 없습니다.
+	##
+	## `heavy` 를 섞습니다. 밀어서 길을 막을 수 있어야 두 번째 수가 생깁니다.
+	const ROOM_PROPS := ["bookshelf", "kidcloset", "toyshelf", "wardrobe",
+		"daycare_toybox", "daycare_kidchair"]
+	var mid: Vector3 = dungeon.room_center(0)
+	for i in ROOM_PROPS.size():
+		var item := Prop.new()
+		world.add_child(item)
+		item.setup(String(ROOM_PROPS[i]))
+		var ang := TAU * float(i) / float(ROOM_PROPS.size())
+		item.global_position = mid + Vector3(cos(ang), 0, sin(ang)) * 4.2
+		item.rotation.y = -ang
+
+	# **둘을 마주 세웁니다.** 시작이 등 뒤면 첫 한 대가 공짜가 됩니다.
+	# 3.0m 씩(6m 떨어져) 세웠다가 좁혔습니다 - 내려다보는 카메라에서 6m 는
+	# 상대가 화면 위끝에 걸립니다. 시작하자마자 상대가 안 보이면 무엇을
+	# 하는 판인지가 안 읽힙니다.
+	player.global_position = mid + Vector3(0, 0, 2.4)
+	var foe := Enemy.new()
+	world.add_child(foe)
+	foe.setup("pillow", 1, dungeon, player)
+	foe.global_position = mid + Vector3(0, 0, -2.4)
+	foe.add_to_group("enemies")
+	_alive = 1
+
+	pillow = PillowMatch.new()
+	pillow.name = "PillowMatch"
+	add_child(pillow)
+	pillow.setup(self, player, foe)
+
+	ui.set_minimap(dungeon, player.global_position, player.global_position)
+	ui.set_boons(_boon_names)
+	if _toon_start and not Toon.enabled:
+		Toon.apply(world, world_env, true)
+	ui.set_toon(Toon.enabled)
+	Toon.refresh(world)
+	ui.set_hud_visible(true)
+	phase = Phase.PLAYING
+	get_tree().paused = false
+
+
+func on_pillow_over(who: String) -> void:
+	if _pose == "pillowrule":
+		# **끝나면 판이 멈춥니다.** 확인용 배치는 `phase == PLAYING` 일 때만
+		# 도므로, 끝난 것을 그 안에서는 찍을 수 없습니다.
+		print("[베개] 베개 없이 정면 한 대: 끝났나 true  이긴 쪽 %s" % who)
+		get_tree().quit()
+
+	## 한 판이 끝났습니다. **다시 하거나 제목으로** 갑니다 - 이 판에는 다음
+	## 층이 없으므로 죽음 화면을 그대로 쓸 수 없습니다.
+	phase = Phase.DEAD
+	get_tree().paused = true
+	ui.show_pillow_result(who)
+
+
+func start_pillow() -> void:
+	## 베개싸움 한 판. **실험용 방을 그대로 씁니다** - 네모난 빈 방 하나면
+	## 둘과 가구만 남고, 그것이 이 판의 전부입니다.
+	pillow_mode = true
+	test_mode = true
+	_test_kind = ""
+	_test_timer = 0.0
+	Recorder.armed = false
+	state = RunState.new()
+	_boon_names = state.skill_summary()
+	rng.randomize()
+	_close_overlay()
+	build_floor()
+	ui.toast("베개싸움 — 안 막고 맞으면 놓칩니다", UiTheme.ACCENT)
+
+
 func start_test() -> void:
 	## 실험용 방으로 들어갑니다. 업데이트가 제대로 됐는지 보는 자리입니다.
 	test_mode = true
+	pillow_mode = false
 	_test_kind = ""
 	_test_timer = 0.0
 	Recorder.armed = false
@@ -891,6 +998,10 @@ func build_floor() -> void:
 	player.read_done.connect(_on_read_done)
 
 	cam_rig.global_position = player.global_position
+
+	if pillow_mode:
+		_build_pillow_match()
+		return
 
 	if test_mode:
 		# 실험용 방에는 출구도 소품도 두지 않습니다. 보려는 것 하나만 남기는
@@ -1541,6 +1652,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("cam_down"):
 		nudge_cam_pitch(-1.0)
 		return
+	if phase == Phase.DEAD and pillow_mode:
+		# **한 판짜리라 "다시" 의 뜻이 다릅니다.** 탐험의 다시 하기는 층
+		# 1부터인데, 여기서는 같은 방 한 판입니다.
+		if event.is_action_pressed("confirm") or event.is_action_pressed("restart"):
+			start_pillow()
+			return
+		if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+			_back_to_title()
+			return
 	if event.is_action_pressed("restart") and phase == Phase.DEAD:
 		start_run()
 		return
@@ -1556,6 +1676,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if event.keycode == KEY_D and not _dev_menu:
 			_open_devmenu()
+			return
+		# **베개싸움은 첫 화면에서만** 먹습니다. 개발자 옵션 안에서 눌러
+		# 딴 데로 떨어지면 무슨 일이 난 것인지 알 수 없습니다.
+		if event.keycode == KEY_P and not _dev_menu:
+			start_pillow()
 			return
 		if event.keycode == KEY_ESCAPE:
 			# 겉에서는 종료, 안에서는 뒤로. **한 키로 한 겹씩** 나가는 것이
@@ -2282,6 +2407,36 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"pillowrule":
+			# **베개싸움의 규칙 넷이 실제로 도는가.**
+			#   ① 둘 다 베개를 들고 시작한다
+			#   ② 안 막고 맞으면 놓친다 (판 위에 떨어진 베개가 생긴다)
+			#   ③ 놓친 쪽은 못 막는다 (guard_arc 0)
+			#   ④ 베개 없이 또 맞으면 진다
+			if pillow == null:
+				pass
+			elif _frames == 30:
+				print("[베개] 시작: 나 %s  상대 %s  떨어진 것 %s  상대 막는각 %.0f" % [
+					str(pillow.player_has), str(pillow.foe_has),
+					str(pillow._drop != null), float(_probe_foe_arc())])
+			elif _frames == 60:
+				_probe_foe = _first_foe()
+				if is_instance_valid(_probe_foe):
+					# 등 뒤에서 때립니다 - 앞이면 막혀서 규칙 ②가 안 걸립니다.
+					_probe_foe.take_damage(9.0, false, Vector3.ZERO, 0.0,
+						_probe_foe.global_position - _probe_foe.facing() * 2.0)
+			elif _frames == 64:
+				print("[베개] 등 뒤로 한 대: 상대 %s  떨어진 것 %s  상대 막는각 %.0f" % [
+					str(pillow.foe_has), str(pillow._drop != null and pillow._drop.visible),
+					float(_probe_foe_arc())])
+			elif _frames == 120 and is_instance_valid(_probe_foe):
+				# 이번엔 **정면**입니다. 베개가 없으니 막히면 안 됩니다.
+				_probe_foe.take_damage(9.0, false, Vector3.ZERO, 0.0,
+					_probe_foe.global_position + _probe_foe.facing() * 2.0)
+			elif _frames == 150:
+				# 여기까지 왔으면 ④가 안 걸린 것입니다.
+				print("[베개] 베개 없이 정면 한 대: 끝났나 false  ← 안 걸림")
+				get_tree().quit()
 		"alloc":
 			# **판을 하는 동안 재질과 메시를 몇 벌이나 새로 짓는가.**
 			#

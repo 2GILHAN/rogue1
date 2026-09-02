@@ -9,6 +9,8 @@ signal shop_bought(index: int)
 signal shop_closed
 signal restart_requested
 signal start_requested
+## 실험 중인 1:1 베개싸움. 재미없으면 이 줄과 `pillow_match.gd` 를 지웁니다.
+signal pillow_requested
 signal toon_toggled
 signal grade_toggled
 signal lock_toggled
@@ -1308,11 +1310,31 @@ func _card(icon: String, name: String, desc: String, footer: String) -> Button:
 	return b
 
 
+func show_pillow_result(who: String) -> void:
+	## 베개싸움이 끝난 화면. **한 판짜리라 다음이 없습니다** - 다시 하거나
+	## 제목으로 돌아가는 둘뿐입니다.
+	_clear_overlay()
+	var won := who == "나"
+	_title("이겼습니다" if won else "졌습니다", UiTheme.GOOD if won else UiTheme.BAD)
+	_sub("베개를 놓친 쪽이 먼저 주우면 다시 막을 수 있습니다."
+		if won else "베개를 놓쳤을 때 주우러 갈지, 한 대를 더 넣을지가 이 판의 고비입니다.")
+	var row := VBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 10)
+	_overlay_box.add_child(row)
+	row.add_child(_menu_button("  한 판 더  (Enter)  ", func() -> void:
+		pillow_requested.emit()))
+	row.add_child(_menu_button("  제목으로  (Esc)  ", func() -> void:
+		title_requested.emit()))
+	_overlay.visible = true
+
+
 func show_title() -> void:
 	_clear_overlay()
 	_title("TOTO FIGHTCLUB")
-	_sub("불꽃 깃털의 모험가가 지하로 내려갑니다. 층의 적을 모두 쓰러뜨리면 파란 문이 열립니다.\n"
-		+ "죽으면 처음부터입니다 - 대신 매번 다른 던전, 다른 축복을 만납니다.")
+	_sub("어린이집 탐험 — 반의 아이를 모두 쓰러뜨리면 파란 문이 열립니다. 죽으면 처음부터입니다.
+"
+		+ "베개싸움 (실험) — 1:1 한 판. 안 막고 맞으면 베개를 놓치고, 베개 없이 또 맞으면 집니다.")
 	_sub("왼쪽 아래를 끌어 이동 · 밀기(잡기)는 앞이면 밀고 등 뒤면 잡습니다"
 		if TouchControls.wanted()
 		else "이동 WASD · 조준 마우스 · 공격 F(제자리면 고함) · 막기 좌클릭 · 구르기 Space(무적) · 일시정지 Esc",
@@ -1328,9 +1350,14 @@ func show_title() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 10)
 	_overlay_box.add_child(row)
-	row.add_child(_menu_button("  시작하기  (Enter)  ", func() -> void:
+	row.add_child(_menu_button("  어린이집 탐험  (Enter)  ", func() -> void:
 		Recorder.armed = false
 		start_requested.emit()))
+	# **실험 중입니다.** 재미없으면 이 줄을 지웁니다 - 나머지는 따로 있는
+	# `pillow_match.gd` 한 파일입니다.
+	row.add_child(_menu_button("  베개싸움 (실험)  (P)  ", func() -> void:
+		Recorder.armed = false
+		pillow_requested.emit()))
 	# **만드는 사람만 쓰는 것은 한 겹 안으로 넣습니다.**
 	#
 	# 테스트 방과 리그 실험실을 첫 화면에 그대로 두면, 처음 열어 본 사람에게는
