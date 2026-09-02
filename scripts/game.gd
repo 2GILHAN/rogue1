@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.67"
+const VERSION := "v0.68"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -253,6 +253,11 @@ var _probe_t0 := 0.0
 ## 값이 바뀐 프레임만 찍으려고 들고 있는 지난 값.
 var _probe_t1 := 0.0
 var _probe_seen: Array = []
+var _fade_us := 0
+var _fade_n := 0
+## `Game._process` 자신이 쓴 시간(마이크로초). 기록이 씁니다.
+var _self_us := 0
+var _self_t0 := 0
 ## 패링이 도는 동안 벽 안에 들어가 있던 프레임 수.
 var _probe_wall_frames := 0
 ## --pose=death 에서 마지막으로 죽인 프레임.
@@ -751,6 +756,14 @@ func start_run() -> void:
 	build_floor()
 	Trace.mark("층시작")
 	ui.toast(RunState.floor_name(state.floor_num), UiTheme.ACCENT)
+
+
+func _all_children(root: Node) -> Array:
+	var out: Array = []
+	for c in root.get_children():
+		out.append(c)
+		out.append_array(_all_children(c))
+	return out
 
 
 func _first_foe() -> Node3D:
@@ -2413,6 +2426,43 @@ func _drive_pose() -> void:
 			if _frames == 80:
 				print("[옵션] 누른 뒤  숨 %.0f -> %.0f  (안 변해야 맞음)  대기 %.2f" % [
 					_probe_t0, state.breath, player._attack_cd])
+		"whoeats":
+			# **스크립트 시간을 누가 쓰는가.** game.gd 자신은 0.13ms 뿐이고
+			# 나머지 노드가 7~9ms 를 씁니다 - 적·소품·UI 중 누구인지 가릅니다.
+			#
+			# 재는 법: **끄고 견줍니다.** 각자의 _process 를 따로 잴 방법이 없어서,
+			# 한 무리씩 꺼 보고 줄어든 만큼이 그 무리의 몫입니다.
+			if _frames % 240 == 0 and _frames > 0 and _frames <= 1200:
+				var step := _frames / 240
+				var label := ""
+				match step:
+					1: label = "다 켬"
+					2:
+						label = "소품 끔"
+						for n in get_tree().get_nodes_in_group("props"):
+							(n as Node).set_process(false)
+					3:
+						label = "소품+적 끔"
+						for n in get_tree().get_nodes_in_group("enemies"):
+							(n as Node).set_process(false)
+					4:
+						label = "소품+적+UI 끔"
+						ui.set_process(false)
+						for n in _all_children(ui):
+							n.set_process(false)
+					5:
+						label = "주인공까지 끔"
+						player.set_process(false)
+						for n in _all_children(player):
+							n.set_process(false)
+				print("[누가] %-14s 스크립트 %.2fms  (그중 game.gd %.2fms)  노드 %d  소품 %d  적 %d" % [
+					label,
+					Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+					float(_self_us) / 1000.0, get_tree().get_node_count(),
+					get_tree().get_nodes_in_group("props").size(),
+					get_tree().get_nodes_in_group("enemies").size()])
+				if step >= 5:
+					get_tree().quit()
 		"pillowpick":
 			# **놓친 베개를 다시 줍는가.** 규칙에 "먼저 줍는 쪽이 임자" 라고 적어
 			# 뒀으니, 주울 길이 실제로 있어야 합니다.
@@ -5462,14 +5512,19 @@ func _drive_skill_hud() -> void:
 
 
 func _process(delta: float) -> void:
+	_self_t0 = Time.get_ticks_usec()
 	_frames += 1
 	# **프레임을 담습니다.** 폰에서만 나는 끊김을 찾는 자리입니다(trace.gd).
 	if Trace.running():
+		# **지난 프레임 값**을 넣습니다. 이번 프레임의 `_process` 는 아직 안
+		# 끝났으니 잴 수가 없습니다 - 한 프레임 밀리지만, 찾는 것이 "이 프레임이
+		# 왜 길었나" 라 옆 프레임 값이어도 같은 무리를 가리킵니다.
 		Trace.sample(delta,
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 			get_tree().get_node_count(),
 			get_tree().get_nodes_in_group("enemies").size(),
-			state.floor_num if state != null else 0)
+			state.floor_num if state != null else 0,
+			_self_us)
 	if _leak_probe and _frames % 600 == 0:
 		var vp := get_viewport()
 		var win: Vector2i = vp.get_visible_rect().size
@@ -5614,6 +5669,7 @@ func _process(delta: float) -> void:
 
 	var _t0 := Time.get_ticks_usec()
 	# 캐릭터를 가리는 벽을 걷어내려면 셰이더가 두 점을 알아야 합니다.
+	var _fade_t0 := Time.get_ticks_usec()
 	if dungeon != null and is_instance_valid(player):
 		var focus: Vector3 = player.global_position + Vector3(0, 0.7, 0)
 		# 1.15 -> 2.20. 판정을 **칸 단위**로 바꾸면서 넓혔습니다 - 좁게 두면
@@ -5630,6 +5686,21 @@ func _process(delta: float) -> void:
 			# 값을 못 받아서, 걷어내는 규칙이 걸린 채로 영영 안 걷혔습니다.
 			if is_instance_valid(prop) and prop.is_fadeable():
 				prop.set_fade_focus(camera.global_position, focus, radius)
+	_fade_us += Time.get_ticks_usec() - _fade_t0
+	_fade_n += 1
+	if _pose == "framecost" and _frames % 300 == 0 and _frames > 0:
+		print("[프레임값] f=%5d  비치기 %.2fms/프레임  소품 %d개  벽재질 %d벌  적 %d  층 %d  전체 %.2fms" % [
+			_frames, float(_fade_us) / maxf(float(_fade_n), 1.0) / 1000.0,
+			get_tree().get_nodes_in_group("props").size(),
+			dungeon.wall_materials.size() if dungeon != null else 0,
+			get_tree().get_nodes_in_group("enemies").size(), state.floor_num,
+			Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0])
+		print("            그중 game.gd 자신 %.2fms  (나머지 노드 %.2fms)" % [
+			float(_self_us) / 1000.0,
+			Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+				- float(_self_us) / 1000.0])
+		_fade_us = 0
+		_fade_n = 0
 	if _leak_probe:
 		# 순간값은 흔들립니다. **평균**을 냅니다.
 		_leak_proc += Performance.get_monitor(Performance.TIME_PROCESS)
@@ -5657,6 +5728,8 @@ func _process(delta: float) -> void:
 			ui.set_prompt("파란 문으로 내려가세요")
 		else:
 			ui.set_prompt("")
+	# **_process 가 여기서 끝납니다.** 이 값이 기록의 「게임」 칸입니다.
+	_self_us = Time.get_ticks_usec() - _self_t0
 
 
 func _show_debug_ui() -> void:

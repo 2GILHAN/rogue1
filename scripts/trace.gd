@@ -36,6 +36,9 @@ static var _draw: PackedInt32Array = PackedInt32Array()
 static var _node: PackedInt32Array = PackedInt32Array()
 static var _foe: PackedInt32Array = PackedInt32Array()
 static var _floor: PackedInt32Array = PackedInt32Array()
+## `Game._process` 자신이 쓴 시간(초). 스크립트 시간을 **우리 총괄 코드**와
+## **나머지 노드들**로 가릅니다.
+static var _game: PackedFloat32Array = PackedFloat32Array()
 ## **시간을 셋으로 쪼갭니다.** 어디서 쓰는지가 이것 하나로 갈립니다.
 ##
 ##   스크립트  `_process` 들(우리 코드)
@@ -76,6 +79,7 @@ static func start() -> void:
 		_phys.resize(CAP)
 		_res.resize(CAP)
 		_floor.resize(CAP)
+		_game.resize(CAP)
 		_mark.resize(CAP)
 	_at = 0
 	_n = 0
@@ -106,8 +110,16 @@ static func mark(what: String) -> void:
 
 
 static func sample(delta: float, draw_calls: int, nodes: int,
-		foes: int, floor_num: int) -> void:
+		foes: int, floor_num: int, game_us: int = 0) -> void:
 	## 한 프레임. `Game._process` 가 매 프레임 부릅니다.
+	##
+	## `game_us` 는 **`Game._process` 자신이 쓴 시간**입니다. `TIME_PROCESS`
+	## 는 트리의 모든 `_process` 를 합친 값이라, 그것만으로는 우리 총괄 코드가
+	## 쓴 것인지 적·소품·UI 가 각자 쓴 것인지 안 갈립니다.
+	##
+	## v0.66 기록에서 **적이 0~2 마리인데 스크립트가 75~82ms** 인 프레임이
+	## 일곱이었습니다. 적과 무관하다는 뜻인데, 그 이상은 이 칸이 없어서
+	## 좁힐 수 없었습니다.
 	if not _on:
 		return
 	_proc[_at] = float(Performance.get_monitor(Performance.TIME_PROCESS))
@@ -120,6 +132,7 @@ static func sample(delta: float, draw_calls: int, nodes: int,
 	_node[_at] = nodes
 	_foe[_at] = foes
 	_floor[_at] = floor_num
+	_game[_at] = float(game_us) / 1000000.0
 	_mark[_at] = _pending
 	_pending = ""
 	_at = (_at + 1) % CAP
@@ -315,18 +328,21 @@ static func report() -> String:
 
 	rows.sort_custom(func(a, b): return float(a[0]) > float(b[0]))
 	out.append("가장 나쁜 프레임 %d개:" % mini(rows.size(), WORST))
-	out.append("   ms  스크립트  물리  나머지  그리기  노드  적  층  자원  무슨 일")
+	out.append("   ms  스크립트  게임  나머지스크립트  물리  엔진  그리기  노드  적  층  자원  무슨 일")
 	for r in rows.slice(0, WORST):
 		var i2: int = int(r[1])
 		var ms := float(r[0]) * 1000.0
 		var pr := _proc[i2] * 1000.0
 		var ph := _phys[i2] * 1000.0
-		out.append("%5.1f %9.1f %5.1f %7.1f %7d %5d %3d %3d %5d  %s" % [
-			ms, pr, ph, maxf(ms - pr - ph, 0.0),
+		var gm := _game[i2] * 1000.0
+		out.append("%5.1f %9.1f %5.1f %14.1f %5.1f %6.1f %7d %5d %3d %3d %5d  %s" % [
+			ms, pr, gm, maxf(pr - gm, 0.0), ph, maxf(ms - pr - ph, 0.0),
 			_draw[i2], _node[i2], _foe[i2], _floor[i2], _res[i2],
 			_mark[i2] if _mark[i2] != "" else "-"])
 	out.append("")
-	out.append("「나머지」가 크면 우리 코드가 아니라 엔진이 그리는 시간입니다")
+	out.append("「게임」은 game.gd 의 _process 가, 「나머지스크립트」는 적·소품·UI 가")
+	out.append("각자 쓴 시간입니다. 스크립트 = 게임 + 나머지스크립트.")
+	out.append("「엔진」이 크면 우리 코드가 아니라 그리는 시간입니다")
 	out.append("(셰이더를 처음 굽거나 그림을 처음 올릴 때 여기가 튑니다).")
 	out.append("「자원」이 그 프레임에 늘었으면 무언가를 처음 불러온 것입니다.")
 	return "
