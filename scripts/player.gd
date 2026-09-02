@@ -1866,11 +1866,13 @@ func parry_press() -> void:
 		return
 	_parry_cd = PARRY_COOLDOWN
 	_parry_ready = state.parry_window
-	# **연 것이 보여야 합니다.** 판정 창은 0.16~0.34초라, 아무 표시도 없으면
-	# 눌렀는지 안 눌렀는지조차 모릅니다.
+	# **연 것은 자세가 말합니다.**
+	#
+	# 발밑에 고리를 띄워 봤는데, 막기는 **누르고 있는 기술**이라 그 고리가
+	# 누를 때마다 발밑에서 커졌다 사라집니다 - 자주 나오는 표시가 매번 눈을
+	# 끌면 그게 곧 잡음입니다. 몸이 이미 웅크리고 두 팔을 올리므로(BLOCK),
+	# 표시는 그것으로 충분합니다. 귀로만 한 번 알립니다.
 	Sfx.play_at(Sfx.PICK, 0.8, -8.0)
-	Fx.ring(get_parent(), global_position, Color(0.62, 0.80, 1.0, 0.5),
-		1.05, state.parry_window)
 
 
 func shout_press() -> void:
@@ -3968,10 +3970,13 @@ func _guard_takes(from: Vector3) -> bool:
 	state.breath = maxf(0.0, state.breath - BREATH_GUARD_HIT)
 	_invuln = maxf(_invuln, 0.10)
 	_guard_pose = maxf(_guard_pose, GUARD_POSE_MIN)
+	# 막은 자리에서 조각이 튑니다. **고리는 안 씁니다** - 고리는 이 게임에서
+	# 「퍼지는 것」의 모양이라, 받아 낸 자리에 쓰면 무언가 나간 것으로
+	# 보입니다.
 	Sfx.play(Sfx.PUSH, -8.0, 0.06)
 	Game.shake(0.12, 0.08)
-	Fx.ring(get_parent(), global_position + to.normalized() * 0.5,
-		Color(0.70, 0.85, 1.0, 0.55), 1.1, 0.22)
+	Fx.burst(get_parent(), global_position + to.normalized() * 0.45
+		+ Vector3(0, 0.7, 0), Color(0.82, 0.90, 1.0), 7, 2.4)
 	return true
 
 
