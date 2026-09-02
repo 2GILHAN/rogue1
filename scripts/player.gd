@@ -62,12 +62,10 @@ const GUARD_ARC := 180.0
 ## 판이 그때마다 끊겼습니다. 지금은 옆으로 반걸음 비켜서면서 발을 걸어
 ## 넘어뜨립니다 - 몸은 바닥에 붙어 있고, 끝나면 그 자리에서 이어집니다.
 ##
-## 비켜서는 거리와 걸리는 데까지의 시간.
-const PARRY_STEP := 0.95
+## 상대를 돌아 **뒤로 가는 데** 걸리는 시간.
 const PARRY_TIME := 0.42
-## 그 시간 중 **발이 걸리는 지점**(0~1). 다 비켜선 뒤가 아니라 지나가면서
-## 겁니다 - 끝에 두면 비키기와 걸기가 두 동작으로 보입니다.
-const PARRY_TRIP_AT := 0.55
+## 그 길의 **몇 %에서 밀까**(0~1). 다 돌아 등을 본 자리에서 밉니다.
+const PARRY_TRIP_AT := 0.88
 ## 걸어 넘어뜨릴 때의 피해 배수와 못 일어나는 시간.
 ##
 ## **미는 힘은 밀기와 같은 값을 씁니다**(`SHOVE_KNOCK` + 스킬). 여기에 따로
@@ -546,7 +544,8 @@ var _parry_to := Vector3.ZERO
 ## 좁히러 달려가는 시간(0 이면 바로 앞이라 안 달립니다)과 그 끝 자리.
 var _parry_run := 0.0
 var _parry_run_to := Vector3.ZERO
-## 잔상을 떨군 뒤 지나온 거리.
+## 도는 쪽(+1 / -1)과, 잔상을 떨군 뒤 지나온 거리.
+var _parry_spin := 1.0
 var _parry_trail := 0.0
 ## 뛰어오르기 전 자리. 앞발로 차면 여기보다 조금 **뒤로** 내려섭니다.
 var _parry_from := Vector3.ZERO
@@ -4116,8 +4115,10 @@ func _begin_parry(foe: Node3D, _unused: bool = false) -> void:
 	_parry_run = clampf(gap / PARRY_RUN_SPEED, 0.0, PARRY_RUN_MAX) if gap > 0.05 else 0.0
 	_parry_run_to = _parry_from + dir * maxf(gap, 0.0)
 	_parry_run_to.y = _parry_from.y
-	# 비켜서는 것은 **좁힌 자리에서** 시작합니다.
-	_parry_to = _parry_run_to + side * PARRY_STEP
+	# **돌아서 등 뒤에 섭니다.** 좁힌 자리의 정반대편입니다 - 반 바퀴를
+	# 돌므로 끝 자리는 곡선을 그리는 식과 어긋날 수가 없습니다.
+	_parry_spin = 1.0 if side.dot(Vector3(-dir.z, 0.0, dir.x)) >= 0.0 else -1.0
+	_parry_to = foe.global_position + dir * PARRY_CLOSE
 	_parry_to.y = _parry_from.y
 	_parry_trail = 0.0
 	_parry_air = _parry_run + PARRY_TIME
@@ -4151,9 +4152,9 @@ func _tick_parry(delta: float) -> void:
 			0.0, 1.0)
 		pos = _parry_from.lerp(_parry_run_to, kr)
 	else:
-		# ② 비켜서며 거는 마디.
+		# ② **상대를 돌아 등 뒤로 가는 마디.**
 		k = 1.0 - clampf(_parry_air / PARRY_TIME, 0.0, 1.0)
-		pos = _parry_run_to.lerp(_parry_to, k * k * (3.0 - 2.0 * k))
+		pos = _orbit_point(k * k * (3.0 - 2.0 * k))
 	pos.y = _parry_from.y
 	# **가는 내내 잔상을 떨굽니다.** 거리마다입니다(구르기와 같은 규칙) -
 	# 좁히는 마디에서는 촘촘하고, 비켜서는 짧은 걸음에서는 두어 장입니다.
@@ -4176,6 +4177,25 @@ func _tick_parry(delta: float) -> void:
 		_end_parry()
 
 
+func _orbit_point(t: float) -> Vector3:
+	## **상대를 중심으로 반 바퀴 돌아 등 뒤로** 갑니다.
+	##
+	## 좁히는 마디가 이미 거리를 1.05m 로 맞춰 놨으므로, 여기서는 반지름이
+	## 거의 그대로인 짧은 궤도입니다 - 멀리서부터 돌던 시절처럼 크게 휘지
+	## 않습니다.
+	##
+	## 상대가 안 보이면(죽었거나) 그냥 끝 자리로 갑니다.
+	if not is_instance_valid(_parry_foe):
+		return _parry_run_to.lerp(_parry_to, t)
+	var c: Vector3 = _parry_foe.global_position
+	c.y = _parry_run_to.y
+	var v0: Vector3 = _parry_run_to - c
+	v0.y = 0.0
+	var r := maxf(v0.length(), 0.05)
+	var a := atan2(v0.z, v0.x) + PI * _parry_spin * t
+	return c + Vector3(cos(a) * r, 0.0, sin(a) * r)
+
+
 func _parry_trip() -> void:
 	## **발을 걸어 넘어뜨립니다.** 한 번만 들어갑니다.
 	##
@@ -4189,9 +4209,9 @@ func _parry_trip() -> void:
 	var roll := state.roll_damage(rng)
 	foe.call("take_damage", float(roll[0]) * PARRY_TRIP_MULT, bool(roll[1]),
 		global_position, PARRY_TRIP_STUN, global_position)
-	# **가던 쪽으로 엎어집니다.** 내가 비킨 쪽이 아니라 상대가 오던 쪽으로
-	# 넘어져야 발에 걸린 것으로 보입니다.
-	var go: Vector3 = _parry_from - foe.global_position
+	# **등 뒤에서 앞으로 밉니다.** 내가 선 자리에서 상대 쪽입니다 - 돌아서
+	# 뒤를 잡았으니 미는 쪽도 그 등이 향한 앞이어야 합니다.
+	var go: Vector3 = foe.global_position - global_position
 	go.y = 0.0
 	go = go.normalized() if go.length_squared() > 0.0001 else aim
 	# **미는 세기는 밀기와 같은 값**입니다. 여기에 숫자를 따로 적어 두면

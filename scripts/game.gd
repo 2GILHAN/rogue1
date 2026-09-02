@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.59.1"
+const VERSION := "v0.60"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2815,11 +2815,20 @@ func _drive_pose() -> void:
 				print("[패링] %-4s 잔상 %d장  좁힌 시간 %.2f초" % [
 					_probe_arg if _probe_arg != "" else "맞붙",
 					Player.ghost_n, player._parry_run])
-				print("[패링] %-4s 끝: 움직인 거리 %.2fm  적과의 거리 %.2fm  적이 받은 피해 %.0f  적 체력 %.0f" % [
+				# **등 뒤를 잡았는가.** 처음 내가 섰던 쪽과 지금 내가 선
+				# 쪽이 상대를 사이에 두고 반대라야 맞습니다.
+				var was: Vector3 = _wedge_from - _probe_foe.global_position
+				var now: Vector3 = player.global_position - _probe_foe.global_position
+				was.y = 0.0
+				now.y = 0.0
+				var flip := -1.0
+				if was.length_squared() > 0.0001 and now.length_squared() > 0.0001:
+					flip = was.normalized().dot(now.normalized())
+				print("[패링] %-4s 끝: 움직인 %.2fm  적과 %.2fm  피해 %.0f  처음 쪽과의 내적 %+.2f(-1 이면 정반대=등 뒤)" % [
 					_probe_arg if _probe_arg != "" else "맞붙",
 					_wedge_from.distance_to(player.global_position),
 					player.global_position.distance_to(_probe_foe.global_position),
-					_probe_t0 - _probe_foe.hp, _probe_foe.hp])
+					_probe_t0 - _probe_foe.hp, flip])
 				print("[패링] 걸음 %.2fm/s  밀림 한도 %.2fm/s (걸음의 %.1f배)" % [
 					state.move_speed, state.move_speed * Enemy.KNOCK_SPEED_MULT,
 					Enemy.KNOCK_SPEED_MULT])
