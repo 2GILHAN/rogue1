@@ -2093,6 +2093,10 @@ func _afterimage(strong: bool) -> void:
 
 	var _t3 := Time.get_ticks_usec()
 	get_parent().add_child(ghost)
+	# **잔상도 표시를 답니다.** 구르기·밀기 누름과는 다른 자리입니다 - 누른
+	# 프레임이 아니라 **가는 동안** 몇 장씩 떨어지므로, 누름 표시만 보면
+	# "구르기 옆에서 끊긴다" 까지만 알고 그게 누름인지 잔상인지 모릅니다.
+	Trace.mark("잔상")
 	var _t4 := Time.get_ticks_usec()
 	ghost.global_transform = body.global_transform
 	var life := 0.30 if not strong else 0.45

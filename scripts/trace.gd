@@ -36,6 +36,20 @@ static var _draw: PackedInt32Array = PackedInt32Array()
 static var _node: PackedInt32Array = PackedInt32Array()
 static var _foe: PackedInt32Array = PackedInt32Array()
 static var _floor: PackedInt32Array = PackedInt32Array()
+## **시간을 셋으로 쪼갭니다.** 어디서 쓰는지가 이것 하나로 갈립니다.
+##
+##   스크립트  `_process` 들(우리 코드)
+##   물리      `_physics_process` 들
+##   나머지    프레임 시간 - 위 둘 = **엔진이 그리는 시간**
+##
+## 나쁜 프레임 열둘에 표시가 하나도 안 붙었을 때(v0.60 기록) 이걸 넣었습니다 -
+## 「무슨 일이 있었나」 로는 못 잡는 끊김이라 「어디서 썼나」 를 봐야 합니다.
+static var _proc: PackedFloat32Array = PackedFloat32Array()
+static var _phys: PackedFloat32Array = PackedFloat32Array()
+## 그 프레임에 자원 수가 얼마나 늘었나. 무언가를 **처음 불러온** 프레임이면
+## 여기가 튑니다(그림·소리·셰이더).
+static var _res: PackedInt32Array = PackedInt32Array()
+static var _res_last := 0
 ## 그 프레임에 있었던 일. 대부분 빈 문자열입니다.
 static var _mark: PackedStringArray = PackedStringArray()
 static var _at := 0
@@ -58,6 +72,9 @@ static func start() -> void:
 		_draw.resize(CAP)
 		_node.resize(CAP)
 		_foe.resize(CAP)
+		_proc.resize(CAP)
+		_phys.resize(CAP)
+		_res.resize(CAP)
 		_floor.resize(CAP)
 		_mark.resize(CAP)
 	_at = 0
@@ -93,6 +110,11 @@ static func sample(delta: float, draw_calls: int, nodes: int,
 	## 한 프레임. `Game._process` 가 매 프레임 부릅니다.
 	if not _on:
 		return
+	_proc[_at] = float(Performance.get_monitor(Performance.TIME_PROCESS))
+	_phys[_at] = float(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS))
+	var res := int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT))
+	_res[_at] = res - _res_last
+	_res_last = res
 	_ms[_at] = delta
 	_draw[_at] = draw_calls
 	_node[_at] = nodes
@@ -182,10 +204,19 @@ static func report() -> String:
 
 	rows.sort_custom(func(a, b): return float(a[0]) > float(b[0]))
 	out.append("가장 나쁜 프레임 %d개:" % mini(rows.size(), WORST))
-	out.append("   ms  그리기  노드  적  층  무슨 일")
+	out.append("   ms  스크립트  물리  나머지  그리기  노드  적  층  자원  무슨 일")
 	for r in rows.slice(0, WORST):
 		var i2: int = int(r[1])
-		out.append("%5.1f %6d %6d %3d %3d  %s" % [
-			float(r[0]) * 1000.0, _draw[i2], _node[i2], _foe[i2], _floor[i2],
+		var ms := float(r[0]) * 1000.0
+		var pr := _proc[i2] * 1000.0
+		var ph := _phys[i2] * 1000.0
+		out.append("%5.1f %9.1f %5.1f %7.1f %7d %5d %3d %3d %5d  %s" % [
+			ms, pr, ph, maxf(ms - pr - ph, 0.0),
+			_draw[i2], _node[i2], _foe[i2], _floor[i2], _res[i2],
 			_mark[i2] if _mark[i2] != "" else "-"])
-	return "\n".join(out)
+	out.append("")
+	out.append("「나머지」가 크면 우리 코드가 아니라 엔진이 그리는 시간입니다")
+	out.append("(셰이더를 처음 굽거나 그림을 처음 올릴 때 여기가 튑니다).")
+	out.append("「자원」이 그 프레임에 늘었으면 무언가를 처음 불러온 것입니다.")
+	return "
+".join(out)
