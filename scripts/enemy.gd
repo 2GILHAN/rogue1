@@ -700,6 +700,9 @@ func launch(direction: Vector3, speed: float, damage: float) -> void:
 	# 세기를 넣어 주므로, 밀기 스킬이 여기에도 그대로 붙습니다.
 	velocity = flat * (throw_knock * THROW_PUSH * speed)
 	velocity.y = 0.0
+	# 던지기도 **같은 빠르기 한도**를 씁니다. 밀기와 던지기가 한 줄기라고
+	# 적어 놓고 빠르기만 따로 두면, 던진 것만 방 끝까지 날아갑니다.
+	_cap_knock()
 	_knock = 0.6
 	# **던진 사람 쪽으로 몸을 돌립니다.** 밀기와 같은 규칙입니다(knock_back
 	# 참고) - 던지기는 밀기의 큰 형이니 밀려나는 모양도 같아야 합니다.
@@ -2130,6 +2133,28 @@ func interrupt(hold: float) -> void:
 		_disc.visible = false
 
 
+## 밀려나는 **최고 빠르기**를 주인공 걸음의 몇 배로 묶을까.
+##
+## 안 묶으면 밀기·던지기·발 걸기가 저마다 다른 세기를 넣어서, 같은 「밀림」
+## 인데 어떤 것은 걸어서 따라갈 수 있고 어떤 것은 방 끝까지 날아갑니다.
+## 걸음의 1.2배면 **쫓아갈 수 있는 빠르기**입니다 - 밀어 놓고 그 자리에서
+## 이어 갈 수 있어야 밀기가 정리하는 기술이 됩니다.
+const KNOCK_SPEED_MULT := 1.2
+
+
+func _cap_knock() -> void:
+	## 바닥을 따라 미는 빠르기를 걸음의 1.2배로 자릅니다. **한 군데에서만**
+	## 자릅니다 - 미는 곳마다 따로 자르면 새 기술을 더할 때 반드시 빠뜨립니다.
+	var top := 3.1 * KNOCK_SPEED_MULT
+	if Game.instance != null and Game.instance.state != null:
+		top = Game.instance.state.move_speed * KNOCK_SPEED_MULT
+	var flat := Vector2(velocity.x, velocity.z)
+	if flat.length() > top:
+		flat = flat.normalized() * top
+		velocity.x = flat.x
+		velocity.z = flat.y
+
+
 func knock_back(impulse: Vector3, chain: int = 0) -> void:
 	## 밖에서 밀어냅니다.
 	##
@@ -2154,6 +2179,7 @@ func knock_back(impulse: Vector3, chain: int = 0) -> void:
 	velocity.x = 0.0
 	velocity.z = 0.0
 	velocity += impulse
+	_cap_knock()
 	velocity.y = maxf(velocity.y, 2.2)      # 살짝 띄워야 밀린 것으로 보입니다
 	# **민 사람 쪽으로 몸을 돌립니다.**
 	#
@@ -2411,6 +2437,7 @@ func _hit_others_while_flying() -> void:
 func shove(impulse: Vector3) -> void:
 	## 밖에서 밀 때. 주인공이 몸으로 밀거나 던져진 물건이 칠 때 씁니다.
 	velocity += impulse
+	_cap_knock()
 	_stagger = maxf(_stagger, 0.12)
 
 

@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.56"
+const VERSION := "v0.57.1"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2319,6 +2319,62 @@ func _drive_pose() -> void:
 				_foe_sum += Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)
 				_foe_draw += Performance.get_monitor(Performance.TIME_PROCESS)
 				_foe_n += 1
+		"attackorder":
+			# **공격 버튼이 무엇을 먼저 보는가.**
+			#
+			# 제자리에서 누르면 고함인데, **그보다 상호작용이 먼저**여야
+			# 합니다. 안 그러면 책장 앞에 가만히 서서 눌러도 고함이 나가고,
+			# 책을 꺼내려면 책장 쪽으로 방향을 누른 채 눌러야 합니다.
+			#
+			# `--side=` 로 무엇을 앞에 놓을지 고릅니다:
+			#   빈칸  아무것도 없음   -> 고함
+			#   shelf 책장            -> 읽기
+			#   prop  소품(인형)      -> 집기
+			if _frames == 20 and is_instance_valid(player):
+				player.bot_active = true
+				player.bot_move = Vector2.ZERO
+				for n in get_tree().get_nodes_in_group("props"):
+					(n as Node3D).queue_free()
+				if _probe_arg == "shelf":
+					var sh := Prop.new()
+					world.add_child(sh)
+					sh.setup("bookshelf")
+					sh.global_position = player.global_position + Vector3(0, 0, -1.1)
+				elif _probe_arg == "prop":
+					var pr := Prop.new()
+					world.add_child(pr)
+					pr.setup("daycare_pandatoy")
+					pr.global_position = player.global_position + Vector3(0, 0, -0.7)
+			# **보고 있는 쪽을 맞춰 둡니다.**
+			#
+			# `_nearest_prop` 은 잡기 부채꼴(보는 쪽) 안의 소품만 셉니다 -
+			# 딴 데를 본 채로는 발밑의 인형도 안 잡힙니다. 그것이 규칙인데,
+			# 프로브가 그걸 모르고 "소품이 안 잡힌다" 로 읽을 뻔했습니다.
+			if _frames > 24:
+				debug_aim = Vector3(0, 0, -1)
+			# **제자리**에서 누릅니다(방향 입력 0).
+			if _frames == 60:
+				player.bot_move = Vector2.ZERO
+				player.grab_press()
+			if _frames == 58 and is_instance_valid(player):
+				var lst: Array = get_tree().get_nodes_in_group("props")
+				for n in lst:
+					var pp := n as Prop
+					print("[공격순서]   소품 %s  붙박이=%s  거리 %.2f" % [
+						pp.kind if "kind" in pp else "?", str(pp.is_fixed()),
+						pp.global_position.distance_to(player.global_position)])
+				var np: Node3D = player._nearest_prop()
+				print("[공격순서] 가까운 소품=%s  거리 %.2f (손 닿는 거리 %.2f)" % [
+					str(np.name) if np != null else "없음",
+					player._grab_distance(np) if np != null else -1.0,
+					Player.GRAB_RANGE])
+			if _frames == 64:
+				print("[공격순서] %-6s 고함=%s  읽는중=%s  손에 든 것=%s  달려듦=%s" % [
+					_probe_arg if _probe_arg != "" else "없음",
+					str(player._swing_time > 0.0),
+					str(player._read_time > 0.0),
+					str(player._held != null),
+					str(player._lunge_time > 0.0)])
 		"guardhold":
 			# **막기 셋을 가릅니다.**
 			#
@@ -2335,15 +2391,29 @@ func _drive_pose() -> void:
 			#    한참 뒤라, 이건 순수하게 「누르고 있어서」 막는 것입니다.
 			if _frames == 30:
 				player.parry_press()
+			# **막는 동안에는 안 움직입니다.** 걸으라고 시켜 놓고 잽니다.
+			if _frames >= 60 and _frames <= 88:
+				player.bot_active = true
+				player.bot_move = Vector2(1, 0)
+				if _frames == 60:
+					_wedge_from = player.global_position
+			if _frames == 88:
+				print("[막기셋] 막는 중 28프레임 걸으라고 시킴: 움직인 거리 %.2fm (0 이어야 맞음)" % [
+					player.global_position.distance_to(_wedge_from)])
+				player.bot_active = false
 			if _frames == 90:
 				player.take_damage(20.0, player.global_position + Vector3(0, 0, -1.5), 5.0)
 			if _frames == 92:
-				print("[막기셋] 누르고 있는 중 앞에서: 체력 %.0f  숨 %.0f  막는중=%s (안 깎여야 맞음)" % [
+				print("[막기셋] 누르고 있는 중 앞에서: 체력 %.0f  숨 %.0f  막는중=%s (20 중 6 만 들어와야 맞음)" % [
 					state.hp, state.breath, str(player.guarding())])
 			# ② 같은 상태에서 **뒤에서** 맞습니다.
-			if _frames == 100:
+			#
+			# **앞의 한 대가 무적을 걸어 둡니다**(막아도 30% 는 들어오므로
+			# 그것도 피격입니다). 곧바로 때리면 그 무적에 먹혀서 "뒤에서도
+			# 안 아프다" 로 읽힙니다 - 실제로 그렇게 한 번 봤습니다.
+			if _frames == 130:
 				player.take_damage(20.0, player.global_position + Vector3(0, 0, 1.5), 5.0)
-			if _frames == 104:
+			if _frames == 134:
 				print("[막기셋] 누르고 있는 중 뒤에서: 체력 %.0f (깎여야 맞음)" % state.hp)
 			# ③ 손을 떼고, 맞춰 눌러 패링.
 			if _frames == 150:
@@ -2423,6 +2493,17 @@ func _drive_pose() -> void:
 							ls.distance_to(rs), lhh.distance_to(rhh),
 							lhh.distance_to(rhh) / maxf(ls.distance_to(rs), 0.0001),
 							lhh.y - hd.y])
+					# 다리도 봅니다 - 발 걸기처럼 다리가 요점인 자세는
+					# 팔만 재면 아무것도 안 잰 것입니다.
+					var lf: Vector3 = world.call("LeftFoot")
+					var rf: Vector3 = world.call("RightFoot")
+					var hip: Vector3 = world.call("Hips")
+					if lf != Vector3.INF and hip != Vector3.INF:
+						var inv2 := sk.global_transform.affine_inverse()
+						var lfl := inv2 * lf
+						var rfl := inv2 * rf
+						print("[실험실] 발 (몸 기준, -Z 가 앞)  왼 z %+.2f y %.2f   오른 z %+.2f y %.2f   두 발 사이 %.2fm" % [
+							lfl.z, lfl.y, rfl.z, rfl.y, lf.distance_to(rf)])
 					for side in ["Left", "Right"]:
 						var elbow: Vector3 = world.call(side + "ForeArm")
 						var hand: Vector3 = world.call(side + "Hand")
@@ -2678,20 +2759,17 @@ func _drive_pose() -> void:
 				print("[버튼] 대기 중 다시 막기: 판정창 %.2f초 (안 열려야 맞음)" % [
 					player._parry_ready])
 		"parry":
-			# **패링 한 바퀴.** 받아 내는지, 시간이 느려지는지, 머리를 밟는지,
-			# 원래 자리보다 뒤에 내려서는지를 봅니다. 후속 누름은 없습니다 -
-			# 받아 내면 한 동작이 끝까지 돕니다.
+			# **받아 내기 한 바퀴.** 비켜서는 거리 · 발 걸기 · 밀리는 빠르기 ·
+			# 값(숨)을 봅니다.
 			if _frames == 20 and is_instance_valid(player):
 				player.bot_active = false
+				debug_aim = Vector3(0, 0, -1)
 				for _i in 3:
 					state.apply_family("shout", rng)
 				_boon_names = state.skill_summary()
 				var e := Enemy.new()
 				world.add_child(e)
 				e.setup("grunt", 1, dungeon, player)
-				# **물리는 켜 둡니다.** 끄면 밀려나지도 않아서 "안 밀린다"
-				# 로 잡힙니다 - 실제로 그렇게 한 번 읽었습니다. 대신 걸음만
-				# 0 으로 두어 다가오지 못하게 합니다.
 				e.speed = 0.0
 				e.max_hp = 9999.0
 				e.hp = e.max_hp
@@ -2700,41 +2778,31 @@ func _drive_pose() -> void:
 				_probe_foe = e
 				_alive += 1
 				_wedge_from = player.global_position
-				_ram_foe = e
-				_probe_t0 = float(e.hp)
-				print("[패링] 고함 Lv%d  판정창 %.2f초" % [
-					state.family_level("shout"), state.parry_window])
+				_probe_t0 = e.hp
+				state.breath = state.max_breath
 			if _frames == 40:
 				player.attack()
 			if _frames == 46 and is_instance_valid(_probe_foe):
 				player.take_damage(20.0, _probe_foe.global_position, 8.0)
 			if _frames == 48:
-				print("[패링] 받아 냄: 체력 %.0f/%.0f  배속 %.2f" % [
-					state.hp, state.max_hp, Engine.time_scale])
-			# 솟구치는 마디(0.20초) → 밟기 → 재비(0.46초). 느린 시간이라
-			# 프레임으로는 그 세 배쯤 걸립니다.
-			if _frames in [55, 75, 110, 200] and is_instance_valid(_probe_foe):
-				print("[패링] f=%3d  높이 %+.2fm  처음 자리에서 %+.2fm  재비 %+.0f도  적 체력 %.0f" % [
-					_frames, player.global_position.y - _wedge_from.y,
-					_wedge_from.distance_to(player.global_position),
-					rad_to_deg(player.pivot.rotation.x),
-					_probe_foe.hp])
-			if _frames == 260:
-				var behind: Vector3 = player.global_position - _wedge_from
-				behind.y = 0.0
-				var to_foe: Vector3 = _probe_foe.global_position - _wedge_from if is_instance_valid(_probe_foe) else Vector3.FORWARD
-				to_foe.y = 0.0
-				print("[패링] 끝: 배속 %.2f  높이 %+.2fm  뒤로 %.2fm(적 반대쪽=%s)  적이 받은 피해 %.0f  적이 밀려난 거리 %.2fm" % [
-					Engine.time_scale, player.global_position.y - _wedge_from.y,
-					behind.length(),
-					str(behind.normalized().dot(to_foe.normalized()) < -0.7),
-					_probe_t0 - (_probe_foe.hp if is_instance_valid(_probe_foe) else 0.0),
-					(_probe_foe.global_position.distance_to(
-						_wedge_from + Vector3(0, 0, -1.5)) if is_instance_valid(_probe_foe) else 0.0)])
-				print("[패링] 적이 간 쪽이 나와 반대인가: %s" % [
-					str((_probe_foe.global_position - _wedge_from).normalized().dot(
-						(player.global_position - _wedge_from).normalized()) < -0.5)
-					if is_instance_valid(_probe_foe) else "?"])
+				print("[패링] 받아 냄: 체력 %.0f/%.0f  숨 %.0f/%.0f  배속 %.2f" % [
+					state.hp, state.max_hp, state.breath, state.max_breath,
+					Engine.time_scale])
+			# 느린 시간이라 프레임으로는 길게 걸립니다.
+			if _frames in [70, 110, 160] and is_instance_valid(_probe_foe):
+				print("[패링] f=%3d  옆으로 %.2fm  높이 %+.2fm  적 체력 %.0f  적 빠르기 %.2fm/s" % [
+					_frames, _wedge_from.distance_to(player.global_position),
+					player.global_position.y - _wedge_from.y,
+					_probe_foe.hp,
+					Vector2(_probe_foe.velocity.x, _probe_foe.velocity.z).length()])
+			if _frames == 220 and is_instance_valid(_probe_foe):
+				print("[패링] 끝: 옆으로 %.2fm(비키는 거리 %.2f)  높이 %+.2fm  배속 %.2f  적이 받은 피해 %.0f" % [
+					_wedge_from.distance_to(player.global_position), Player.PARRY_STEP,
+					player.global_position.y - _wedge_from.y, Engine.time_scale,
+					_probe_t0 - _probe_foe.hp])
+				print("[패링] 걸음 %.2fm/s  밀림 한도 %.2fm/s (걸음의 %.1f배)" % [
+					state.move_speed, state.move_speed * Enemy.KNOCK_SPEED_MULT,
+					Enemy.KNOCK_SPEED_MULT])
 		"slamdisc":
 			# **내려치기 예고가 칠해지는가.** 베개 아이를 세워 두고 예고가
 			# 도는 동안 원이 자라는지를 봅니다(`--shot=` 으로 같이 찍습니다).

@@ -108,7 +108,8 @@ var _clip_buttons: Array[Button] = []
 ##
 ## 여기에 줄을 더하는 것이 곧 실험실에 자세를 더하는 일입니다.
 const LAB_POSES: Array = [
-	["없음", ""], ["막기", "BLOCK"], ["고함", "SHOUT"], ["구르기", "ROLL"],
+	["없음", ""], ["막기", "BLOCK"], ["발 걸기", "TRIP"], ["고함", "SHOUT"],
+	["구르기", "ROLL"],
 	["달려들기", "LUNGE"], ["잡고 있기", "CARRY"], ["맞음", "HURT"],
 	["붙잡힘", "BOUND"], ["마시기", "DRINK"], ["읽기", "READ"],
 	["박치기 예고", "REACH"], ["박치기", "RAM"], ["베개 막기", "GUARD"],
