@@ -89,6 +89,18 @@ const PARRY_REACH := LUNGE_RANGE
 ## 처음에는 「때린 자리 근처에 적이 있나」 로 갈랐는데, 가까이서 쏜 아이가
 ## 그 안에 들어와 **원거리인데 맞붙기로 잡혔습니다.**
 const PARRY_HIT_NEAR := 0.9
+
+## **맞은 뒤에도 이만큼은 늦게 눌러도 받아 냅니다**(초).
+##
+## 창은 누른 뒤 **앞쪽으로만** 열려 있었습니다(0.16~0.34초). 뒤쪽 여유가 0 이라,
+## 맞는 순간에 맞춰 누르면 이미 늦습니다 - 손은 「맞는 순간」을 겨누는데 창은
+## 그 앞에만 있으니 **일찍 눌러야 하는 기술**이 됩니다. 그러면 배우는 것이
+## 「맞는 순간을 보기」 가 아니라 「빨리 누르기」 가 되고, 그건 이 기술이 있는
+## 이유가 아닙니다.
+##
+## 맞고 나서 이 안에 누르면 **그 한 대를 되돌리고** 받아 냅니다. 되돌리는 것이
+## 곧 패링이 하는 일이라, 규칙이 하나 늘지 않습니다.
+const PARRY_LATE := 0.10
 ## **거리를 좁히고 나서 비켜섭니다.**
 ##
 ## 상대가 이 거리 안이면 「바로 앞」이라 그냥 겁니다. 그보다 멀면 먼저
@@ -550,6 +562,10 @@ var _parry_trail := 0.0
 ## 이번 프레임에 가고 싶은 속도. **자리를 직접 옮기지 않습니다** - 옮기면
 ## 충돌을 아예 안 거쳐서 벽을 뚫고 방 밖으로 나갑니다(실제로 그랬습니다).
 var _parry_vel := Vector3.ZERO
+## 방금 맞은 한 대. 늦게 눌렀을 때 되돌릴 것들입니다.
+var _late_hit := 0.0
+var _late_from := Vector3.ZERO
+var _late_amount := 0.0
 ## 뛰어오르기 전 자리. 앞발로 차면 여기보다 조금 **뒤로** 내려섭니다.
 var _parry_from := Vector3.ZERO
 ## 느려진 시간이 끝나는 **실제** 시각(ms).
@@ -716,6 +732,7 @@ func _physics_process(delta: float) -> void:
 			remove_collision_exception_with(_pass_with)
 		_pass_with = null
 	_parry_ready = maxf(0.0, _parry_ready - delta)
+	_late_hit = maxf(0.0, _late_hit - delta)
 	_parry_cd = maxf(0.0, _parry_cd - delta)
 	if guarding():
 		_guard_pose = maxf(_guard_pose, 0.12)
@@ -1919,6 +1936,12 @@ func parry_press() -> void:
 		return
 	_guard_held = true
 	_guard_pose = maxf(_guard_pose, GUARD_POSE_MIN)
+	# **방금 맞았으면 그 한 대를 되돌립니다.** 창을 새로 열기 전입니다 -
+	# 열고 나면 이 누름이 「앞으로의 한 대」 를 기다리는 것이 되어, 방금
+	# 맞은 것은 영영 못 되돌립니다.
+	if _parry_cd <= 0.0 and _try_late_parry():
+		_parry_cd = PARRY_COOLDOWN
+		return
 	# **패링 창은 누른 그 순간에만** 열립니다. 누르고 있는 동안 계속 열려
 	# 있으면 막기와 패링이 같은 것이 되어, 맞추는 일이 없어집니다.
 	if _parry_cd > 0.0:
@@ -4144,9 +4167,34 @@ func _guard_takes(from: Vector3) -> bool:
 
 
 func _try_parry(from: Vector3) -> bool:
-	## **맞기 직전에 고함을 눌러 뒀나.** 눌러 뒀으면 그 한 대를 받아 냅니다.
+	## **맞기 직전에 막기를 눌러 뒀나.** 눌러 뒀으면 그 한 대를 받아 냅니다.
 	if _parry_ready <= 0.0 or _dead or _parry_air > 0.0:
 		return false
+	return _do_parry(from)
+
+
+func _try_late_parry() -> bool:
+	## **맞고 나서 눌렀나.** 0.10초 안이면 그 한 대를 되돌리고 받아 냅니다.
+	##
+	## 되돌리는 것이 곧 패링이 하는 일이라, 규칙이 하나 늘지 않습니다 -
+	## 「받아 내면 그 한 대는 없던 일」 이 앞에서든 뒤에서든 같습니다.
+	if _late_hit <= 0.0 or _dead or _parry_air > 0.0:
+		return false
+	var from := _late_from
+	var back := _late_amount
+	_late_hit = 0.0
+	if not _do_parry(from):
+		return false
+	# **되돌립니다.** 맞은 값만 돌려주고, 넉백은 `_begin_parry` 가 속도를
+	# 0 으로 만들면서 저절로 지워집니다.
+	state.hp = minf(state.max_hp, state.hp + back)
+	health_changed.emit(state.hp, state.max_hp)
+	return true
+
+
+func _do_parry(from: Vector3) -> bool:
+	## 받아 낼 상대를 찾아 넘깁니다. 앞에서 눌렀든 뒤에서 눌렀든 여기로
+	## 모입니다 - 갈래를 둘로 두면 한쪽만 고치게 됩니다.
 	# **때린 쪽을 찾습니다.** `from` 은 때린 자리라 그 근처의 적이 임자입니다 -
 	# 가장 가까운 적을 그냥 집으면, 뒤에서 온 것을 받아 내고 엉뚱한 아이에게
 	# 발을 겁니다.
@@ -4397,6 +4445,10 @@ func take_damage(amount: float, from: Vector3 = Vector3.ZERO,
 	if _shield_blocks(from):
 		_shield_take(amount, from)
 		return
+	# **방금 맞은 한 대를 기억해 둡니다.** 곧바로 막기를 누르면 되돌립니다.
+	_late_hit = PARRY_LATE
+	_late_from = from
+	_late_amount = amount
 	state.hp -= amount
 	_invuln = HIT_INVULN
 	Sfx.play(Sfx.HURT, -3.0, 0.10)

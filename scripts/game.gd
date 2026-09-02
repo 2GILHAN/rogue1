@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.63.1"
+const VERSION := "v0.64"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -2920,19 +2920,30 @@ func _drive_pose() -> void:
 				print("[창] 고함 Lv%d  적힌 판정창 %.2f초 (=%.1f프레임)" % [
 					state.family_level("shout"), state.parry_window,
 					state.parry_window * 60.0])
-			if _frames == 60:
-				player.parry_press()
-			# `--side=N` 프레임 뒤에 맞습니다.
-			if _frames == 60 + (0 if _probe_arg == "" else int(_probe_arg)) 					and is_instance_valid(_probe_foe):
-				_probe_t0 = state.hp
-				_probe_t1 = player._parry_ready
-				print("[창] 맞기 직전: 남은 창 %.3f  무적 %.3f  막는중=%s  패링중=%s  숨 %.0f" % [
-					player._parry_ready, player._invuln, str(player.guarding()),
-					str(player._parry_air > 0.0), state.breath])
-				player.take_damage(20.0, _probe_foe.global_position, 8.0)
+			# **`--side=` 가 양수면 누른 뒤 그만큼 있다 맞고, 음수면 맞은 뒤
+			# 그만큼 있다 누릅니다.** 뒤쪽 여유를 재려면 순서를 뒤집을 수
+			# 있어야 합니다.
+			var off := 0 if _probe_arg == "" else int(_probe_arg)
+			if off >= 0:
+				if _frames == 60:
+					player.parry_press()
+				if _frames == 60 + off and is_instance_valid(_probe_foe):
+					_probe_t0 = state.hp
+					print("[창] 맞기 직전: 남은 창 %.3f  무적 %.3f" % [
+						player._parry_ready, player._invuln])
+					player.take_damage(20.0, _probe_foe.global_position, 8.0)
+			else:
+				if _frames == 60 and is_instance_valid(_probe_foe):
+					_probe_t0 = state.hp
+					player.take_damage(20.0, _probe_foe.global_position, 8.0)
+				if _frames == 60 - off:
+					print("[창] 누르기 직전: 방금 맞은 것 %.3f초 남음  체력 %.0f" % [
+						player._late_hit, state.hp])
+					player.parry_press()
 			if _frames == 100:
-				print("[창] 누르고 %2s프레임 뒤: 맞을 때 남은 창 %.3f초  체력 %.0f -> %.0f  받아 냄=%s" % [
-					_probe_arg if _probe_arg != "" else "0", _probe_t1,
+				print("[창] %s: 체력 %.0f -> %.0f  받아 냄=%s" % [
+					("누르고 %d프레임 뒤에 맞음" % off) if off >= 0
+						else ("맞고 %d프레임 뒤에 누름" % -off),
 					_probe_t0, state.hp, str(is_equal_approx(_probe_t0, state.hp))])
 		"carryspeed":
 			# **무거운 아이를 잡고 걸을 때 빨라지는가.**
