@@ -70,6 +70,25 @@ print("DECIMATE_RESULT " + json.dumps({"before": before, "after": after}))
 '''
 
 
+def count(src: Path) -> int:
+    """지금 삼각형이 몇 개인가. **줄이기 전에 물어봅니다.**
+
+    비율이 아니라 목표 수로 줄이려면 먼저 지금 수를 알아야 합니다. Blender 를
+    한 번 더 띄우지 않고 GLB 를 직접 읽습니다 - 굽는 데 이미 몇 분이 듭니다.
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from glb import read
+    r = read(str(src))
+    g = r[0] if isinstance(r, tuple) else r
+    n = 0
+    for m in g.get("meshes", []):
+        for pr in m["primitives"]:
+            if "indices" in pr:
+                n += g["accessors"][pr["indices"]]["count"] // 3
+    return n
+
+
 def run(src: Path, dst: Path, ratio: float) -> dict:
     tmp = ROOT / "out" / "_decimate.py"
     tmp.parent.mkdir(exist_ok=True)

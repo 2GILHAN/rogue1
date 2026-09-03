@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from img2model import animate            # noqa: E402
 from glb import read, write              # noqa: E402
 from merge_anims import graft            # noqa: E402
+from clean_blend import clean           # noqa: E402
 
 # **게임에 들어가는 것과 재료를 가릅니다.**
 #
@@ -40,7 +41,10 @@ SRC = ROOT / "art_src" / "src"
 # 걷어내면서(v0.33) 게임 쪽 파일이 바뀌었습니다. 여기 왼쪽은 `test3` 가 내는
 # 이름(blend·클립)이고, 오른쪽이 게임이 읽는 이름입니다.
 GAME_NAME = {
-    "dowon_b": "hero",
+    # 주인공의 원본이 dowon_b -> dowon_new 로 바뀌었습니다. **한 게임 이름에
+    # 원본은 하나여야 합니다** - 둘이 같은 이름으로 나가면 나중에 구운 것이
+    # 앞엣것을 조용히 덮고, 어느 blend 가 게임에 들어갔는지 알 수 없습니다.
+    "dowon_new": "hero",
     "seojin": "foe_charger",
     "black": "foe_thrower",
     "baby": "foe_blocker",
@@ -59,6 +63,16 @@ GAME_NAME = {
 KIDS = {
     # 새 주인공. 키가 0.85m 라 아이들(1.25m)보다도 작습니다 - 다리가 더
     # 짧으니 걸음 폭을 더 넓게 잡아야 종종거려 보이지 않습니다.
+    # 새 주인공(dowon_new.blend). 클립 값은 dowon_b 에서 그대로 가져왔습니다 -
+    # 같은 아이를 다시 조각한 것이라 다리 길이가 크게 다르지 않습니다. 구운 뒤
+    # **보폭을 다시 재서** 바뀌었으면 여기와 docs/ANIMATION.md 를 같이 고칩니다.
+    "dowon_new": {"blend": "dowon_new.blend",
+                "walk": {"leg_swing": 35.0, "arm_swing": 21.0, "knee": 40.0,
+                         "bob_amount": 0.018},
+                "run": {"leg_swing": 62.0, "arm_swing": 40.0, "knee": 70.0,
+                        "bob_amount": 0.040, "cycle_frames": 24},
+                "back": {"leg_swing": 20.0, "arm_swing": 12.0, "knee": 26.0,
+                         "bob_amount": 0.010}},
     "dowon_b": {"blend": "dowon_b.blend",
                 "walk": {"leg_swing": 35.0, "arm_swing": 21.0, "knee": 40.0,
                          "bob_amount": 0.018},
@@ -277,10 +291,12 @@ def press_arms(motion, degrees: float, elbow: float) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--decimate", type=float, default=0.10,
-                    help="굽고 나서 삼각형을 이 비율로 줄입니다(0.10 = 2만 -> "
-                         "2천). 1.0 이면 안 줄입니다. 0.10 과 0.30 사이는 "
-                         "오히려 나쁩니다 - 이유는 tools/decimate.py 머리말에.")
+    ap.add_argument("--tris", type=int, default=2000,
+                    help="굽고 나서 삼각형을 이 수까지 줄입니다. 0 이면 안 "
+                         "줄입니다. 비율이 아니라 수인 이유: 원본이 작은 "
+                         "모델만 혼자 더 뭉개집니다. 2천 근처가 아니라 그 "
+                         "사이(6천쯤)로 두면 오히려 나쁩니다 - 이유는 "
+                         "tools/decimate.py 머리말에.")
     ap.add_argument("--only", nargs="*", default=[])
     ap.add_argument("--arms", type=float, default=38.0,
                     help="어깨를 몸 쪽으로 접는 각도(도). 55 까지 가면 팔이 "
@@ -303,6 +319,20 @@ def main() -> int:
         if not blend.exists():
             print(f"[!] {name}: {blend} 없음")
             continue
+
+        # **굽기 전에 메시를 고친 사본을 만듭니다.**
+        #
+        # 조각을 다시 해 온 blend 의 메시가 유효하지 않으면, 블렌더의 glTF
+        # 내보내기가 **오류 없이 뼈대와 클립을 빼고** 내보냅니다 - 노드 하나에
+        # 클립 0개짜리 GLB 가 나오고, 게임에서는 그 캐릭터가 통째로 사라집니다.
+        #
+        # 원본은 안 고칩니다. 그건 조각하는 사람의 파일이고, 도구가 남의 원본을
+        # 말없이 바꾸면 무엇이 원본인지 알 수 없게 됩니다.
+        clean_src = ROOT / "out" / f"_clean_{name}.blend"
+        n_fixed = clean(blend, clean_src)
+        if n_fixed:
+            print(f"[!] {name}: 메시 {n_fixed}개를 고쳐서 굽습니다 "
+                  f"(원본은 그대로)", flush=True)
 
         # 밀기는 주인공만 씁니다. 적은 이 동작을 안 합니다.
         wanted = ("walk", "idle", "push") if name in ("dowon", "dowon_b") else ("walk", "idle")
@@ -327,7 +357,7 @@ def main() -> int:
             scale_motion(motion, load_tuning(name))
             press_arms(motion, args.arms, args.elbow)
             print(f"[make] {out.name} (팔 {args.arms:+.0f}도) ...", flush=True)
-            animate.apply_motion(blend, motion, out)
+            animate.apply_motion(clean_src, motion, out)
 
         js, bn = read(SRC / f"{name}_walk.glb")
         for extra in wanted[1:]:
@@ -335,19 +365,34 @@ def main() -> int:
             bn, _ = graft(js, bn, sjs, sbn)
         target = MODELS / f"{GAME_NAME.get(name, name)}.glb"
         size = write(target, js, bn)
-        # **삼각형을 줄입니다.** 굽고 나면 늘 2만인데, 화면에서 60~150 픽셀인
-        # 캐릭터에는 과합니다(모바일 캐릭터는 보통 1.5천~8천). 여기서 안 하면
-        # 다시 구울 때마다 2만으로 돌아갑니다.
-        if args.decimate < 1.0:
-            import decimate as _dec
-            r = _dec.run(target, target, args.decimate)
-            size = target.stat().st_size // 1024
-            print(f"    삼각형 {r['before']} -> {r['after']}")
         # 골반을 올립니다. **여기서 부르지 않으면 다시 구울 때마다 원래의
         # 낮은 골반으로 되돌아갑니다** - 손으로 한 번 고치고 잊으면 다음
         # 사람이 이유도 모르고 다시 밟습니다.
+        #
+        # **줄이기보다 먼저입니다.** 거꾸로 뒀다가 물렸습니다 - 줄이고 나면
+        # 뼈 이름이 남지 않아서, 골반을 올리려는 쪽이 "뼈가 없습니다" 로
+        # 멈추고 GLB 가 반만 쓰인 채로 남습니다(노드 1개 · 클립 0개).
         subprocess.run([sys.executable, str(ROOT / "tools" / "raise_hips.py"),
                         str(target), "--hip", str(args.hip)], check=True)
+        # **삼각형을 줄입니다.** 화면에서 60~150 픽셀인 캐릭터에 2만은
+        # 과합니다(모바일 캐릭터는 보통 1.5천~8천). 여기서 안 하면 다시 구울
+        # 때마다 원래 수로 돌아갑니다.
+        #
+        # **비율이 아니라 목표 수**로 줄입니다. 비율로 두면 원본이 작은
+        # 모델만 혼자 더 뭉개집니다 - dowon_new 는 8천에서 시작해서 0.10 이
+        # 807 이 됐고, 나머지 일곱은 2천이었습니다.
+        if args.tris > 0:
+            import decimate as _dec
+            before = _dec.count(target) if hasattr(_dec, "count") else 0
+            ratio = 1.0
+            if before > args.tris:
+                ratio = float(args.tris) / float(before)
+            if ratio < 1.0:
+                r = _dec.run(target, target, ratio)
+                size = target.stat().st_size // 1024
+                print(f"    삼각형 {r['before']} -> {r['after']} (목표 {args.tris})")
+            else:
+                print(f"    삼각형 {before} - 목표({args.tris}) 아래라 그대로 둡니다")
         print(f"[ok] {target.name}: {[a.get('name') for a in js['animations']]} "
               f"({size // 1024} KB)")
     return 0

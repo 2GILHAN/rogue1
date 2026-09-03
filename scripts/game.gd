@@ -9,7 +9,7 @@ class_name Game
 ##
 ## 자릿수 규칙: 수치·값만 바뀌면 뒷자리(0.1 -> 0.1.1), 규칙이나 기능이
 ## 바뀌면 앞자리(0.1 -> 0.2).
-const VERSION := "v0.73.1"
+const VERSION := "v0.74"
 
 ## 게임 전체를 묶는 곳. 층을 짓고, 상태를 넘기고, 카메라를 따라가게 합니다.
 ##
@@ -292,6 +292,7 @@ var _stride_sum := 0.0
 var _stride_frames := 0
 var _stride_have := false
 var _stride_run := false
+var _stride_back := false
 var _stride_kind := "grunt"
 var _skate_prev := Vector3.ZERO
 var _skate_moved := 0.0
@@ -1865,7 +1866,11 @@ func _drive_pose_stride() -> void:
 			return
 		player.stride_probe = true
 		var ap: AnimationPlayer = player._anim
-		var which: String = player._run if _stride_run else player._walk
+		var which: String = player._walk
+		if _stride_back:
+			which = player._back
+		elif _stride_run:
+			which = player._run
 		if ap.current_animation != which:
 			ap.play(which)
 		ap.speed_scale = 1.0
@@ -5373,6 +5378,11 @@ func _drive_pose() -> void:
 					   _stride_sum, _stride_sum / 4.0])
 		"striderun":
 			_stride_run = true
+			_drive_pose_stride()
+		"strideback":
+			# 뒷걸음 클립. 이것도 재야 합니다 - 주인공 원본을 갈면 셋이 다
+			# 어긋나는데, 하나만 재고 넘어가면 나머지 둘에서 발이 미끄러집니다.
+			_stride_back = true
 			_drive_pose_stride()
 		"stride":
 			_drive_pose_stride()
